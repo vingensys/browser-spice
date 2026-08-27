@@ -1,0 +1,1037 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Browser SPICE - Interactive CAD Circuit Simulator</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background: #101318;
+            color: #e8edf5;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        header {
+            padding: 14px 22px;
+            border-bottom: 1px solid #2b3140;
+            background: #12161d;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 20px;
+            color: #6ea8fe;
+        }
+
+        .subtitle {
+            color: #9aa4b5;
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        /* TOOLBAR */
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: #171b23;
+            border-bottom: 1px solid #2b3140;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: 1px solid #3b4454;
+            background: #202633;
+            color: #e8edf5;
+            padding: 7px 11px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+
+        button:hover {
+            background: #2a3241;
+            border-color: #505d75;
+        }
+
+        button.active {
+            border-color: #6ea8fe;
+            background: #293b5a;
+            color: #6ea8fe;
+        }
+
+        button.sim-btn {
+            background: #1b382b;
+            border-color: #2e5d46;
+            color: #50fa7b;
+        }
+
+        button.sim-btn:hover {
+            background: #244b39;
+            border-color: #50fa7b;
+        }
+
+        .separator {
+            width: 1px;
+            height: 28px;
+            background: #303747;
+            margin: 0 4px;
+        }
+
+        /* MAIN LAYOUT WITH COMPONENT PALETTE SIDEBAR */
+        main {
+            padding: 16px;
+        }
+
+        .workspace {
+            display: grid;
+            grid-template-columns: 220px minmax(600px, 1fr) 300px;
+            gap: 16px;
+            max-width: 1920px;
+            margin: auto;
+        }
+
+        .palette-sidebar {
+            background: #171b23;
+            border: 1px solid #303747;
+            border-radius: 8px;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .palette-sidebar h3 {
+            margin: 0 0 4px 0;
+            font-size: 14px;
+            color: #6ea8fe;
+            border-bottom: 1px solid #2b3140;
+            padding-bottom: 8px;
+        }
+
+        .palette-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .palette-group-title {
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #9aa4b5;
+            margin-top: 6px;
+        }
+
+        .palette-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            background: #202633;
+            border: 1px solid #3b4454;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: all 0.15s ease;
+        }
+
+        .palette-item:hover {
+            background: #2a3241;
+            border-color: #6ea8fe;
+        }
+
+        .palette-item.active {
+            background: #293b5a;
+            border-color: #6ea8fe;
+            color: #6ea8fe;
+        }
+
+        .palette-badge {
+            font-size: 10px;
+            background: #0d1117;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #9aa4b5;
+            font-family: Consolas, monospace;
+        }
+
+        .middle-column {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        /* SCHEMATIC CANVAS - BIGGER CAD WORKSPACE */
+        .canvas-container {
+            border: 1px solid #303747;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #0d1117;
+            position: relative;
+        }
+
+        #schematic {
+            width: 100%;
+            height: 620px;
+            display: block;
+            touch-action: none;
+            outline: none;
+        }
+
+        .status {
+            padding: 8px 12px;
+            background: #171b23;
+            border-top: 1px solid #303747;
+            color: #9aa4b5;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        /* PLOT SECTION */
+        .plot-container {
+            border: 1px solid #303747;
+            border-radius: 8px;
+            background: #171b23;
+            padding: 12px;
+        }
+
+        .plot-container h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #e8edf5;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .plot-controls {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .plot-controls button {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        #plotCanvas {
+            width: 100%;
+            height: 280px;
+            display: block;
+            background: #0d1117;
+            border-radius: 6px;
+            border: 1px solid #252b37;
+        }
+
+        /* RIGHT SIDEBAR PROPERTIES & SIM RESULTS */
+        .right-sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .panel {
+            background: #171b23;
+            border: 1px solid #303747;
+            border-radius: 8px;
+            padding: 14px;
+        }
+
+        .panel h2 {
+            margin: 0 0 12px 0;
+            font-size: 15px;
+            color: #e8edf5;
+            border-bottom: 1px solid #2b3140;
+            padding-bottom: 8px;
+        }
+
+        .no-selection {
+            color: #7f8999;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .property {
+            margin-bottom: 14px;
+        }
+
+        .property label {
+            display: block;
+            color: #9aa4b5;
+            font-size: 11px;
+            margin-bottom: 5px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .property input,
+        .property select {
+            width: 100%;
+            padding: 8px;
+            background: #0d1117;
+            border: 1px solid #3a4352;
+            border-radius: 5px;
+            color: #e8edf5;
+            font-size: 13px;
+        }
+
+        .property input:focus,
+        .property select:focus {
+            outline: none;
+            border-color: #6ea8fe;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .results-table th,
+        .results-table td {
+            padding: 6px 8px;
+            text-align: left;
+            border-bottom: 1px solid #2b3140;
+        }
+
+        .results-table th {
+            color: #9aa4b5;
+            font-weight: 600;
+        }
+
+        .results-table td.val {
+            font-family: Consolas, monospace;
+            color: #50fa7b;
+        }
+
+        /* CONTEXT MENU */
+        .context-menu {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            background: #171b23;
+            border: 1px solid #3b4454;
+            border-radius: 8px;
+            padding: 6px 0;
+            width: 190px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+        }
+
+        .ctx-item {
+            padding: 8px 14px;
+            font-size: 13px;
+            color: #e8edf5;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .ctx-item:hover {
+            background: #2a3241;
+            color: #6ea8fe;
+        }
+
+        .ctx-item.disabled {
+            color: #505d75;
+            cursor: not-allowed;
+        }
+
+        .ctx-item.disabled:hover {
+            background: transparent;
+            color: #505d75;
+        }
+
+        .ctx-key {
+            font-size: 10px;
+            color: #9aa4b5;
+            font-family: Consolas, monospace;
+        }
+
+        .ctx-divider {
+            height: 1px;
+            background: #2b3140;
+            margin: 4px 0;
+        }
+
+        /* MODAL */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .modal-content {
+            background: #171b23;
+            border: 1px solid #303747;
+            border-radius: 8px;
+            padding: 20px;
+            width: 550px;
+            max-width: 90%;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 14px;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #6ea8fe;
+        }
+
+        .modal-textarea {
+            width: 100%;
+            height: 250px;
+            background: #0d1117;
+            border: 1px solid #3b4454;
+            color: #50fa7b;
+            font-family: Consolas, monospace;
+            font-size: 12px;
+            padding: 10px;
+            border-radius: 6px;
+            resize: vertical;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div>
+            <h1>Browser SPICE</h1>
+            <div class="subtitle">Interactive CAD Schematic & Circuit Simulator Engine</div>
+        </div>
+    </header>
+
+    <!-- CLEAN TOP TOOLBAR (FILE & SIMULATION) -->
+    <div class="toolbar">
+        <button id="saveJson" title="Save Schematic JSON file">💾 Save CAD</button>
+        <button id="loadJson" title="Open Schematic JSON file">📂 Open CAD</button>
+        <button id="exportCir" title="Export SPICE .cir Netlist">⚡ Export Netlist</button>
+        <button id="example">Load Example</button>
+
+        <span class="separator"></span>
+
+        <button id="runDC" class="sim-btn">▶ Run DC</button>
+        <button id="runAC" class="sim-btn">▶ Run AC Sweep</button>
+        <button id="runTransient" class="sim-btn">▶ Run Transient</button>
+
+        <input type="file" id="fileInput" accept=".json" style="display: none;">
+    </div>
+
+    <!-- WORKSPACE -->
+    <main>
+        <div class="workspace">
+            <!-- LEFT COMPONENT PALETTE SIDEBAR -->
+            <div class="palette-sidebar">
+                <h3>Component Library</h3>
+
+                <div class="palette-group-title">Mode & Wiring</div>
+                <div class="palette-group">
+                    <div class="palette-item active" data-tool="select">
+                        <span>Pointer / Select</span>
+                        <span class="palette-badge">Esc</span>
+                    </div>
+                    <div class="palette-item" data-tool="wire">
+                        <span>Wire Tool</span>
+                        <span class="palette-badge">Wire</span>
+                    </div>
+                </div>
+
+                <div class="palette-group-title">Passive Components</div>
+                <div class="palette-group">
+                    <div class="palette-item" data-tool="R">
+                        <span>Resistor</span>
+                        <span class="palette-badge">R</span>
+                    </div>
+                    <div class="palette-item" data-tool="C">
+                        <span>Capacitor</span>
+                        <span class="palette-badge">C</span>
+                    </div>
+                    <div class="palette-item" data-tool="L">
+                        <span>Inductor</span>
+                        <span class="palette-badge">L</span>
+                    </div>
+                </div>
+
+                <div class="palette-group-title">Sources & References</div>
+                <div class="palette-group">
+                    <div class="palette-item" data-tool="V">
+                        <span>Voltage Source</span>
+                        <span class="palette-badge">V</span>
+                    </div>
+                    <div class="palette-item" data-tool="GND">
+                        <span>Ground</span>
+                        <span class="palette-badge">GND</span>
+                    </div>
+                </div>
+
+                <div class="palette-group-title">Measurement Probes</div>
+                <div class="palette-group">
+                    <div class="palette-item" data-tool="vProbe" style="color: #ff79c6;">
+                        <span>Voltage Probe</span>
+                        <span class="palette-badge">V-Prb</span>
+                    </div>
+                    <div class="palette-item" data-tool="iProbe" style="color: #bd93f9;">
+                        <span>Current Probe</span>
+                        <span class="palette-badge">I-Prb</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MIDDLE COLUMN: CANVAS & PLOT -->
+            <div class="middle-column">
+                <!-- SCHEMATIC -->
+                <div class="canvas-container">
+                    <canvas id="schematic" tabindex="0"></canvas>
+                    <div class="status">
+                        <span id="statusText">Select a tool from the Component Library or right-click canvas for CAD actions.</span>
+                        <span style="color: #6ea8fe; font-size: 11px;">💡 Hold Space + Drag or Middle Click to Pan canvas. Click & Drag wires to move.</span>
+                    </div>
+                </div>
+
+                <!-- WAVEFORM / BODE PLOT -->
+                <div class="plot-container">
+                    <h3>
+                        <span>Simulation Waveform / Plot</span>
+                        <div class="plot-controls">
+                            <span id="plotTitle" style="font-size: 12px; color: #9aa4b5; font-weight: normal; margin-right: 12px;">No simulation run yet</span>
+                            <button id="zoomInBtn" title="Zoom In X/Y">🔍 +</button>
+                            <button id="zoomOutBtn" title="Zoom Out X/Y">🔍 -</button>
+                            <button id="resetZoomBtn" title="Reset Zoom">⟲ Reset</button>
+                        </div>
+                    </h3>
+                    <canvas id="plotCanvas"></canvas>
+                </div>
+            </div>
+
+            <!-- RIGHT SIDEBAR PROPERTIES & SIM RESULTS -->
+            <div class="right-sidebar">
+                <!-- PROPERTIES -->
+                <div class="panel">
+                    <h2>Properties</h2>
+                    <div id="propertiesContent">
+                        <div class="no-selection">
+                            No component selected.<br><br>
+                            Click a component on the schematic to view and edit its parameters.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DC RESULTS -->
+                <div class="panel">
+                    <h2>DC Operating Point</h2>
+                    <div id="dcResults">
+                        <div class="no-selection">Run DC simulation to view node voltages & currents.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- RIGHT-CLICK CAD CONTEXT MENU -->
+    <div id="contextMenu" class="context-menu">
+        <div class="ctx-item" id="ctxUndo">↶ Undo <span class="ctx-key">Ctrl+Z</span></div>
+        <div class="ctx-item" id="ctxRedo">↷ Redo <span class="ctx-key">Ctrl+Y</span></div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" id="ctxCopy">📋 Copy <span class="ctx-key">Ctrl+C</span></div>
+        <div class="ctx-item" id="ctxPaste">📄 Paste <span class="ctx-key">Ctrl+V</span></div>
+        <div class="ctx-item" id="ctxRotate">🔄 Rotate <span class="ctx-key">R</span></div>
+        <div class="ctx-item" id="ctxDelete">🗑️ Delete <span class="ctx-key">Del</span></div>
+        <div class="ctx-divider"></div>
+        <div class="ctx-item" id="ctxWire">✏️ Draw Wire <span class="ctx-key">W</span></div>
+        <div class="ctx-item" id="ctxVProbe" style="color: #ff79c6;">⚡ Add V-Probe</div>
+        <div class="ctx-item" id="ctxIProbe" style="color: #bd93f9;">⚡ Add I-Probe</div>
+    </div>
+
+    <!-- SPICE NETLIST EXPORT MODAL -->
+    <div id="netlistModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>SPICE Netlist (.cir)</h3>
+                <button id="closeNetlistModal">✖ Close</button>
+            </div>
+            <textarea id="netlistText" class="modal-textarea" readonly></textarea>
+            <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
+                <button id="downloadCirBtn" class="sim-btn">💾 Download .cir File</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CORE SCRIPTS -->
+    <script src="js/utils/complex.js"></script>
+    <script src="js/utils/units.js"></script>
+
+    <script src="js/circuit/node.js"></script>
+    <script src="js/circuit/circuit.js"></script>
+    <script src="js/circuit/components/component.js"></script>
+    <script src="js/circuit/components/resistor.js"></script>
+    <script src="js/circuit/components/capacitor.js"></script>
+    <script src="js/circuit/components/inductor.js"></script>
+    <script src="js/circuit/components/ground.js"></script>
+    <script src="js/circuit/components/voltage-source.js"></script>
+    <script src="js/circuit/netlist.js"></script>
+
+    <script src="js/solver/matrix.js"></script>
+    <script src="js/solver/mna.js"></script>
+    <script src="js/solver/dc.js"></script>
+    <script src="js/solver/ac.js"></script>
+    <script src="js/solver/transient.js"></script>
+
+    <script src="js/visualization/schematic.js"></script>
+    <script src="js/visualization/waveform.js"></script>
+
+    <!-- APP WIRING -->
+    <script>
+        const canvas = document.getElementById("schematic");
+        const editor = new SchematicEditor(canvas);
+
+        const plotCanvas = document.getElementById("plotCanvas");
+        const plotter = new WaveformPlotter(plotCanvas);
+
+        // Palette Sidebar Item Click Handlers
+        document.querySelectorAll(".palette-item").forEach(item => {
+            item.addEventListener("click", () => {
+                const tool = item.getAttribute("data-tool");
+                document.querySelectorAll(".palette-item").forEach(i => i.classList.remove("active"));
+                item.classList.add("active");
+                editor.setTool(tool);
+                updateStatus();
+            });
+        });
+
+        function updatePaletteActive(tool) {
+            document.querySelectorAll(".palette-item").forEach(i => {
+                if (i.getAttribute("data-tool") === tool) {
+                    i.classList.add("active");
+                } else {
+                    i.classList.remove("active");
+                }
+            });
+        }
+
+        // RIGHT CLICK CONTEXT MENU SYSTEM
+        const ctxMenu = document.getElementById("contextMenu");
+
+        window.showContextMenu = function(e) {
+            const hasSelection = !!(editor.selected || editor.selectedWire);
+            const hasClipboard = !!editor.clipboard;
+
+            document.getElementById("ctxCopy").classList.toggle("disabled", !editor.selected);
+            document.getElementById("ctxPaste").classList.toggle("disabled", !hasClipboard);
+            document.getElementById("ctxRotate").classList.toggle("disabled", !editor.selected);
+            document.getElementById("ctxDelete").classList.toggle("disabled", !hasSelection);
+
+            ctxMenu.style.left = `${e.clientX}px`;
+            ctxMenu.style.top = `${e.clientY}px`;
+            ctxMenu.style.display = "block";
+        };
+
+        document.addEventListener("click", () => {
+            ctxMenu.style.display = "none";
+        });
+
+        document.getElementById("ctxUndo").addEventListener("click", () => editor.undo());
+        document.getElementById("ctxRedo").addEventListener("click", () => editor.redo());
+        
+        document.getElementById("ctxCopy").addEventListener("click", () => {
+            if (editor.selected) {
+                editor.copySelected();
+                updateStatus();
+            }
+        });
+
+        document.getElementById("ctxPaste").addEventListener("click", () => {
+            if (editor.clipboard) {
+                editor.paste();
+                updateProperties();
+                updateStatus();
+            }
+        });
+
+        document.getElementById("ctxRotate").addEventListener("click", () => {
+            if (editor.selected) {
+                editor.rotateSelected();
+                updateProperties();
+            }
+        });
+
+        document.getElementById("ctxDelete").addEventListener("click", () => {
+            if (editor.selected || editor.selectedWire) {
+                editor.removeSelected();
+                updateProperties();
+            }
+        });
+
+        document.getElementById("ctxWire").addEventListener("click", () => {
+            editor.setTool("wire");
+            updateStatus();
+        });
+
+        document.getElementById("ctxVProbe").addEventListener("click", () => {
+            editor.setTool("vProbe");
+            updateStatus();
+        });
+
+        document.getElementById("ctxIProbe").addEventListener("click", () => {
+            editor.setTool("iProbe");
+            updateStatus();
+        });
+
+        // SAVE & LOAD CAD SCHEMATIC JSON
+        document.getElementById("saveJson").addEventListener("click", () => {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
+                components: editor.components,
+                wires: editor.wires,
+                probes: editor.probes,
+                nextId: editor.nextId,
+                panX: editor.panX,
+                panY: editor.panY
+            }, null, 2));
+
+            const downloadAnchor = document.createElement("a");
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "circuit_design.json");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        });
+
+        document.getElementById("loadJson").addEventListener("click", () => {
+            document.getElementById("fileInput").click();
+        });
+
+        document.getElementById("fileInput").addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = (evt) => {
+                try {
+                    const state = JSON.parse(evt.target.result);
+                    editor.saveState();
+                    editor.components = state.components || [];
+                    editor.wires = state.wires || [];
+                    editor.probes = state.probes || [];
+                    editor.nextId = state.nextId || 1;
+                    editor.panX = state.panX || 0;
+                    editor.panY = state.panY || 0;
+                    editor.selected = null;
+                    editor.selectedWire = null;
+                    editor.rerouteAllWires();
+                    editor.draw();
+                    updateProperties();
+                    updateStatus();
+                } catch (err) {
+                    alert("Invalid schematic file format: " + err.message);
+                }
+            };
+            reader.readAsText(file);
+        });
+
+        // EXPORT SPICE NETLIST (.cir)
+        document.getElementById("exportCir").addEventListener("click", () => {
+            try {
+                const netlistInfo = NetlistExtractor.extract(editor);
+                let spiceCode = `* Browser SPICE Netlist Export\n`;
+                spiceCode += `* Date: ${new Date().toLocaleString()}\n\n`;
+
+                for (const comp of netlistInfo.circuit.components) {
+                    if (comp.getType() === "VOLTAGE_SOURCE") {
+                        if (comp.sourceType === "AC") {
+                            spiceCode += `${comp.name} ${comp.node1} ${comp.node2} SIN(${comp.dcOffset || 0} ${comp.acMagnitude} ${comp.frequency}Hz 0 0 ${comp.acPhase})\n`;
+                        } else {
+                            spiceCode += `${comp.name} ${comp.node1} ${comp.node2} DC ${comp.dcVoltage}\n`;
+                        }
+                    } else if (comp.getType() === "RESISTOR") {
+                        spiceCode += `${comp.name} ${comp.node1} ${comp.node2} ${comp.resistance}\n`;
+                    } else if (comp.getType() === "CAPACITOR") {
+                        spiceCode += `${comp.name} ${comp.node1} ${comp.node2} ${comp.capacitance}\n`;
+                    } else if (comp.getType() === "INDUCTOR") {
+                        spiceCode += `${comp.name} ${comp.node1} ${comp.node2} ${comp.inductance}\n`;
+                    }
+                }
+
+                spiceCode += `\n.op\n.tran 50u 50m\n.end\n`;
+
+                document.getElementById("netlistText").value = spiceCode;
+                document.getElementById("netlistModal").style.display = "flex";
+            } catch (err) {
+                alert("Error generating SPICE netlist: " + err.message);
+            }
+        });
+
+        document.getElementById("closeNetlistModal").addEventListener("click", () => {
+            document.getElementById("netlistModal").style.display = "none";
+        });
+
+        document.getElementById("downloadCirBtn").addEventListener("click", () => {
+            const text = document.getElementById("netlistText").value;
+            const dataStr = "data:text/plain;charset=utf-8," + encodeURIComponent(text);
+            const downloadAnchor = document.createElement("a");
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", "circuit.cir");
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        });
+
+        // ZOOM CONTROLS
+        document.getElementById("zoomInBtn").addEventListener("click", () => {
+            plotter.zoomX *= 1.2;
+            plotter.zoomY *= 1.2;
+            plotter.draw();
+        });
+        document.getElementById("zoomOutBtn").addEventListener("click", () => {
+            plotter.zoomX *= 0.8;
+            plotter.zoomY *= 0.8;
+            plotter.draw();
+        });
+        document.getElementById("resetZoomBtn").addEventListener("click", () => {
+            plotter.resetZoom();
+        });
+
+        document.getElementById("example").addEventListener("click", () => {
+            editor.loadExample();
+            updateProperties();
+            updateStatus();
+        });
+
+        // SIMULATION CONTROLS WITH PROBE-DRIVEN WAVEFORMS
+        document.getElementById("runDC").addEventListener("click", () => {
+            try {
+                const netlistInfo = NetlistExtractor.extract(editor);
+                const dc = new DCOperatingPoint(netlistInfo.circuit);
+
+                let html = `<table class="results-table"><thead><tr><th>Node / Branch</th><th>Voltage / Current</th></tr></thead><tbody>`;
+                for (const [node, v] of Object.entries(dc.result.nodeVoltages)) {
+                    html += `<tr><td>Node ${node}</td><td class="val">${Units.formatSI(v, "V")}</td></tr>`;
+                }
+                for (const [src, i] of Object.entries(dc.result.sourceCurrents)) {
+                    html += `<tr><td>I(${src})</td><td class="val">${Units.formatSI(i, "A")}</td></tr>`;
+                }
+                html += `</tbody></table>`;
+                document.getElementById("dcResults").innerHTML = html;
+                document.getElementById("plotTitle").textContent = "DC Analysis Probed Values";
+
+                plotter.plotDC(dc.result, editor.probes, netlistInfo);
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        document.getElementById("runAC").addEventListener("click", () => {
+            try {
+                const netlistInfo = NetlistExtractor.extract(editor);
+                const sweepResults = ACAnalysis.sweep(netlistInfo.circuit, 10, 1e6, 20);
+                plotter.plotAC(sweepResults, editor.probes, netlistInfo);
+                document.getElementById("plotTitle").textContent = "AC Frequency Sweep (Bode Plot)";
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        document.getElementById("runTransient").addEventListener("click", () => {
+            try {
+                const netlistInfo = NetlistExtractor.extract(editor);
+                const trans = new TransientAnalysis(netlistInfo.circuit, 0.05, 5e-5);
+                plotter.plotTransient(trans, editor.probes, netlistInfo);
+                document.getElementById("plotTitle").textContent = "Transient Waveform V(t) / I(t)";
+            } catch (err) {
+                alert(err.message);
+            }
+        });
+
+        // PROPERTIES PANEL UPDATE
+        function updateProperties() {
+            const container = document.getElementById("propertiesContent");
+            const component = editor.selected;
+
+            if (!component) {
+                container.innerHTML = `<div class="no-selection">No component selected.<br><br>Click a component on the schematic to view and edit its parameters.</div>`;
+                return;
+            }
+
+            let html = `
+                <div class="property">
+                    <label>Name</label>
+                    <input type="text" id="propName" value="${component.name}">
+                </div>
+            `;
+
+            if (component.type === "V") {
+                const sType = component.sourceType || "DC";
+                html += `
+                    <div class="property">
+                        <label>Source Type</label>
+                        <select id="propSourceType">
+                            <option value="DC" ${sType === "DC" ? "selected" : ""}>DC Voltage</option>
+                            <option value="AC" ${sType === "AC" ? "selected" : ""}>AC Sine Wave</option>
+                        </select>
+                    </div>
+                `;
+
+                if (sType === "DC") {
+                    html += `
+                        <div class="property">
+                            <label>DC Voltage</label>
+                            <input type="text" id="propValue" value="${component.value || "5 V"}">
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="property">
+                            <label>AC Amplitude</label>
+                            <input type="text" id="propACMag" value="${component.acMagnitude ? Units.formatSI(component.acMagnitude, "V") : "5 V"}">
+                        </div>
+                        <div class="property">
+                            <label>DC Offset</label>
+                            <input type="text" id="propDCOffset" value="${component.dcOffset ? Units.formatSI(component.dcOffset, "V") : "0 V"}">
+                        </div>
+                        <div class="property">
+                            <label>Frequency</label>
+                            <input type="text" id="propFreq" value="${component.frequency ? Units.formatSI(component.frequency, "Hz") : "1 kHz"}">
+                        </div>
+                        <div class="property">
+                            <label>Phase (deg)</label>
+                            <input type="text" id="propPhase" value="${component.acPhase || "0"}">
+                        </div>
+                    `;
+                }
+            } else if (component.type !== "GND") {
+                html += `
+                    <div class="property">
+                        <label>Value</label>
+                        <input type="text" id="propValue" value="${component.value}">
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+
+            // Bind listeners with live input handlers
+            const nameInput = document.getElementById("propName");
+            if (nameInput) {
+                nameInput.addEventListener("input", (e) => {
+                    component.name = e.target.value;
+                    editor.draw();
+                });
+            }
+
+            const sourceTypeSelect = document.getElementById("propSourceType");
+            if (sourceTypeSelect) {
+                sourceTypeSelect.addEventListener("change", (e) => {
+                    editor.saveState();
+                    component.sourceType = e.target.value;
+                    component.value = component.sourceType === "AC"
+                        ? `${component.acMagnitude || "5 V"} ${component.frequency || "1 kHz"}`
+                        : `${component.dcVoltage || "5 V"}`;
+                    updateProperties();
+                    editor.draw();
+                });
+            }
+
+            const valInput = document.getElementById("propValue");
+            if (valInput) {
+                valInput.addEventListener("input", (e) => {
+                    component.value = e.target.value;
+                    component.dcVoltage = Units.parseSI(e.target.value);
+                    editor.draw();
+                });
+            }
+
+            const acMagInput = document.getElementById("propACMag");
+            if (acMagInput) {
+                acMagInput.addEventListener("input", (e) => {
+                    component.acMagnitude = Units.parseSI(e.target.value);
+                    component.value = `${e.target.value} ${component.frequency || "1 kHz"}`;
+                    editor.draw();
+                });
+            }
+
+            const dcOffsetInput = document.getElementById("propDCOffset");
+            if (dcOffsetInput) {
+                dcOffsetInput.addEventListener("input", (e) => {
+                    component.dcOffset = Units.parseSI(e.target.value);
+                    editor.draw();
+                });
+            }
+
+            const freqInput = document.getElementById("propFreq");
+            if (freqInput) {
+                freqInput.addEventListener("input", (e) => {
+                    component.frequency = Units.parseSI(e.target.value);
+                    component.value = `${component.acMagnitude || "5 V"} ${e.target.value}`;
+                    editor.draw();
+                });
+            }
+
+            const phaseInput = document.getElementById("propPhase");
+            if (phaseInput) {
+                phaseInput.addEventListener("input", (e) => {
+                    component.acPhase = Units.parseSI(e.target.value);
+                    editor.draw();
+                });
+            }
+        }
+
+        function updateStatus() {
+            const status = document.getElementById("statusText");
+            if (editor.tool === "wire") {
+                status.textContent = "Wire Tool: Click to start. Click on canvas to anchor corner waypoints. Right-click for CAD menu.";
+            } else if (editor.tool === "vProbe") {
+                status.textContent = "V-Probe Tool: Click on a wire/node to attach a Voltage Probe.";
+            } else if (editor.tool === "iProbe") {
+                status.textContent = "I-Probe Tool: Click on a component to attach a Current Probe I(comp).";
+            } else if (editor.selected) {
+                status.textContent = `${editor.selected.name} selected. Drag to move, press R to rotate.`;
+            } else if (editor.selectedWire) {
+                status.textContent = "Wire selected. Click & Drag wire to shift position on grid, press Del to delete.";
+            } else {
+                status.textContent = "Select a tool from the Component Library or right-click canvas for CAD actions.";
+            }
+            updatePaletteActive(editor.tool);
+        }
+
+        const origPointerDown = editor.pointerDown.bind(editor);
+        editor.pointerDown = function (event) {
+            origPointerDown(event);
+            updateProperties();
+            updateStatus();
+        };
+
+        updateProperties();
+        updateStatus();
+    </script>
+</body>
+
+</html>
