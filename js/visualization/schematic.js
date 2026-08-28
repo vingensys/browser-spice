@@ -585,16 +585,43 @@ class SchematicEditor {
         return pointInside(p1.x, p1.y) || pointInside(p2.x, p2.y);
     }
 
+    getComponentBodyBox(component) {
+        const rotated = component.rotation === 90 || component.rotation === 270;
+        const hw = rotated ? 20 : 30;
+        const hh = rotated ? 30 : 20;
+
+        return {
+            x1: component.x - hw,
+            x2: component.x + hw,
+            y1: component.y - hh,
+            y2: component.y + hh
+        };
+    }
+
+    getTerminalPinStub(component, terminal, stubLength = 20) {
+        const angle = (component.rotation * Math.PI) / 180;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+
+        let dirX = Math.sign(terminal.x) || -1;
+        let dirY = Math.sign(terminal.y);
+
+        const rotatedDirX = dirX * cos - dirY * sin;
+        const rotatedDirY = dirX * sin + dirY * cos;
+
+        const pos = this.getTerminalPosition(component, terminal);
+
+        return {
+            x: pos.x + rotatedDirX * stubLength,
+            y: pos.y + rotatedDirY * stubLength
+        };
+    }
+
     isSegmentBlocked(p1, p2, sourceComp, destComp, targetWire = null) {
         for (const comp of this.components) {
-            const box = this.getComponentObstacleBox(comp);
+            const bodyBox = this.getComponentBodyBox(comp);
 
-            if (this.lineIntersectsBox(p1, p2, box)) {
-                const isStartTerminal = (sourceComp === comp && ((p1.x === comp.x - 40 && p1.y === comp.y) || (p1.x === comp.x + 40 && p1.y === comp.y) || (p1.y === comp.y - 40 && p1.x === comp.x) || (p1.y === comp.y + 40 && p1.x === comp.x)));
-                const isEndTerminal = (destComp === comp && ((p2.x === comp.x - 40 && p2.y === comp.y) || (p2.x === comp.x + 40 && p2.y === comp.y) || (p2.y === comp.y - 40 && p2.x === comp.x) || (p2.y === comp.y + 40 && p2.x === comp.x)));
-
-                if (isStartTerminal || isEndTerminal) continue;
-
+            if (this.lineIntersectsBox(p1, p2, bodyBox)) {
                 return true;
             }
         }
@@ -606,7 +633,7 @@ class SchematicEditor {
                 const ep1 = existingWire.route[i];
                 const ep2 = existingWire.route[i + 1];
 
-                if (p1.y === p2.y && ep1.y === ep2.y && p1.y === ep1.y) {
+                if (p1.y === p2.y && ep1.y === ep2.y && Math.abs(p1.y - ep1.y) < 1) {
                     const min1 = Math.min(p1.x, p2.x);
                     const max1 = Math.max(p1.x, p2.x);
                     const min2 = Math.min(ep1.x, ep2.x);
@@ -617,7 +644,7 @@ class SchematicEditor {
                     }
                 }
 
-                if (p1.x === p2.x && ep1.x === ep2.x && p1.x === ep1.x) {
+                if (p1.x === p2.x && ep1.x === ep2.x && Math.abs(p1.x - ep1.x) < 1) {
                     const min1 = Math.min(p1.y, p2.y);
                     const max1 = Math.max(p1.y, p2.y);
                     const min2 = Math.min(ep1.y, ep2.y);
@@ -636,6 +663,8 @@ class SchematicEditor {
     calculateWireRoute(wire) {
         let startPos = null;
         let endPos = null;
+        let startStub = null;
+        let endStub = null;
         let sourceComp = null;
         let destComp = null;
 
@@ -644,9 +673,11 @@ class SchematicEditor {
             if (info) {
                 startPos = info.position;
                 sourceComp = info.component;
+                startStub = this.getTerminalPinStub(info.component, info.terminal, 20);
             }
         } else {
             startPos = { x: wire.start.x, y: wire.start.y };
+            startStub = startPos;
         }
 
         if (wire.end.type === "terminal" || wire.end.component) {
@@ -654,14 +685,25 @@ class SchematicEditor {
             if (info) {
                 endPos = info.position;
                 destComp = info.component;
+                endStub = this.getTerminalPinStub(info.component, info.terminal, 20);
             }
         } else {
             endPos = { x: wire.end.x, y: wire.end.y };
+            endStub = endPos;
         }
 
         if (!startPos || !endPos) return null;
 
-        return this.findObstacleFreePath(startPos, endPos, sourceComp, destComp, wire);
+        const pathFromStubs = this.findObstacleFreePath(startStub, endStub, sourceComp, destComp, wire);
+        if (!pathFromStubs) return [startPos, endPos];
+
+        const fullRoute = [startPos];
+        for (const pt of pathFromStubs) {
+            fullRoute.push(pt);
+        }
+        fullRoute.push(endPos);
+
+        return this.removeDuplicatePoints(fullRoute);
     }
 
     findObstacleFreePath(start, end, sourceComp, destComp, targetWire = null) {
