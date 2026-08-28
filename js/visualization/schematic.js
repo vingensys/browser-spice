@@ -1559,6 +1559,41 @@ class SchematicEditor {
             case "V":
                 this.drawVoltageSource(component);
                 break;
+            case "D":
+                this.drawDiode(component);
+                break;
+            case "DZ":
+                this.drawZener(component);
+                break;
+            case "LED":
+                this.drawLED(component);
+                break;
+            case "BJT_NPN":
+                this.drawTransistorNPN(component);
+                break;
+            case "BJT_PNP":
+                this.drawTransistorPNP(component);
+                break;
+            case "NMOS":
+                this.drawMOSFETN(component);
+                break;
+            case "PMOS":
+                this.drawMOSFETP(component);
+                break;
+            case "OPAMP":
+                this.drawOpAmp(component);
+                break;
+            case "IC555":
+                this.drawIC555(component);
+                break;
+            case "AND":
+            case "OR":
+            case "NOT":
+            case "NAND":
+            case "NOR":
+            case "XOR":
+                this.drawLogicGate(component);
+                break;
             case "GND":
                 this.drawGround(component);
                 break;
@@ -1654,6 +1689,315 @@ class SchematicEditor {
 
         this.drawTerminal(-40, 0);
         this.drawTerminal(40, 0);
+        this.drawLabel(component);
+    }
+
+    drawDiode(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#ff79c6";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(-40, 0);
+        ctx.lineTo(-14, 0);
+        ctx.moveTo(14, 0);
+        ctx.lineTo(40, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ff79c6";
+        ctx.beginPath();
+        ctx.moveTo(-14, -12);
+        ctx.lineTo(14, 0);
+        ctx.lineTo(-14, 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(14, -12);
+        ctx.lineTo(14, 12);
+        ctx.stroke();
+
+        this.drawTerminal(-40, 0);
+        this.drawTerminal(40, 0);
+        this.drawLabel(component);
+    }
+
+    drawZener(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#ff79c6";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(-40, 0);
+        ctx.lineTo(-14, 0);
+        ctx.moveTo(14, 0);
+        ctx.lineTo(40, 0);
+        ctx.stroke();
+
+        ctx.fillStyle = "#ff79c6";
+        ctx.beginPath();
+        ctx.moveTo(-14, -12);
+        ctx.lineTo(14, 0);
+        ctx.lineTo(-14, 12);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(8, -16);
+        ctx.lineTo(14, -12);
+        ctx.lineTo(14, 12);
+        ctx.lineTo(20, 16);
+        ctx.stroke();
+
+        this.drawTerminal(-40, 0);
+        this.drawTerminal(40, 0);
+        this.drawLabel(component);
+    }
+
+    drawLED(component) {
+        this.drawDiode(component);
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#50fa7b";
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        ctx.moveTo(2, -14);
+        ctx.lineTo(10, -24);
+        ctx.moveTo(10, -14);
+        ctx.lineTo(18, -24);
+        ctx.stroke();
+    }
+
+    drawTransistorNPN(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#bd93f9";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(-40, 0);
+        ctx.lineTo(-10, 0);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-10, -20);
+        ctx.lineTo(-10, 20);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-10, -10);
+        ctx.lineTo(20, -40);
+        ctx.moveTo(-10, 10);
+        ctx.lineTo(20, 40);
+        ctx.stroke();
+
+        ctx.fillStyle = "#bd93f9";
+        ctx.beginPath();
+        ctx.moveTo(20, 40);
+        ctx.lineTo(10, 32);
+        ctx.lineTo(14, 22);
+        ctx.closePath();
+        ctx.fill();
+
+        this.drawTerminal(-40, 0);
+        this.drawTerminal(20, -40);
+        this.drawTerminal(20, 40);
+        this.drawLabel(component);
+    }
+
+    drawTransistorPNP(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#bd93f9";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(-40, 0);
+        ctx.lineTo(-10, 0);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-10, -20);
+        ctx.lineTo(-10, 20);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-10, -10);
+        ctx.lineTo(20, -40);
+        ctx.moveTo(-10, 10);
+        ctx.lineTo(20, 40);
+        ctx.stroke();
+
+        ctx.fillStyle = "#bd93f9";
+        ctx.beginPath();
+        ctx.moveTo(-10, 10);
+        ctx.lineTo(0, 18);
+        ctx.lineTo(-4, 28);
+        ctx.closePath();
+        ctx.fill();
+
+        this.drawTerminal(-40, 0);
+        this.drawTerminal(20, -40);
+        this.drawTerminal(20, 40);
+        this.drawLabel(component);
+    }
+
+    drawMOSFETN(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#50fa7b";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(-40, 0);
+        ctx.lineTo(-12, 0);
+        ctx.moveTo(-12, -18);
+        ctx.lineTo(-12, 18);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(-4, -18);
+        ctx.lineTo(-4, 18);
+        ctx.moveTo(-4, -15);
+        ctx.lineTo(20, -40);
+        ctx.moveTo(-4, 15);
+        ctx.lineTo(20, 40);
+        ctx.stroke();
+
+        this.drawTerminal(-40, 0);
+        this.drawTerminal(20, -40);
+        this.drawTerminal(20, 40);
+        this.drawLabel(component);
+    }
+
+    drawMOSFETP(component) {
+        this.drawMOSFETN(component);
+    }
+
+    drawOpAmp(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#ffb86c";
+        ctx.lineWidth = 3;
+
+        ctx.beginPath();
+        ctx.moveTo(25, 0);
+        ctx.lineTo(40, 0);
+        ctx.moveTo(-40, -20);
+        ctx.lineTo(-25, -20);
+        ctx.moveTo(-40, 20);
+        ctx.lineTo(-25, 20);
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(255, 184, 108, 0.1)";
+        ctx.beginPath();
+        ctx.moveTo(-25, -35);
+        ctx.lineTo(25, 0);
+        ctx.lineTo(-25, 35);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = "bold 14px system-ui";
+        ctx.fillStyle = "#ffb86c";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("−", -15, -20);
+        ctx.fillText("+", -15, 20);
+
+        this.drawTerminal(-40, -20);
+        this.drawTerminal(-40, 20);
+        this.drawTerminal(40, 0);
+        this.drawLabel(component);
+    }
+
+    drawIC555(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#8be9fd";
+        ctx.lineWidth = 3;
+
+        ctx.fillStyle = "#171b23";
+        ctx.beginPath();
+        ctx.rect(-35, -45, 70, 90);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = "bold 13px system-ui";
+        ctx.fillStyle = "#8be9fd";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText("NE555", 0, 0);
+
+        const pins = [
+            { name: "GND", y: -30 }, { name: "TRIG", y: -10 },
+            { name: "OUT", y: 10 }, { name: "RESET", y: 30 },
+            { name: "CTRL", y: 30, right: true }, { name: "THRES", y: 10, right: true },
+            { name: "DISCH", y: -10, right: true }, { name: "VCC", y: -30, right: true }
+        ];
+
+        for (const p of pins) {
+            const x1 = p.right ? 35 : -35;
+            const x2 = p.right ? 50 : -50;
+            ctx.beginPath();
+            ctx.moveTo(x1, p.y);
+            ctx.lineTo(x2, p.y);
+            ctx.stroke();
+            this.drawTerminal(x2, p.y);
+        }
+
+        this.drawLabel(component);
+    }
+
+    drawLogicGate(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#f1fa8c";
+        ctx.lineWidth = 3;
+
+        const isNot = component.type === "NOT";
+        if (isNot) {
+            ctx.beginPath();
+            ctx.moveTo(-40, 0);
+            ctx.lineTo(-20, 0);
+            ctx.moveTo(20, 0);
+            ctx.lineTo(40, 0);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(-20, -20);
+            ctx.lineTo(15, 0);
+            ctx.lineTo(-20, 20);
+            ctx.closePath();
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.arc(18, 0, 4, 0, Math.PI * 2);
+            ctx.stroke();
+
+            this.drawTerminal(-40, 0);
+            this.drawTerminal(40, 0);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(-40, -15);
+            ctx.lineTo(-20, -15);
+            ctx.moveTo(-40, 15);
+            ctx.lineTo(-20, 15);
+            ctx.moveTo(20, 0);
+            ctx.lineTo(40, 0);
+            ctx.stroke();
+
+            ctx.font = "bold 13px system-ui";
+            ctx.fillStyle = "#f1fa8c";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(component.type, 0, 0);
+
+            ctx.beginPath();
+            ctx.rect(-20, -25, 40, 50);
+            ctx.stroke();
+
+            this.drawTerminal(-40, -15);
+            this.drawTerminal(-40, 15);
+            this.drawTerminal(40, 0);
+        }
+
         this.drawLabel(component);
     }
 
