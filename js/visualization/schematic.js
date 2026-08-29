@@ -411,8 +411,8 @@ class SchematicEditor {
 
     getComponentObstacleBox(component) {
         const rotated = component.rotation === 90 || component.rotation === 270;
-        const hw = rotated ? 22 : 30;
-        const hh = rotated ? 30 : 22;
+        const hw = rotated ? 50 : 70;
+        const hh = rotated ? 70 : 50;
 
         return {
             x1: component.x - hw,
@@ -674,6 +674,8 @@ class SchematicEditor {
                 startPos = info.position;
                 sourceComp = info.component;
                 startStub = this.getTerminalPinStub(info.component, info.terminal, 20);
+                wire.start.x = startPos.x;
+                wire.start.y = startPos.y;
             }
         } else {
             startPos = { x: wire.start.x, y: wire.start.y };
@@ -686,6 +688,8 @@ class SchematicEditor {
                 endPos = info.position;
                 destComp = info.component;
                 endStub = this.getTerminalPinStub(info.component, info.terminal, 20);
+                wire.end.x = endPos.x;
+                wire.end.y = endPos.y;
             }
         } else {
             endPos = { x: wire.end.x, y: wire.end.y };
@@ -694,6 +698,54 @@ class SchematicEditor {
 
         if (!startPos || !endPos) return null;
 
+        // PRESERVE USER-DRAWN INTERMEDIATE WAYPOINTS ACROSS LAYOUT/ROTATION/ALIGNMENT
+        if (wire.userWaypoints && wire.userWaypoints.length >= 3) {
+            const fullRoute = [startPos];
+            if (startStub && (startStub.x !== startPos.x || startStub.y !== startPos.y)) {
+                fullRoute.push(startStub);
+            }
+
+            const firstUserPoint = wire.userWaypoints[1];
+            const startLink = this.findObstacleFreePath(startStub || startPos, firstUserPoint, sourceComp, null, wire);
+            if (startLink && startLink.length >= 2) {
+                for (let k = 1; k < startLink.length; k++) {
+                    fullRoute.push(startLink[k]);
+                }
+            } else {
+                fullRoute.push(firstUserPoint);
+            }
+
+            for (let i = 1; i < wire.userWaypoints.length - 2; i++) {
+                const ptA = wire.userWaypoints[i];
+                const ptB = wire.userWaypoints[i + 1];
+                const midLink = this.findObstacleFreePath(ptA, ptB, null, null, wire);
+                if (midLink && midLink.length >= 2) {
+                    for (let k = 1; k < midLink.length; k++) {
+                        fullRoute.push(midLink[k]);
+                    }
+                } else {
+                    fullRoute.push(ptB);
+                }
+            }
+
+            const lastUserPoint = wire.userWaypoints[wire.userWaypoints.length - 2];
+            const endLink = this.findObstacleFreePath(lastUserPoint, endStub || endPos, null, destComp, wire);
+            if (endLink && endLink.length >= 2) {
+                for (let k = 1; k < endLink.length; k++) {
+                    fullRoute.push(endLink[k]);
+                }
+            } else {
+                fullRoute.push(endStub || endPos);
+            }
+
+            if (endStub && (endStub.x !== endPos.x || endStub.y !== endPos.y)) {
+                fullRoute.push(endPos);
+            }
+
+            return this.removeDuplicatePoints(fullRoute);
+        }
+
+        // Auto-route between stubs if no custom waypoints
         const pathFromStubs = this.findObstacleFreePath(startStub, endStub, sourceComp, destComp, wire);
         if (!pathFromStubs) return [startPos, endPos];
 
@@ -914,7 +966,8 @@ class SchematicEditor {
             id: this.nextId++,
             start: this.formatWireEndpoint(start),
             end: this.formatWireEndpoint(end),
-            route: cleanRoute
+            route: cleanRoute,
+            userWaypoints: cleanRoute.map(p => ({ x: p.x, y: p.y }))
         };
 
         this.wires.push(newWire);
