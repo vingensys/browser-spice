@@ -1539,7 +1539,6 @@ class SchematicEditor {
             ctx.fill();
         }
     }
-    }
 
     drawWirePreview() {
         if (!this.wiring || !this.wireWaypoints || this.wireWaypoints.length === 0 || !this.hoverSnap) return;
