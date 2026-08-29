@@ -979,12 +979,29 @@ class SchematicEditor {
         this.draw();
     }
 
+    isPointOnSegment(px, py, x1, y1, x2, y2) {
+        if (Math.abs(x1 - x2) < 2 && Math.abs(px - x1) < 2) {
+            return py >= Math.min(y1, y2) - 2 && py <= Math.max(y1, y2) + 2;
+        }
+        if (Math.abs(y1 - y2) < 2 && Math.abs(py - y1) < 2) {
+            return px >= Math.min(x1, x2) - 2 && px <= Math.max(x1, x2) + 2;
+        }
+        return false;
+    }
+
     formatWireEndpoint(snap) {
         if (snap.type === "terminal") {
             return {
                 type: "terminal",
                 component: snap.component.id,
                 terminal: snap.terminal.name,
+                x: snap.x,
+                y: snap.y
+            };
+        } else if (snap.type === "wire") {
+            return {
+                type: "wire",
+                wireId: snap.wire.id,
                 x: snap.x,
                 y: snap.y
             };
@@ -1373,12 +1390,33 @@ class SchematicEditor {
 
         const pointCounts = new Map();
         const recordPoint = (p) => {
-            const key = `${p.x},${p.y}`;
+            const key = `${Math.round(p.x)},${Math.round(p.y)}`;
             pointCounts.set(key, (pointCounts.get(key) || 0) + 1);
         };
 
         const horizontalSegments = [];
         const verticalSegments = [];
+        const junctionPoints = new Set();
+
+        for (const wireA of this.wires) {
+            if (!wireA.route || wireA.route.length < 2) continue;
+
+            const endPoints = [wireA.route[0], wireA.route[wireA.route.length - 1]];
+            for (const pt of endPoints) {
+                for (const wireB of this.wires) {
+                    if (wireA === wireB || !wireB.route || wireB.route.length < 2) continue;
+
+                    for (let j = 0; j < wireB.route.length - 1; j++) {
+                        const a = wireB.route[j];
+                        const b = wireB.route[j + 1];
+
+                        if (this.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) {
+                            junctionPoints.add(`${Math.round(pt.x)},${Math.round(pt.y)}`);
+                        }
+                    }
+                }
+            }
+        }
 
         for (const wire of this.wires) {
             if (!wire.route || wire.route.length < 2) continue;
@@ -1406,8 +1444,10 @@ class SchematicEditor {
             for (const vSeg of verticalSegments) {
                 if (hSeg.wire === vSeg.wire) continue;
 
+                const crossKey = `${Math.round(vSeg.x)},${Math.round(hSeg.y)}`;
+                if (junctionPoints.has(crossKey)) continue;
+
                 if (vSeg.x > hSeg.minX && vSeg.x < hSeg.maxX && hSeg.y > vSeg.minY && hSeg.y < vSeg.maxY) {
-                    const crossKey = `${vSeg.x},${hSeg.y}`;
                     const count = pointCounts.get(crossKey) || 0;
 
                     if (count < 3) {
@@ -1461,6 +1501,7 @@ class SchematicEditor {
                     ctx.beginPath();
                     ctx.moveTo(p1.x, p1.y);
                     ctx.lineTo(p2.x, p2.y);
+                    ctx.lineTo(p2.x, p2.y);
                     ctx.stroke();
                 }
             }
@@ -1483,13 +1524,21 @@ class SchematicEditor {
 
         ctx.fillStyle = "#6ea8fe";
         for (const [key, count] of pointCounts) {
-            if (count >= 3) {
+            if (count >= 3 || junctionPoints.has(key)) {
                 const [x, y] = key.split(",").map(Number);
                 ctx.beginPath();
-                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.arc(x, y, 5, 0, Math.PI * 2);
                 ctx.fill();
             }
         }
+
+        for (const key of junctionPoints) {
+            const [x, y] = key.split(",").map(Number);
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
     }
 
     drawWirePreview() {

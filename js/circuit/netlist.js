@@ -85,6 +85,32 @@ class NetlistExtractor {
             }
         }
 
+        // 2b. Merge T-junction wire taps (where an endpoint of wireA touches a segment of wireB)
+        for (const wireA of editor.wires) {
+            if (!wireA.route || wireA.route.length < 2) continue;
+
+            const endPoints = [wireA.route[0], wireA.route[wireA.route.length - 1]];
+            for (const pt of endPoints) {
+                const keyA = getKey(pt.x, pt.y);
+
+                for (const wireB of editor.wires) {
+                    if (wireA === wireB || !wireB.route || wireB.route.length < 2) continue;
+
+                    for (let j = 0; j < wireB.route.length - 1; j++) {
+                        const a = wireB.route[j];
+                        const b = wireB.route[j + 1];
+
+                        if (editor.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) {
+                            const keyB1 = getKey(a.x, a.y);
+                            const keyB2 = getKey(b.x, b.y);
+                            ds.union(keyA, keyB1);
+                            ds.union(keyA, keyB2);
+                        }
+                    }
+                }
+            }
+        }
+
         // 3. Find Ground root node
         let groundRoot = null;
         for (const comp of editor.components) {
