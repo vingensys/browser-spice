@@ -10,7 +10,8 @@
 //         gmin, srcScale, uic, noncon, v(i) }
 
 const SIM = {
-    VT: 0.025852,      // kT/q at 27 C
+    K_OVER_Q: 8.617333262e-5,  // Boltzmann / charge (V per kelvin)
+    VT: 8.617333262e-5 * 300.15, // kT/q at 27 C
     GMIN: 1e-12,
     EXP_MAX: 80
 };
@@ -204,10 +205,13 @@ class Resistor extends Element {
 }
 
 class Capacitor extends Element {
-    constructor(name, nodes, { c, ic = 0 }) {
+    // ic: explicit initial voltage. Without one a UIC start uses icDefault, which the engine
+    // sets from any .ic node voltages (and is 0 otherwise), as SPICE does.
+    constructor(name, nodes, { c, ic }) {
         super(name, nodes);
         this.c = c;
         this.ic = ic;
+        this.icDefault = 0;
         this.vPrev = 0;
         this.iPrev = 0;
         this.geq = 0;
@@ -226,16 +230,17 @@ class Capacitor extends Element {
         } else if (ctx.uic) {
             // hold the node pair at the initial condition (a stiff voltage source)
             const g = 1e6;
+            const v0 = this.ic !== undefined ? this.ic : this.icDefault;
             ctx.sys.addG(a, b, g);
-            ctx.sys.rhs(a, g * this.ic);
-            ctx.sys.rhs(b, -g * this.ic);
+            ctx.sys.rhs(a, g * v0);
+            ctx.sys.rhs(b, -g * v0);
         }
     }
 
     stampAC(ac, omega) { ac.addY(this.n[0], this.n[1], 0, omega * this.c); }
 
     initState(ctx) {
-        this.vPrev = ctx.uic ? this.ic : ctx.v(this.n[0]) - ctx.v(this.n[1]);
+        this.vPrev = ctx.uic ? (this.ic !== undefined ? this.ic : this.icDefault) : ctx.v(this.n[0]) - ctx.v(this.n[1]);
         this.iPrev = 0;
     }
 
@@ -351,9 +356,12 @@ class VoltageSource extends Element {
 }
 
 class CurrentSource extends Element {
-    constructor(name, nodes, { wave }) {
+    // current flows from nodes[0] through the source to nodes[1]
+    constructor(name, nodes, { wave, acMag = 0, acPhase = 0 }) {
         super(name, nodes);
         this.wave = wave;
+        this.acMag = acMag;
+        this.acPhase = acPhase;
         this.last = 0;
     }
 
@@ -365,8 +373,35 @@ class CurrentSource extends Element {
         ctx.sys.rhs(this.n[1], i);
     }
 
+    stampAC(ac) {
+        if (!this.acMag) return;
+        const ph = (this.acPhase * Math.PI) / 180;
+        const re = this.acMag * Math.cos(ph), im = this.acMag * Math.sin(ph);
+        ac.rhs(this.n[0], -re, -im);
+        ac.rhs(this.n[1], re, im);
+    }
+
     current() { return this.last; }
     breakpoints(tStop) { return this.wave.breakpoints(tStop); }
+}
+
+// Ideal switch: a resistor that is ron when closed and roff when open. The state is a
+// plain property, so the UI (or a script) can flip it between runs or during one.
+class Switch extends Element {
+    constructor(name, nodes, { closed = false, ron = 1e-3, roff = 1e9 } = {}) {
+        super(name, nodes);
+        this.closed = closed;
+        this.ron = ron;
+        this.roff = roff;
+    }
+
+    get g() { return 1 / (this.closed ? this.ron : this.roff); }
+    stamp(ctx) { ctx.sys.addG(this.n[0], this.n[1], this.g); }
+    stampAC(ac) { ac.addY(this.n[0], this.n[1], this.g, 0); }
+    current(x) {
+        const v = (i) => (i < 0 ? 0 : x[i]);
+        return (v(this.n[0]) - v(this.n[1])) * this.g;
+    }
 }
 
 
@@ -457,13 +492,10 @@ class Diode extends NonlinearElement {
         super(name, nodes);
         this.p = Object.assign({
             is: 1e-14, n: 1, rs: 0, bv: Infinity, ibv: 1e-3, nbv: 1,
-            cjo: 0, vj: 0.7, m: 0.5, fc: 0.5, tt: 0
+            cjo: 0, vj: 0.7, m: 0.5, fc: 0.5, tt: 0, eg: 1.11, xti: 3
         }, p);
-        this.vte = this.p.n * SIM.VT;
-        this.vcrit = this.vte * Math.log(this.vte / (Math.SQRT2 * this.p.is));
-        this.vcritBV = isFinite(this.p.bv)
-            ? this.p.nbv * SIM.VT * Math.log(this.p.nbv * SIM.VT / (Math.SQRT2 * this.p.ibv))
-            : Infinity;
+        this.p0 = this.p;
+        this.setTemperature(27);
         this.vd = 0;
         this.qPrev = 0;
         this.iPrev = 0;
@@ -472,6 +504,21 @@ class Diode extends NonlinearElement {
         this.hasCap = false;
         this.id = 0;
         this.gd = 0;
+    }
+
+    // SPICE temperature scaling of the saturation current and thermal voltage
+    setTemperature(tC, tnomC = 27) {
+        const T = tC + 273.15, Tn = tnomC + 273.15;
+        this.vt = SIM.K_OVER_Q * T;
+        const { n, eg = 1.11, xti = 3 } = this.p0;
+        const ratio = T / Tn;
+        const factlog = (ratio - 1) * eg / (n * this.vt) + (xti / n) * Math.log(ratio);
+        this.p = Object.assign({}, this.p0, { is: this.p0.is * Math.exp(factlog) });
+        this.vte = this.p.n * this.vt;
+        this.vcrit = this.vte * Math.log(this.vte / (Math.SQRT2 * this.p.is));
+        this.vcritBV = isFinite(this.p.bv)
+            ? this.p.nbv * this.vt * Math.log(this.p.nbv * this.vt / (Math.SQRT2 * this.p.ibv))
+            : Infinity;
     }
 
     bind(circuit) {
@@ -496,7 +543,7 @@ class Diode extends NonlinearElement {
             gd = 0;
         }
         if (isFinite(bv)) {
-            const vtb = nbv * SIM.VT;
+            const vtb = nbv * this.vt;
             const arg = -(vd + bv) / vtb;
             if (arg > -30) {
                 const e = safeExp(arg);
@@ -509,8 +556,8 @@ class Diode extends NonlinearElement {
 
     limit(vnew) {
         let v = pnjlim(vnew, this.vd, this.vte, this.vcrit);
-        if (isFinite(this.p.bv) && v < -this.p.bv + 10 * this.p.nbv * SIM.VT) {
-            const vtb = this.p.nbv * SIM.VT;
+        if (isFinite(this.p.bv) && v < -this.p.bv + 10 * this.p.nbv * this.vt) {
+            const vtb = this.p.nbv * this.vt;
             let t = -(v + this.p.bv);
             const told = -(this.vd + this.p.bv);
             t = pnjlim(t, told, vtb, this.vcritBV);
@@ -610,12 +657,11 @@ class BJT extends NonlinearElement {
         this.pol = polarity;
         this.p = Object.assign({
             is: 1e-16, bf: 100, br: 1, nf: 1, nr: 1, vaf: 0,
-            cje: 0, vje: 0.75, mje: 0.33, cjc: 0, vjc: 0.75, mjc: 0.33, tf: 0, tr: 0, fc: 0.5
+            cje: 0, vje: 0.75, mje: 0.33, cjc: 0, vjc: 0.75, mjc: 0.33, tf: 0, tr: 0, fc: 0.5,
+            eg: 1.11, xti: 3, xtb: 0
         }, p);
-        this.vtf = this.p.nf * SIM.VT;
-        this.vtr = this.p.nr * SIM.VT;
-        this.vcritF = this.vtf * Math.log(this.vtf / (Math.SQRT2 * this.p.is));
-        this.vcritR = this.vtr * Math.log(this.vtr / (Math.SQRT2 * this.p.is));
+        this.p0 = this.p;
+        this.setTemperature(27);
         this.vbe = 0;
         this.vbc = 0;
         this.ic = 0;
@@ -626,6 +672,22 @@ class BJT extends NonlinearElement {
             { qPrev: 0, iPrev: 0, kk: 0, trap: false },
             { qPrev: 0, iPrev: 0, kk: 0, trap: false }
         ];
+    }
+
+    setTemperature(tC, tnomC = 27) {
+        const T = tC + 273.15, Tn = tnomC + 273.15;
+        const vt = SIM.K_OVER_Q * T;
+        const { eg, xti, xtb } = this.p0;
+        const ratio = T / Tn, ratlog = Math.log(ratio);
+        const factor = Math.exp((ratio - 1) * eg / vt + xti * ratlog);
+        const bfactor = Math.exp(ratlog * xtb);
+        this.p = Object.assign({}, this.p0, {
+            is: this.p0.is * factor, bf: this.p0.bf * bfactor, br: this.p0.br * bfactor
+        });
+        this.vtf = this.p.nf * vt;
+        this.vtr = this.p.nr * vt;
+        this.vcritF = this.vtf * Math.log(this.vtf / (Math.SQRT2 * this.p.is));
+        this.vcritR = this.vtr * Math.log(this.vtr / (Math.SQRT2 * this.p.is));
     }
 
     beginSolve(ctx) {
@@ -1028,6 +1090,7 @@ class Timer555 extends Element {
         this.p = Object.assign({ rdiv: 5000, rout: 10, rdis: 10, dropHigh: 1.7, lowOut: 0.1 }, p);
         this.q = 0;
         this.nonlinear = false;
+        this.hasEvents = true;
     }
 
     bind(circuit) {
@@ -1059,14 +1122,19 @@ class Timer555 extends Element {
         if (!this.q) s.addG(disch, gnd, 1 / this.p.rdis);
     }
 
-    latch(ctx) {
+    // latch state the comparators call for at the present node voltages
+    nextState(ctx) {
         const [gnd, trig, , reset, , , thres] = this.n;
         const v = (n) => ctx.v(n) - ctx.v(gnd);
-        const va = v(this.ta), vb = v(this.tb);
-        const resetLow = v(reset) < 0.7;
-        if (resetLow || v(thres) > va) this.q = 0;
-        else if (v(trig) < vb) this.q = 1;
+        if (v(reset) < 0.7 || v(thres) > v(this.ta)) return 0;
+        if (v(trig) < v(this.tb)) return 1;
+        return this.q;
     }
+
+    // the engine uses this to find the exact crossing time instead of reacting a step late
+    wouldFlip(ctx) { return this.nextState(ctx) !== this.q; }
+
+    latch(ctx) { this.q = this.nextState(ctx); }
 
     initState(ctx) { this.q = 0; this.latch(ctx); }
     accept(ctx) { this.latch(ctx); }

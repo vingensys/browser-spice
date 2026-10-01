@@ -58,9 +58,12 @@ class SimEngine {
     constructor(circuit, options = {}) {
         this.c = circuit.finalize();
         this.opt = Object.assign({
-            reltol: 1e-3, vntol: 1e-6, abstol: 1e-12, maxIter: 100, gmin: SIM.GMIN
+            reltol: 1e-3, vntol: 1e-6, abstol: 1e-12, maxIter: 100, gmin: SIM.GMIN, temp: 27
         }, options);
-        this.sys = new DenseSystem(this.c.size);
+        if (this.opt.temp !== 27) {
+            for (const el of this.c.elements) if (el.setTemperature) el.setTemperature(this.opt.temp);
+        }
+        this.sys = createSystem(this.c.size);
         this.lastOp = null;
     }
 
@@ -103,6 +106,10 @@ class SimEngine {
             sys.clear();
             for (let i = 0; i < n; i++) sys.add(i, i, ctx.gmin);
             for (const el of c.elements) el.stamp(ctx);
+            if (ctx.nodeIC) {
+                // .ic: pin these nodes while finding the initial state (a stiff source to ground)
+                for (const [idx, v] of ctx.nodeIC) { sys.add(idx, idx, 1e3); sys.rhs(idx, 1e3 * v); }
+            }
 
             let xn;
             try {
@@ -148,10 +155,17 @@ class SimEngine {
 
     // ------------------------------------------------------------ operating point
 
-    operatingPoint({ uic = false } = {}) {
+    // nodeIC: { nodeName: volts } applied only to the initial solve of a UIC transient
+    operatingPoint({ uic = false, nodeIC = null } = {}) {
         const c = this.c;
         const ctx = this.makeCtx("op");
         ctx.uic = uic;
+        if (uic && nodeIC) {
+            ctx.nodeIC = Object.entries(nodeIC).map(([n, v]) => [c.node(n), v]).filter(([i]) => i >= 0);
+            // capacitors without their own IC start at the voltage the .ic nodes imply
+            const v0 = (i) => { const hit = ctx.nodeIC.find(([k]) => k === i); return hit ? hit[1] : 0; };
+            for (const el of c.elements) if (el instanceof Capacitor) el.icDefault = v0(el.n[0]) - v0(el.n[1]);
+        }
         const zero = new Float64Array(c.size);
 
         let r = this.newton(ctx, zero);
@@ -238,9 +252,24 @@ class SimEngine {
 
     // ----------------------------------------------------------------- transient
 
-    transient({ tStop = 0.01, tStep = 1e-5, method = "trap", uic = true } = {}) {
+    // Predictor-based local error estimate: how far the new solution is from a straight-line
+    // extrapolation of the last two. > 1 means the step was too coarse for the waveform.
+    lteRatio(xn, x1, x2, h, h1, tol) {
+        if (!x2 || !(h1 > 0)) return 0;
+        let worst = 0;
+        for (let i = 0; i < this.c.nodeCount; i++) {
+            const xp = x1[i] + (x1[i] - x2[i]) * (h / h1);
+            const scale = tol * Math.max(Math.abs(xn[i]), Math.abs(x1[i])) + 1e-4;
+            worst = Math.max(worst, Math.abs(xn[i] - xp) / scale);
+        }
+        return worst;
+    }
+
+    // tStep is the largest step; with adaptive on, the engine shortens it where the waveform
+    // bends sharply and lands exactly on source edges and on comparator crossings.
+    transient({ tStop = 0.01, tStep = 1e-5, method = "trap", uic = true, adaptive = true, lteTol = 0.02, nodeIC = null } = {}) {
         const c = this.c;
-        const op = this.operatingPoint({ uic });
+        const op = this.operatingPoint({ uic, nodeIC });
         let x = op.x;
 
         const ctx = this.makeCtx("tran");
@@ -248,7 +277,7 @@ class SimEngine {
         ctx.uic = uic;
         for (const el of c.elements) el.initState(ctx);
 
-        const res = { timePoints: [0], nodeHistories: {}, currentHistories: {}, steps: 0, rejected: 0 };
+        const res = { timePoints: [0], nodeHistories: {}, currentHistories: {}, steps: 0, rejected: 0, events: 0 };
         c.names.forEach(n => { if (!c.isInternal(n)) res.nodeHistories[n] = []; });
         c.elements.forEach(e => { if (!e.name.includes(".")) res.currentHistories[e.name] = []; });
 
@@ -260,6 +289,7 @@ class SimEngine {
 
         const breaks = [...new Set(c.elements.flatMap(e => e.breakpoints(tStop)))]
             .filter(t => t > 0 && t <= tStop).sort((a, b) => a - b);
+        const evEls = c.elements.filter(e => e.hasEvents);
         let bi = 0;
 
         const tEps = tStop * 1e-12;
@@ -267,6 +297,16 @@ class SimEngine {
         let t = 0;
         let afterBreak = true;
         let hNext = tStep;
+        let xPrev = null, hPrev = 0; // history for the error predictor
+
+        const solve = (hh, meth) => {
+            ctx.mode = "tran";
+            ctx.time = t + hh;
+            ctx.dt = hh;
+            ctx.method = meth;
+            return this.newton(ctx, x, 40);
+        };
+        const flips = (sol) => { ctx.x = sol.x; return evEls.some(e => e.wouldFlip(ctx)); };
 
         while (t < tStop - tEps) {
             let h = Math.min(hNext, tStop - t);
@@ -277,34 +317,67 @@ class SimEngine {
                 hitsBreak = true;
             }
 
-            let r = null, shrink = 0;
+            let r = null, shrink = 0, lteTries = 0, ratio = 0;
             for (;;) {
-                ctx.mode = "tran";
-                ctx.time = t + h;
-                ctx.dt = h;
-                ctx.method = (afterBreak || shrink > 0) ? "be" : method;
-                r = this.newton(ctx, x, 40);
-                if (r.ok) break;
-                res.rejected++;
-                h /= 4;
-                hitsBreak = false;
-                shrink++;
-                if (h < hMin) {
-                    throw new Error(`Transient analysis failed to converge at t = ${(t * 1e3).toPrecision(4)} ms (time step too small).`);
+                r = solve(h, (afterBreak || shrink > 0) ? "be" : method);
+                if (!r.ok) {
+                    res.rejected++;
+                    h /= 4;
+                    hitsBreak = false;
+                    shrink++;
+                    if (h < hMin) {
+                        throw new Error(`Transient analysis failed to converge at t = ${(t * 1e3).toPrecision(4)} ms (time step too small).`);
+                    }
+                    continue;
                 }
+                if (adaptive && !afterBreak && xPrev) {
+                    ratio = this.lteRatio(r.x, x, xPrev, h, hPrev, lteTol);
+                    if (ratio > 1 && lteTries < 8 && h > tStep * 1e-3) {
+                        h *= Math.max(0.2, 0.85 / Math.sqrt(ratio));
+                        hitsBreak = false;
+                        lteTries++;
+                        res.rejected++;
+                        continue;
+                    }
+                }
+                break;
             }
 
+            // a comparator would change state during this step: find the crossing by bisection
+            let hitEvent = false;
+            if (evEls.length && flips(r)) {
+                let lo = 0, hi = h;
+                for (let it = 0; it < 12; it++) {
+                    const mid = (lo + hi) / 2;
+                    const rm = solve(mid, "be");
+                    if (!rm.ok) break;
+                    if (flips(rm)) hi = mid; else lo = mid;
+                }
+                h = hi;
+                r = solve(h, "be"); // refresh companion state for the step that is accepted
+                hitEvent = true;
+                hitsBreak = false;
+                res.events++;
+            }
+
+            xPrev = x;
+            hPrev = h;
             x = r.x;
             ctx.x = x;
+            ctx.time = t + h;
+            ctx.dt = h;
             for (const el of c.elements) el.accept(ctx);
             t += h;
             res.steps++;
             res.timePoints.push(t);
             record();
 
-            afterBreak = hitsBreak;
-            // recover the nominal step gradually after a shrink
-            hNext = shrink > 0 ? Math.min(tStep, h * 2) : tStep;
+            afterBreak = hitsBreak || hitEvent;
+            if (afterBreak) { xPrev = null; }
+            // grow back toward the nominal step, faster when the waveform is smooth
+            hNext = (shrink > 0 || lteTries > 0 || hitEvent)
+                ? Math.min(tStep, h * (ratio < 0.3 ? 2 : 1.4))
+                : Math.min(tStep, h * (ratio < 0.3 ? 2 : 1.4));
         }
 
         res.stepsTaken = res.steps;
@@ -320,7 +393,7 @@ class SimEngine {
         // Only sources with an AC magnitude excite the circuit. If none are marked,
         // treat each source as a unit-style stimulus using its DC value (legacy behaviour).
         const sources = c.elements.filter(e => e instanceof VoltageSource);
-        const anyAc = sources.some(s => s.acMag > 0);
+        const anyAc = sources.some(s => s.acMag > 0) || c.elements.some(e => e instanceof CurrentSource && e.acMag > 0);
         sources.forEach(s => { s.acActive = anyAc ? s.acMag > 0 : true; s._acFallback = !anyAc; });
 
         const stamper = new ComplexStamper(c.size);

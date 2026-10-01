@@ -58,10 +58,51 @@ class SpiceParser {
         return p;
     }
 
+    // evaluate  {a*2+1}  /  10k*3  style expressions with named parameters
+    static evalExpr(src, params) {
+        const t = src.toLowerCase().match(/[a-z_][a-z0-9_]*|(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?[a-z]*|[-+*/^()]/g) || [];
+        let i = 0;
+        const peek = () => t[i], next = () => t[i++];
+        const atom = () => {
+            const k = next();
+            if (k === undefined) throw new Error("incomplete expression: " + src);
+            if (k === "(") { const v = sum(); next(); return v; }
+            if (k === "-") return -atom();
+            if (k === "+") return atom();
+            if (/^[a-z_]/.test(k) && !(k in params) && isNaN(SpiceParser.number(k))) throw new Error(`unknown parameter ${k}`);
+            return k in params ? params[k] : SpiceParser.number(k);
+        };
+        const pow = () => { let v = atom(); while (peek() === "^") { next(); v = Math.pow(v, atom()); } return v; };
+        const prod = () => { let v = pow(); while (peek() === "*" || peek() === "/") { v = next() === "*" ? v * pow() : v / pow(); } return v; };
+        const sum = () => { let v = prod(); while (peek() === "+" || peek() === "-") { v = next() === "+" ? v + prod() : v - prod(); } return v; };
+        return sum();
+    }
+
+    // .param definitions, then {expr} substitution in every other line
+    static applyParams(lines, warnings) {
+        const params = {};
+        const out = [];
+        for (const l of lines) {
+            if (!l.title && /^\s*\.param\b/i.test(l.text)) {
+                for (const m of l.text.replace(/^\s*\.param\s*/i, "").matchAll(/([a-z_][a-z0-9_]*)\s*=\s*(\{[^}]*\}|\S+)/gi)) {
+                    try { params[m[1].toLowerCase()] = SpiceParser.evalExpr(m[2].replace(/^\{|\}$/g, ""), params); }
+                    catch (e) { warnings.push(`.param ${m[1]}: ${e.message}`); }
+                }
+                continue;
+            }
+            if (l.title) { out.push(l); continue; }
+            out.push({ ...l, text: l.text.replace(/\{([^}]*)\}/g, (all, expr) => {
+                try { return String(SpiceParser.evalExpr(expr, params)); }
+                catch (e) { warnings.push(`{${expr}}: ${e.message}`); return "0"; }
+            }) });
+        }
+        return out;
+    }
+
     static parse(text) {
         const warnings = [];
         const deck = { title: "", elements: [], models: {}, subckts: {}, analyses: [], warnings };
-        const lines = SpiceParser.logicalLines(text);
+        const lines = SpiceParser.applyParams(SpiceParser.logicalLines(text), warnings);
         let current = null; // open .subckt
 
         for (const { text: line, title } of lines) {
@@ -110,7 +151,12 @@ class SpiceParser {
             case ".dc":
                 deck.analyses.push({ type: "dc", source: tok[1], start: N(tok[2]), stop: N(tok[3]), step: N(tok[4]) });
                 break;
-            case ".param": case ".options": case ".option": case ".temp": case ".print": case ".plot":
+            case ".temp": deck.temp = N(tok[1]); break;
+            case ".ic":
+                deck.ic = deck.ic || {};
+                for (const m of line.toLowerCase().matchAll(/v\(\s*([^)\s]+)\s*\)\s*=\s*(\S+)/g)) deck.ic[m[1]] = N(m[2]);
+                break;
+            case ".options": case ".option": case ".print": case ".plot":
             case ".probe": case ".save": case ".control": case ".endc": case ".include": case ".lib":
                 warnings.push(`${tok[0]} is not supported and was ignored`);
                 break;
@@ -147,8 +193,8 @@ class SpiceParser {
 
         switch (kind) {
             case "r": return { kind: "R", name, nodes: [tok[1], tok[2]], value: N(tok[3]) };
-            case "c": return { kind: "C", name, nodes: [tok[1], tok[2]], value: N(tok[3]), ic: SpiceParser.params(tok).ic || 0 };
-            case "l": return { kind: "L", name, nodes: [tok[1], tok[2]], value: N(tok[3]), ic: SpiceParser.params(tok).ic || 0 };
+            case "c": return { kind: "C", name, nodes: [tok[1], tok[2]], value: N(tok[3]), ic: SpiceParser.params(tok).ic };
+            case "l": return { kind: "L", name, nodes: [tok[1], tok[2]], value: N(tok[3]), ic: SpiceParser.params(tok).ic };
             case "v":
             case "i":
                 return { kind: kind.toUpperCase(), name, nodes: [tok[1], tok[2]], spec: SpiceParser.sourceSpec(tok.slice(3)) };
@@ -196,7 +242,8 @@ class SpiceParser {
         return {
             is: p.is || 1e-14, n: p.n || 1, rs: p.rs || 0,
             bv: p.bv || Infinity, ibv: p.ibv || 1e-3, nbv: p.nbv || 1,
-            cjo: p.cjo || p.cj0 || 0, vj: p.vj || 1, m: p.m || 0.5, fc: p.fc || 0.5, tt: p.tt || 0
+            cjo: p.cjo || p.cj0 || 0, vj: p.vj || 1, m: p.m || 0.5, fc: p.fc || 0.5, tt: p.tt || 0,
+            eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti
         };
     }
 
@@ -207,7 +254,8 @@ class SpiceParser {
             vaf: p.vaf || p.va || 0,
             cje: p.cje || 0, vje: p.vje || 0.75, mje: p.mje || 0.33,
             cjc: p.cjc || 0, vjc: p.vjc || 0.75, mjc: p.mjc || 0.33,
-            tf: p.tf || 0, tr: p.tr || 0, fc: p.fc || 0.5
+            tf: p.tf || 0, tr: p.tr || 0, fc: p.fc || 0.5,
+            eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti, xtb: p.xtb || 0
         };
     }
 

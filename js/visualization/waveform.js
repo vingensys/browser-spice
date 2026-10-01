@@ -152,6 +152,33 @@ class WaveformPlotter {
     }
 
     /**
+     * Plots a DC sweep: probed node voltages / element currents against the swept source value.
+     */
+    plotSweep(sweepResult, probes = [], netlistInfo = null, xLabel = "Sweep", xUnit = "V") {
+        if (!probes || probes.length === 0 || !sweepResult.sweep.length) {
+            this.data = null;
+            this.draw();
+            return;
+        }
+
+        const series = [];
+        let colorIdx = 0;
+        for (const item of this.buildProbeSeriesMap(probes, netlistInfo)) {
+            const values = item.type === "V" ? sweepResult.nodeHistories[item.node] : sweepResult.currentHistories[item.targetName];
+            if (!values) continue;
+            series.push({ name: item.label, color: this.colors[colorIdx++ % this.colors.length], values });
+        }
+        if (!series.length) {
+            this.data = null;
+            this.draw();
+            return;
+        }
+
+        this.data = { mode: "sweep", xLabel, xUnit, yLabel: "Voltage (V) / Current (A)", xValues: sweepResult.sweep, series };
+        this.draw();
+    }
+
+    /**
      * Plots AC Frequency Sweep Bode plot for probes ALONE. No probes = No signal.
      */
     plotAC(acSweepResults, probes = [], netlistInfo = null) {
@@ -398,7 +425,7 @@ class WaveformPlotter {
 
             ctx.textAlign = "center";
             ctx.textBaseline = "top";
-            const unitStr = this.data.mode === "ac" ? "Hz" : "s";
+            const unitStr = this.data.xUnit !== undefined ? this.data.xUnit : (this.data.mode === "ac" ? "Hz" : "s");
             ctx.fillText(Units.formatSI(xVal, unitStr), xPos, paddingTop + graphHeight + 6);
         }
 

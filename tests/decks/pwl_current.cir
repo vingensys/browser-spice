@@ -1,0 +1,7 @@
+PWL current source charging an RC, with a parameterised resistor
+.param rv=2k cap=1u
+I1 0 n PWL(0 0 1m 2m 3m 2m 4m 0 6m 0)
+R1 n 0 {rv}
+C1 n 0 {cap}
+.tran 20u 6m
+.end

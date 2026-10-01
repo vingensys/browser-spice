@@ -25,6 +25,11 @@ class SymbolRenderer {
             case "C": this.drawCapacitor(component); break;
             case "L": this.drawInductor(component); break;
             case "V": this.drawVoltageSource(component); break;
+            case "I": this.drawCurrentSource(component); break;
+            case "E": this.drawControlledSource(component, false); break;
+            case "G": this.drawControlledSource(component, true); break;
+            case "SW": this.drawSwitch(component); break;
+            case "POT": this.drawPot(component); break;
             case "D": this.drawDiode(component); break;
             case "DZ": this.drawZener(component); break;
             case "LED": this.drawLED(component); break;
@@ -153,6 +158,109 @@ class SymbolRenderer {
 
         this.drawTerminal(-40, 0);
         this.drawTerminal(40, 0);
+        this.drawLabel(component);
+    }
+
+    drawCurrentSource(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#50fa7b";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-40, 0); ctx.lineTo(-24, 0);
+        ctx.moveTo(24, 0); ctx.lineTo(40, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, 24, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // arrow along the current direction (pin 1 -> pin 2)
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(-13, 0); ctx.lineTo(13, 0);
+        ctx.stroke();
+        ctx.fillStyle = "#50fa7b";
+        ctx.beginPath();
+        ctx.moveTo(15, 0); ctx.lineTo(6, -6); ctx.lineTo(6, 6);
+        ctx.closePath();
+        ctx.fill();
+        this.drawLabel(component);
+    }
+
+    // Dependent source: diamond with the control pair on the left, output on the right.
+    drawControlledSource(component, current) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#f1fa8c";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-40, -20); ctx.lineTo(-22, -20);
+        ctx.moveTo(-40, 20); ctx.lineTo(-22, 20);
+        ctx.moveTo(40, -20); ctx.lineTo(22, -20);
+        ctx.moveTo(40, 20); ctx.lineTo(22, 20);
+        ctx.stroke();
+
+        ctx.fillStyle = "rgba(241, 250, 140, 0.08)";
+        ctx.beginPath();
+        ctx.moveTo(0, -34); ctx.lineTo(24, 0); ctx.lineTo(0, 34); ctx.lineTo(-24, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = "bold 11px system-ui";
+        ctx.fillStyle = "#f1fa8c";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(current ? "gm" : "A", 0, 0);
+        ctx.font = "11px system-ui";
+        ctx.fillText("+", -15, -20); ctx.fillText("−", -15, 20);
+        ctx.fillText("+", 15, -20); ctx.fillText("−", 15, 20);
+        this.drawLabel(component);
+    }
+
+    drawSwitch(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#8be9fd";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-40, 0); ctx.lineTo(-18, 0);
+        ctx.moveTo(18, 0); ctx.lineTo(40, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-18, 0);
+        if (component.closed) ctx.lineTo(18, 0);
+        else ctx.lineTo(14, -16);
+        ctx.stroke();
+        ctx.fillStyle = "#171b23";
+        for (const x of [-18, 18]) {
+            ctx.beginPath();
+            ctx.arc(x, 0, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+        }
+        this.drawLabel(component);
+    }
+
+    drawPot(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#ffb86c";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-40, 0); ctx.lineTo(-28, 0);
+        ctx.lineTo(-20, -8); ctx.lineTo(-8, 8); ctx.lineTo(4, -8); ctx.lineTo(16, 8); ctx.lineTo(28, -8);
+        ctx.lineTo(34, 0); ctx.lineTo(40, 0);
+        ctx.stroke();
+
+        // wiper arrow from the top pin onto the resistor, positioned by its setting
+        const pos = Math.min(1, Math.max(0, component.position === undefined ? 0.5 : component.position));
+        const wx = -28 + pos * 56;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(0, -40); ctx.lineTo(0, -22); ctx.lineTo(wx, -22); ctx.lineTo(wx, -10);
+        ctx.stroke();
+        ctx.fillStyle = "#ffb86c";
+        ctx.beginPath();
+        ctx.moveTo(wx, -6); ctx.lineTo(wx - 4, -13); ctx.lineTo(wx + 4, -13);
+        ctx.closePath();
+        ctx.fill();
         this.drawLabel(component);
     }
 

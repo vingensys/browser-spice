@@ -181,6 +181,28 @@ class NetlistExtractor {
                     // pin 2 is the + terminal
                     els.push({ ...base, kind: "V", nodes: [pin("2"), pin("1")], params: NetlistExtractor.sourceParams(comp) });
                     break;
+                case "I":
+                    // current flows from pin 1 through the source to pin 2
+                    els.push({ ...base, kind: "I", nodes: [pin("1"), pin("2")], params: NetlistExtractor.sourceParams(comp) });
+                    break;
+                case "E":
+                    els.push({ ...base, kind: "E", nodes: [pin("O+"), pin("O-"), pin("C+"), pin("C-")], params: { gain: Units.parseSI(comp.value) || 0 } });
+                    break;
+                case "G":
+                    els.push({ ...base, kind: "G", nodes: [pin("O+"), pin("O-"), pin("C+"), pin("C-")], params: { gm: Units.parseSI(comp.value) || 0 } });
+                    break;
+                case "SW":
+                    els.push({ ...base, kind: "SW", nodes: [pin("1"), pin("2")], params: { closed: !!comp.closed, ron: 1e-3, roff: 1e9 } });
+                    break;
+                case "POT": {
+                    // two resistors on either side of the wiper
+                    const total = Units.parseSI(comp.value) || 10000;
+                    const pos = Math.min(1, Math.max(0, comp.position === undefined ? 0.5 : comp.position));
+                    const rTop = Math.max(total * pos, 1e-3), rBot = Math.max(total * (1 - pos), 1e-3);
+                    els.push({ kind: "R", name: `${comp.name}_A`, comp, nodes: [pin("A"), pin("W")], params: { r: rTop } });
+                    els.push({ kind: "R", name: `${comp.name}_B`, comp, nodes: [pin("W"), pin("B")], params: { r: rBot } });
+                    break;
+                }
                 case "D":
                 case "LED":
                 case "DZ": {
@@ -250,6 +272,12 @@ class NetlistExtractor {
             };
             params.acMag = params.sin.amp;
             params.acPhase = params.sin.phase;
+        } else if (sourceType === "PWL") {
+            const nums = String(comp.pwl || "0 0").split(/[\s,]+/).filter(Boolean).map(t => Units.parseSI(t));
+            const pts = [];
+            for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
+            params.pwl = pts;
+            params.acMag = stim;
         } else if (sourceType === "PULSE") {
             const p = comp.pulse || {};
             params.pulse = {
@@ -282,10 +310,23 @@ class NetlistExtractor {
                     let wave;
                     if (p.sourceType === "AC") wave = Waveform.sin(p.sin);
                     else if (p.sourceType === "PULSE") wave = Waveform.pulse(p.pulse);
+                    else if (p.sourceType === "PWL") wave = Waveform.pwl(p.pwl);
                     else wave = Waveform.dc(p.dc);
                     c.add(new VoltageSource(e.name, e.nodes, { wave, acMag: p.acMag || 0, acPhase: p.acPhase || 0 }));
                     break;
                 }
+                case "I": {
+                    let wave;
+                    if (p.sourceType === "AC") wave = Waveform.sin(p.sin);
+                    else if (p.sourceType === "PULSE") wave = Waveform.pulse(p.pulse);
+                    else if (p.sourceType === "PWL") wave = Waveform.pwl(p.pwl);
+                    else wave = Waveform.dc(p.dc);
+                    c.add(new CurrentSource(e.name, e.nodes, { wave, acMag: p.acMag || 0, acPhase: p.acPhase || 0 }));
+                    break;
+                }
+                case "E": c.add(new VCVS(e.name, e.nodes, p)); break;
+                case "G": c.add(new VCCS(e.name, e.nodes, p)); break;
+                case "SW": c.add(new Switch(e.name, e.nodes, p)); break;
                 case "D": c.add(new Diode(e.name, e.nodes, p)); break;
                 case "Q": c.add(new BJT(e.name, e.nodes, e.pol, p)); break;
                 case "M": c.add(new MOSFET(e.name, e.nodes, e.pol, p)); break;
@@ -333,17 +374,18 @@ class NetlistExtractor {
         "Rrs reset vcc 100k",
         "Cq ql gnd 1n IC=0",
         // dq/dt: set drive, reset drive (dominant) and a cubic term that makes 0 and 1 the
-        // only stable latch states
-        "Bq gnd ql I=2e-1*(0.5*(1+tanh((V(nb)-V(trig))/0.02))*(1-(V(ql)-V(gnd)))-1.5*0.5*(1+tanh(max(V(thres)-V(ctrl),0.7-V(reset)+V(gnd))/0.02))*(V(ql)-V(gnd))+0.5*(V(ql)-V(gnd))*(1-(V(ql)-V(gnd)))*(2*(V(ql)-V(gnd))-1))",
-        "Bout oi gnd V=0.1+(V(vcc)-V(gnd)-1.8)*0.5*(1+tanh((V(ql)-V(gnd)-0.5)/0.02))",
+        // only stable latch states. The cubic barrier (4) means a comparator must reach about
+        // half of its range to flip the latch, i.e. it switches at the nominal threshold.
+        "Bq gnd ql I=2e-1*(0.5*(1+tanh((V(nb)-V(trig))/0.005))*(1-(V(ql)-V(gnd)))-1.5*0.5*(1+tanh(max(V(thres)-V(ctrl),0.7-V(reset)+V(gnd))/0.005))*(V(ql)-V(gnd))+4*(V(ql)-V(gnd))*(1-(V(ql)-V(gnd)))*(2*(V(ql)-V(gnd))-1))",
+        "Bout oi gnd V=0.1+(V(vcc)-V(gnd)-1.8)*0.5*(1+tanh((V(ql)-V(gnd)-0.5)/0.005))",
         "Ro oi out 10",
-        "Bdis disch gnd I=(V(disch)-V(gnd))/10*(1-0.5*(1+tanh((V(ql)-V(gnd)-0.5)/0.02)))",
+        "Bdis disch gnd I=(V(disch)-V(gnd))/10*(1-0.5*(1+tanh((V(ql)-V(gnd)-0.5)/0.005)))",
         ".ends NE555"
     ];
 
     static spiceName(e) {
         const clean = (s) => String(s).replace(/[^A-Za-z0-9_]/g, "_");
-        const prefix = { R: "R", C: "C", L: "L", V: "V", D: "D", Q: "Q", M: "M", OPAMP: "X", GATE: "B", "555": "X" }[e.kind];
+        const prefix = { R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", SW: "R", D: "D", Q: "Q", M: "M", OPAMP: "X", GATE: "B", "555": "X" }[e.kind];
         const n = clean(e.name);
         return n.toUpperCase().startsWith(prefix) ? n : `${prefix}${n}`;
     }
@@ -366,14 +408,25 @@ class NetlistExtractor {
                 case "R": lines.push(`${name} ${n[0]} ${n[1]} ${f(p.r)}`); break;
                 case "C": lines.push(`${name} ${n[0]} ${n[1]} ${f(p.c)}${p.ic ? ` IC=${f(p.ic)}` : ""}`); break;
                 case "L": lines.push(`${name} ${n[0]} ${n[1]} ${f(p.l)}${p.ic ? ` IC=${f(p.ic)}` : ""}`); break;
+                case "E": lines.push(`${name} ${n[0]} ${n[1]} ${n[2]} ${n[3]} ${f(p.gain)}`); break;
+                case "G": lines.push(`${name} ${n[0]} ${n[1]} ${n[2]} ${n[3]} ${f(p.gm)}`); break;
+                case "SW": {
+                    // an ideal switch exported as the resistance it presents in this state
+                    lines.push(`* ${e.name} is ${p.closed ? "closed" : "open"}`);
+                    lines.push(`${name} ${n[0]} ${n[1]} ${f(p.closed ? p.ron : p.roff)}`);
+                    break;
+                }
+                case "I":
                 case "V": {
                     let spec;
                     if (p.sourceType === "AC") {
                         const s = p.sin;
                         spec = `SIN(${f(s.offset)} ${f(s.amp)} ${f(s.freq)} 0 0 ${f(s.phase)}) AC ${f(s.amp)}`;
+                    } else if (p.sourceType === "PWL") {
+                        spec = `PWL(${p.pwl.map(pt => `${f(pt[0])} ${f(pt[1])}`).join(" ")})${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
                     } else if (p.sourceType === "PULSE") {
                         const q = p.pulse;
-                        spec = `PULSE(${f(q.v1)} ${f(q.v2)} ${f(q.delay)} ${f(q.rise)} ${f(q.fall)} ${f(q.width)} ${f(q.period)})`;
+                        spec = `PULSE(${f(q.v1)} ${f(q.v2)} ${f(q.delay)} ${f(q.rise)} ${f(q.fall)} ${f(q.width)} ${f(q.period)})${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
                     } else {
                         spec = `DC ${f(p.dc)}${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
                     }

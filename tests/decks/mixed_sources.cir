@@ -1,0 +1,11 @@
+Pulse voltage source and DC current source into a diode network
+V1 in 0 PULSE(0 5 100u 10u 10u 400u 1m)
+R1 in a 470
+D1 a b DM
+R2 b 0 1k
+I1 0 b DC 500u
+C1 a 0 10n
+.model DM D(IS=1e-14 N=1.2 RS=2 CJO=2p TT=1n)
+.op
+.tran 2u 2m
+.end

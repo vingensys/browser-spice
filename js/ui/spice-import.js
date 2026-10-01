@@ -10,6 +10,9 @@ class SchematicImporter {
     static PIN_NAMES = {
         R: ["1", "2"], C: ["1", "2"], L: ["1", "2"],
         V: ["2", "1"],            // netlist order is (+, -); our + terminal is pin 2
+        I: ["1", "2"],            // current flows pin 1 -> pin 2, like the netlist (n+ -> n-)
+        E: ["O+", "O-", "C+", "C-"],
+        G: ["O+", "O-", "C+", "C-"],
         D: ["1", "2"],
         Q: ["C", "B", "E"],       // parser order (collector, base, emitter)
         M: ["G", "D", "S"]        // parser order (gate, drain, source)
@@ -25,7 +28,12 @@ class SchematicImporter {
             const part = SchematicImporter.mapElement(e, deck, warnings);
             if (part) parts.push(part);
         }
-        if (!parts.length) throw new Error("No supported components were found in that netlist.");
+        if (!parts.length) {
+            // a model-only file (vendor .lib / .mod): add its models to the part pickers
+            const lib = SimModelLibrary.register(deck);
+            if (!lib.added.length) throw new Error("No supported components or models were found in that file.");
+            return { count: 0, models: lib.added.length, skipped: lib.skipped, title: deck.title, warnings: lib.skipped.length ? [`skipped ${lib.skipped.join(", ")}`] : [], deck };
+        }
 
         editor.saveState();
         editor.setTool("select");
@@ -130,9 +138,15 @@ class SchematicImporter {
 
         switch (e.kind) {
             case "R": return { ...base, type: "R", props: { value: Units.formatSI(e.value, "Ω") } };
-            case "C": return { ...base, type: "C", props: { value: Units.formatSI(e.value, "F"), ic: e.ic || "" } };
+            case "C": {
+                // an explicit IC=, else the voltage implied by any .ic node voltages
+                const node = (n) => (deck.ic && deck.ic[n]) || 0;
+                const ic = e.ic !== undefined ? e.ic : (deck.ic ? node(e.nodes[0]) - node(e.nodes[1]) : "");
+                return { ...base, type: "C", props: { value: Units.formatSI(e.value, "F"), ic } };
+            }
             case "L": return { ...base, type: "L", props: { value: Units.formatSI(e.value, "H"), ic: e.ic || "" } };
-            case "V": {
+            case "V":
+            case "I": {
                 const s = e.spec;
                 const props = { dcVoltage: s.dc, acStim: s.acMag || "" };
                 const w = s.wave;
@@ -147,14 +161,15 @@ class SchematicImporter {
                         sourceType: "PULSE",
                         pulse: { v1: a[0] || 0, v2: a[1] || 0, delay: a[2] || 0, rise: a[3] || 1e-9, fall: a[4] || 1e-9, width: a[5] === undefined ? 1e-3 : a[5], period: a[6] || 0 }
                     });
-                } else if (w) {
-                    warnings.push(`${name}: ${w.kind.toUpperCase()} source imported as its first value (DC)`);
-                    props.dcVoltage = w.args[1] || 0;
+                } else if (w && w.kind === "pwl") {
+                    Object.assign(props, { sourceType: "PWL", pwl: w.args.join(" ") });
                 }
-                const part = { ...base, type: "V", props };
-                props.value = PropertiesPanel.sourceLabel(Object.assign({ sourceType: "DC" }, props));
+                const part = { ...base, type: e.kind, props };
+                props.value = PropertiesPanel.sourceLabel(Object.assign({ sourceType: "DC", type: e.kind }, props));
                 return part;
             }
+            case "E": return { ...base, type: "E", props: { value: String(e.gain) } };
+            case "G": return { ...base, type: "G", props: { value: Units.formatSI(e.gm, "S") } };
             case "D": {
                 const m = deck.models[e.model];
                 const params = SpiceParser.diodeParams(m);
@@ -171,12 +186,6 @@ class SchematicImporter {
                 const type = m && m.type === "pmos" ? "PMOS" : "NMOS";
                 return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.mosParams(m, e.w, e.l) : undefined } };
             }
-            case "I":
-                warnings.push(`${name}: current sources have no symbol yet and were skipped`);
-                return null;
-            case "E": case "G":
-                warnings.push(`${name}: controlled sources have no symbol yet and were skipped`);
-                return null;
             default:
                 return null;
         }

@@ -30,7 +30,7 @@ Hotkeys: **C** capacitor, **L** inductor, **V** source, **G** ground, **D** diod
 
 **Simulating**
 
-- **Run DC / AC Sweep / Transient** from the toolbar; add voltage / current probes to plot signals.
+- **Run DC / AC Sweep / Transient / DC Sweep** from the toolbar (Temp sets the circuit temperature); add voltage / current probes to plot signals.
 - **Stop / Step / start from 0** set the transient run; **AC** sets the sweep range.
 - **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
@@ -44,18 +44,25 @@ Hotkeys: **C** capacitor, **L** inductor, **V** source, **G** ground, **D** diod
 
 ## What is simulated
 
-R, C, L, voltage sources (DC / sine / pulse), diode, LED, zener, NPN / PNP BJT, N / P MOSFET
-(level 1 with body diode and gate capacitance), op-amp (single pole, rail clamp), logic gates
-(with propagation delay), NE555. Part models are standard SPICE parameter sets (1N4148,
-1N4007, 2N2222, 2N3904, 2N7000, IRF540, LM741, ...).
+R, C, L, voltage and current sources (DC / sine / pulse / piecewise-linear, with an AC-sweep
+magnitude), VCVS and VCCS, ideal switch, potentiometer, diode, LED, zener, NPN / PNP BJT, N / P
+MOSFET (level 1 with body diode and gate capacitance), op-amp (single pole, rail clamp), logic
+gates (with propagation delay), NE555. Part models are standard SPICE parameter sets (1N4148,
+1N4007, 2N2222, 2N3904, 2N7000, IRF540, LM741, ...); `.model` cards from vendor files can be
+imported (Import SPICE with a model-only file) and are remembered between sessions.
+
+**Analyses**: operating point, DC sweep, transient (with UIC / `.ic`), AC small-signal, and a
+temperature setting (`.temp`) that scales junction currents the way SPICE does.
 
 The engine (`js/sim`) is a SPICE-style solver: modified nodal analysis, Newton-Raphson with
 junction limiting, gmin and source stepping, trapezoidal / backward-Euler transient with
-breakpoints, charge-conserving junction capacitances, small-signal AC.
+local-error step control, exact landing on source edges and comparator crossings,
+charge-conserving junction capacitances, and a Markowitz sparse LU for larger circuits
+(about 7 ms per step at 1,100 unknowns).
 
 ## Layout
 
-- `js/sim/` engine: `linalg`, `devices`, `models`, `engine`, `spice-parser`, `ngspice-backend`
+- `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `models`, `model-library`, `engine`, `spice-parser`, `ngspice-backend`
 - `js/cad/` editor internals: `symbols` (pins and bodies), `router` (A* + rubber-band repair), `symbol-draw`
 - `js/visualization/` schematic editor and waveform plotter
 - `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
@@ -65,20 +72,24 @@ breakpoints, charge-conserving junction capacitances, small-signal AC.
 
 ```bash
 npm test             # engine, ngspice cross-check (needs ngspice on PATH), ngspice-WASM adapter
+SPARSE=1 npm test    # the same with the sparse solver forced on for every circuit
 ```
 
-- `tests/sim.test.js` engine against closed-form results (42 checks).
-- `tests/ngspice.test.js` runs `tests/decks/*.cir` through the engine **and** native ngspice and compares
-  operating points, transients and AC sweeps node by node. Skips if ngspice is missing.
+- `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import (46 checks).
+- `tests/ngspice.test.js` runs `tests/decks/*.cir` (diodes, BJT / MOS amplifiers, rectifiers, CMOS, controlled
+  sources, PWL / `.param`, `.ic`, `.temp`) through the engine **and** native ngspice and compares operating
+  points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
 
 Browser suites (load in the running app and call from the console):
 
 ```js
-(0, eval)(await (await fetch('tests/interaction.js')).text()); interactionTests();   // editor behaviour
-(0, eval)(await (await fetch('tests/stress.js')).text());      stress(12345, 100);  // random drags / rotations
-(0, eval)(await (await fetch('tests/examples.js')).text());    await exampleTests(); // every example's physics
+(0, eval)(await (await fetch('tests/interaction.js')).text()); interactionTests();     // editor behaviour
+(0, eval)(await (await fetch('tests/stress.js')).text());      stress(12345, 100);    // random drags / rotations
+(0, eval)(await (await fetch('tests/examples.js')).text());    await exampleTests();   // every example's physics
 (0, eval)(await (await fetch('tests/roundtrip.js')).text());   await roundtripTests(); // SPICE -> schematic -> sim
+(0, eval)(await (await fetch('tests/engines.js')).text());     await engineTests();    // built-in vs ngspice-WASM
 ```
 
-Parts that are known to be approximations are listed in the roadmap. ngspice remains the reference.
+ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each
+within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay; MOSFETs are level 1.

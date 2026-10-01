@@ -88,6 +88,26 @@ window.exampleTests = function () {
         near(f, 1.44 / ((1000 + 20000) * 100e-9), 70, "frequency");
     });
 
+    check("diode-iv: sweep shows the exponential knee", () => {
+        const { sim } = load("diode-iv");
+        const r = sim.dcSweep("V1", 0, 1, 0.01);
+        const i = r.currentHistories.D1;
+        const at = (v) => i[Math.round(v / 0.01)];
+        if (at(0.3) > 1e-5) throw new Error("conducting too early: " + at(0.3));
+        if (at(0.9) < 5e-3) throw new Error("not conducting at 0.9 V: " + at(0.9));
+        if (!(at(0.8) > at(0.7) && at(0.7) > at(0.6))) throw new Error("not monotonic");
+    });
+
+    check("pot-divider: wiper at 25 % loaded by the switch", () => {
+        const { info, sim } = load("pot-divider");
+        const w = sim.operatingPoint().nodeVoltages[nodeOf(info, "POT1", "W")];
+        // 2.5 kΩ above the wiper to 10 V, 7.5 kΩ below it in parallel with the 10 kΩ load (4.286 kΩ)
+        near(w, 10 * 4.2857 / (2.5 + 4.2857), 0.05, "wiper (switch closed)");
+        const sw = editor.components.find(c => c.type === "SW"); sw.closed = false;
+        const w2 = new SimEngine(NetlistExtractor.extract(editor).circuit).operatingPoint().nodeVoltages[nodeOf(info, "POT1", "W")];
+        near(w2, 7.5, 0.01, "wiper (switch open)");
+    });
+
     check("boost: steps 5 V up to ~9.7 V", () => {
         const { info, sim } = load("boost");
         const r = sim.transient({ tStop: 0.02, tStep: 1e-6, uic: true });

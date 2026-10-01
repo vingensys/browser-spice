@@ -1,0 +1,10 @@
+Controlled sources: VCVS buffer into a VCCS transconductance stage
+V1 in 0 DC 0 AC 1
+R1 in a 1k
+C1 a 0 100n
+E1 b 0 a 0 2.5
+R2 b c 2k
+G1 0 d c 0 2m
+RL d 0 5k
+.ac dec 10 10 100k
+.end

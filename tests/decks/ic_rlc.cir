@@ -1,0 +1,9 @@
+Parallel RLC tank started from initial node voltages (.ic with UIC)
+R1 n 0 5k
+L1 n 0 1m
+C1 n 0 1u
+C2 m 0 2u
+R2 n m 100
+.ic v(n)=3 v(m)=1
+.tran 1u 1.5m uic
+.end

@@ -1,0 +1,13 @@
+Diode forward drop and BJT bias at 85 C
+V1 in 0 DC 5
+R1 in d 1k
+D1 d 0 DM
+VCC vcc 0 DC 12
+RB vcc b 470k
+RC vcc c 2.2k
+Q1 c b 0 QN
+.model DM D(IS=2.52e-9 N=1.752 RS=0.568 XTI=3 EG=1.11)
+.model QN NPN(IS=14.34f BF=255.9 BR=6.092 VAF=74.03 XTI=3 EG=1.11)
+.temp 85
+.op
+.end

@@ -31,6 +31,9 @@ class Units {
         const num = parseFloat(match[1]);
         const prefix = match[2];
 
+        // SPICE spells mega as "meg" (a bare M means milli there); accept it as well
+        if (/^meg/i.test(str.slice(match[1].length).trim())) return num * 1e6;
+
         if (prefix && Units.SI_PREFIXES[prefix] !== undefined) {
             return num * Units.SI_PREFIXES[prefix];
         }

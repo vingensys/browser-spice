@@ -16,7 +16,8 @@ const files = [
     "js/sim/linalg.js", "js/sim/devices.js", "js/sim/models.js", "js/sim/engine.js", "js/sim/spice-parser.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
-const { SimEngine, SpiceParser } = new Function(src + "\nreturn { SimEngine, SpiceParser };")();
+const { SimEngine, SpiceParser, SPARSE_THRESHOLD } = new Function(src + "\nreturn { SimEngine, SpiceParser, SPARSE_THRESHOLD };")();
+if (process.env.SPARSE) SPARSE_THRESHOLD.n = 0; // force the sparse solver for every circuit
 
 if (spawnSync("ngspice", ["-v"]).error) {
     console.log("ngspice not found on PATH: skipping cross-check");
@@ -59,7 +60,7 @@ for (const file of fs.readdirSync(dir).filter(f => f.endsWith(".cir")).sort()) {
     const deck = SpiceParser.parse(text);
     const { circuit, warnings } = SpiceParser.build(deck);
     const nodes = circuit.names.filter(n => !n.includes("#") && !n.includes("."));
-    const sim = new SimEngine(circuit);
+    const sim = new SimEngine(circuit, { temp: deck.temp === undefined ? 27 : deck.temp });
 
     // ngspice run
     const body = text.split("\n").filter(l => !/^\s*\.(op|tran|ac|dc|end)\b/i.test(l)).join("\n");
@@ -101,7 +102,7 @@ for (const file of fs.readdirSync(dir).filter(f => f.endsWith(".cir")).sort()) {
             lines.push(`op   worst ${(w * 100).toFixed(3)}% of full scale at v(${wn})`);
         }
         if (tr) {
-            const r = sim.transient({ tStop: tr.tStop, tStep: tr.tStep, uic: tr.uic });
+            const r = sim.transient({ tStop: tr.tStop, tStep: tr.tStep, uic: tr.uic, nodeIC: deck.ic });
             const ng = readPairs(`${tmp}/${id}.tran.txt`, nodes);
             let w = 0, wn = "";
             nodes.forEach((n, k) => {

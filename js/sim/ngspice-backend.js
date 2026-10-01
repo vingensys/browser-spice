@@ -41,15 +41,33 @@ class NgspiceBackend {
         return [];
     }
 
+    // ngspice writes its progress and convergence chatter to the console; capture it so it
+    // can be shown (or ignored) deliberately instead of flooding the developer console.
     static async run(deck) {
         const sim = await NgspiceBackend.load();
-        sim.setNetList(deck);
-        const res = await sim.runSim();
-        const errors = sim.getError ? sim.getError() : [];
-        if (!res || !res.data || !res.data.length) {
-            throw new Error("ngspice produced no data" + (errors.length ? `: ${errors.slice(0, 2).join("; ")}` : "."));
+        const log = [];
+        const saved = { error: console.error, warn: console.warn, log: console.log };
+        const grab = (...a) => log.push(a.join(" "));
+        console.error = console.warn = console.log = grab;
+        let res, errors = [];
+        try {
+            sim.setNetList(deck);
+            res = await sim.runSim();
+            errors = sim.getError ? sim.getError() : [];
+        } finally {
+            console.error = saved.error; console.warn = saved.warn; console.log = saved.log;
         }
+        if (!res || !res.data || !res.data.length) {
+            const fatal = log.filter(l => /error|fatal|abort/i.test(l)).slice(0, 2).join("; ");
+            throw new Error("ngspice produced no data" + ((errors.length || fatal) ? `: ${(errors.slice(0, 2).join("; ") || fatal)}` : "."));
+        }
+        res.log = log.filter(l => l.trim());
         return res;
+    }
+
+    // Lines worth telling the user about (real problems, not gmin-stepping progress notes)
+    static problems(res) {
+        return (res.log || []).filter(l => /error|fatal|abort|too many|no convergence|timestep too small/i.test(l));
     }
 
     // ---- result conversion (pure; unit-testable without a browser) ------------
@@ -89,6 +107,20 @@ class NgspiceBackend {
         const derived = NgspiceBackend.derivedCurrents(info, (n) => vAt(n));
         for (const [name, fn] of Object.entries(derived)) currents[name] = fn(0);
         return { nodeVoltages, currents, sourceCurrents, method: "ngspice", iterations: null };
+    }
+
+    static toSweep(res, info) {
+        const axis = res.data[0];
+        const out = { sweep: axis.values.slice(), nodeHistories: {}, currentHistories: {} };
+        for (const d of res.data.slice(1)) {
+            const c = NgspiceBackend.classify(d.name, info);
+            if (!c) continue;
+            if (c.type === "node") out.nodeHistories[c.key] = d.values.slice();
+            else out.currentHistories[c.key] = d.values.slice();
+        }
+        const derived = NgspiceBackend.derivedCurrents(info, (n, i) => (n === "0" ? 0 : (out.nodeHistories[n] || [])[i] || 0));
+        for (const [name, fn] of Object.entries(derived)) out.currentHistories[name] = out.sweep.map((_, i) => fn(i));
+        return out;
     }
 
     static toTransient(res, info) {

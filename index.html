@@ -514,6 +514,7 @@
         <button id="runDC" class="sim-btn">▶ Run DC</button>
         <button id="runAC" class="sim-btn">▶ Run AC Sweep</button>
         <button id="runTransient" class="sim-btn">▶ Run Transient</button>
+        <button id="runSweep" class="sim-btn">▶ DC Sweep</button>
 
         <span class="separator"></span>
 
@@ -522,6 +523,9 @@
             <label>Step <input id="simTstep" value="20u" size="5"></label>
             <label class="chk"><input id="simUic" type="checkbox" checked> start from 0</label>
             <label>AC <input id="simFstart" value="10" size="4">–<input id="simFstop" value="1M" size="4"> Hz</label>
+            <label>Temp <input id="simTemp" value="27" size="3"> °C</label>
+            <label>Sweep <select id="sweepSrc"><option value="">(no sources)</option></select>
+                <input id="sweepStart" value="0" size="3">→<input id="sweepStop" value="5" size="3"> step <input id="sweepStep" value="0.1" size="3"></label>
             <label>Engine
                 <select id="simEngine" title="Built-in: instant and interactive. ngspice: the industry-standard solver (loads on first use).">
                     <option value="builtin">Built-in (fast)</option>
@@ -574,6 +578,26 @@
                     <div class="palette-item" data-tool="V">
                         <span>Voltage Source</span>
                         <span class="palette-badge">V</span>
+                    </div>
+                    <div class="palette-item" data-tool="I">
+                        <span>Current Source</span>
+                        <span class="palette-badge">I</span>
+                    </div>
+                    <div class="palette-item" data-tool="E">
+                        <span>VCVS (E)</span>
+                        <span class="palette-badge">E</span>
+                    </div>
+                    <div class="palette-item" data-tool="G">
+                        <span>VCCS (G)</span>
+                        <span class="palette-badge">G</span>
+                    </div>
+                    <div class="palette-item" data-tool="SW">
+                        <span>Switch</span>
+                        <span class="palette-badge">S</span>
+                    </div>
+                    <div class="palette-item" data-tool="POT">
+                        <span>Potentiometer</span>
+                        <span class="palette-badge">P</span>
                     </div>
                     <div class="palette-item" data-tool="GND">
                         <span>Ground</span>
@@ -753,6 +777,7 @@
     <script src="js/sim/models.js"></script>
     <script src="js/sim/engine.js"></script>
     <script src="js/sim/spice-parser.js"></script>
+    <script src="js/sim/model-library.js"></script>
     <script src="js/sim/ngspice-backend.js"></script>
 
     <!-- schematic editor -->

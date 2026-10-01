@@ -4,6 +4,7 @@
 (() => {
     const $ = (id) => document.getElementById(id);
 
+    SimModelLibrary.restore();
     const editor = new SchematicEditor($("schematic"));
     const plotter = new WaveformPlotter($("plotCanvas"));
     const props = new PropertiesPanel(editor, $("propertiesContent"));
@@ -50,10 +51,21 @@
     }
 
     editor.onChange = () => {
+        runner.refreshSweepSources();
         props.render();
         updateStatus();
     };
-    editor.onEdit = () => props.focusMain();
+    editor.onEdit = (comp) => {
+        if (comp && comp.type === "SW") {
+            editor.saveState();
+            comp.closed = !comp.closed;
+            comp.value = comp.closed ? "closed" : "open";
+            editor.draw();
+            props.render();
+            return;
+        }
+        props.focusMain();
+    };
 
     document.querySelectorAll(".palette-item").forEach(item => {
         item.addEventListener("click", () => {
@@ -138,6 +150,7 @@
                 editor.refreshWires();
                 editor.draw();
                 editor.notify();
+                runner.refreshSweepSources();
                 props.render();
                 updateStatus();
             } catch (err) {
@@ -156,6 +169,13 @@
         reader.onload = (evt) => {
             try {
                 const r = SchematicImporter.import(editor, evt.target.result);
+                runner.refreshSweepSources();
+                if (r.models) {
+                    props.render();
+                    runner.toast(`Added ${r.models} model(s) to the part pickers.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");
+                    e.target.value = "";
+                    return;
+                }
                 props.render();
                 updateStatus();
                 const warn = r.warnings.length ? ` ${r.warnings.length} note(s): ${r.warnings.slice(0, 2).join("; ")}${r.warnings.length > 2 ? " …" : ""}` : "";
@@ -185,6 +205,7 @@
     exampleSelect.addEventListener("change", () => {
         if (!exampleSelect.value) return;
         const ex = loadExampleById(editor, exampleSelect.value);
+        runner.refreshSweepSources();
         runner.toast(ex.note, "info");
         exampleSelect.value = "";
         props.render();
@@ -196,11 +217,13 @@
     $("runDC").addEventListener("click", () => runner.runDC());
     $("runAC").addEventListener("click", () => runner.runAC());
     $("runTransient").addEventListener("click", () => runner.runTransient());
+    $("runSweep").addEventListener("click", () => { runner.refreshSweepSources(); runner.runSweep(); });
 
     $("zoomInBtn").addEventListener("click", () => { plotter.zoomX *= 1.2; plotter.zoomY *= 1.2; plotter.draw(); });
     $("zoomOutBtn").addEventListener("click", () => { plotter.zoomX *= 0.8; plotter.zoomY *= 0.8; plotter.draw(); });
     $("resetZoomBtn").addEventListener("click", () => plotter.resetZoom());
 
+    runner.refreshSweepSources();
     props.render();
     updateStatus();
 })();

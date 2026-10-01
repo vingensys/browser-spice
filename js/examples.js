@@ -183,6 +183,37 @@ const EXAMPLES = [
         }
     },
     {
+        id: "diode-iv",
+        name: "Diode I-V curve (DC sweep)",
+        note: "Press DC Sweep: V1 sweeps 0 to 1 V and the probe plots the diode current (the exponential knee near 0.6 V).",
+        settings: {},
+        sweep: { start: "0", stop: "1", step: "0.01" },
+        build(b) {
+            const v = b.part("V", 120, 260, { rot: 270, dcVoltage: 0, value: "0 V" });
+            const r = b.part("R", 260, 180, { value: "1 Ω" });
+            const d = b.part("D", 400, 260, { rot: 90, model: "1N4148", value: "1N4148" });
+            const g = b.part("GND", 260, 400);
+            b.wire(v, "2", r, "1"); b.wire(r, "2", d, "1"); b.wire(d, "2", g, "1"); b.wire(v, "1", g, "1");
+            b.iprobe(d);
+        }
+    },
+    {
+        id: "pot-divider",
+        name: "Potentiometer divider + switch",
+        note: "Run DC, then change the wiper in the Properties panel or double-click the switch to connect the load.",
+        settings: {},
+        build(b) {
+            const v = b.part("V", 120, 300, { rot: 270, dcVoltage: 10, value: "10 V" });
+            const p = b.part("POT", 300, 240, { value: "10 kΩ", position: 0.25 });
+            const sw = b.part("SW", 480, 140, { closed: true, value: "closed" });
+            const rl = b.part("R", 620, 300, { rot: 90, value: "10 kΩ" });
+            const g = b.part("GND", 300, 440);
+            b.wire(v, "2", p, "A"); b.wire(p, "B", g, "1"); b.wire(p, "W", sw, "1");
+            b.wire(sw, "2", rl, "1"); b.wire(rl, "2", g, "1"); b.wire(v, "1", g, "1");
+            b.vprobe(p, "W", "V(wiper)");
+        }
+    },
+    {
         id: "boost",
         name: "Boost converter (switching)",
         note: "5 V to about 9.7 V with an IRF540 switched at 50 kHz. Run Transient for 5 ms.",
@@ -222,6 +253,14 @@ function loadExampleById(editor, id) {
 
     ex.build(new ExampleBuilder(editor));
     new ExampleBuilder(editor).finish();
+
+    // push the example's suggested sweep range
+    if (ex.sweep) {
+        for (const [id, v] of [["sweepStart", ex.sweep.start], ["sweepStop", ex.sweep.stop], ["sweepStep", ex.sweep.step]]) {
+            const input = document.getElementById(id);
+            if (input) input.value = v;
+        }
+    }
 
     // push the example's suggested run settings into the toolbar
     for (const [key, value] of Object.entries(ex.settings || {})) {

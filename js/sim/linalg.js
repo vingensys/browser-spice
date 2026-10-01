@@ -83,11 +83,129 @@ class DenseSystem {
     }
 }
 
+// Sparse LU with Markowitz pivoting for larger circuits. Same interface as DenseSystem.
+//
+// Rows are hash maps (column -> value). Each step picks the sparsest active column, then
+// the pivot row in it with the fewest entries among those within a threshold of the largest
+// (so a zero diagonal on a voltage-source row is no problem), and eliminates it. Fill-in is
+// kept low by that ordering, so cost grows roughly with the number of nonzeros rather than n^3.
+class SparseSystem {
+    constructor(n) {
+        this.n = n;
+        this.rows = Array.from({ length: n }, () => new Map());
+        this.b = new Float64Array(n);
+    }
+
+    clear() {
+        for (const r of this.rows) r.clear();
+        this.b.fill(0);
+    }
+
+    add(i, j, v) {
+        if (i < 0 || j < 0) return;
+        const r = this.rows[i];
+        r.set(j, (r.get(j) || 0) + v);
+    }
+
+    rhs(i, v) {
+        if (i < 0) return;
+        this.b[i] += v;
+    }
+
+    addG(i, j, g) {
+        this.add(i, i, g);
+        this.add(j, j, g);
+        this.add(i, j, -g);
+        this.add(j, i, -g);
+    }
+
+    solve() {
+        const n = this.n;
+        const rows = this.rows.map(m => new Map(m));
+        const b = Float64Array.from(this.b);
+        const cols = Array.from({ length: n }, () => new Set());
+        for (let i = 0; i < n; i++) for (const j of rows[i].keys()) cols[j].add(i);
+
+        const rowActive = new Uint8Array(n).fill(1);
+        const colActive = new Uint8Array(n).fill(1);
+        const pivots = []; // { p, q, pv, prow }
+        const THRESH = 0.1;
+
+        for (let k = 0; k < n; k++) {
+            // sparsest active column
+            let q = -1, best = Infinity;
+            for (let j = 0; j < n; j++) {
+                if (!colActive[j]) continue;
+                const c = cols[j].size;
+                if (c < best) { best = c; q = j; if (c <= 1) break; }
+            }
+            if (q < 0 || best === 0) {
+                // an active column with no entries: structurally singular
+                throw new SingularMatrixError(q < 0 ? k : q);
+            }
+
+            let maxAbs = 0;
+            for (const i of cols[q]) maxAbs = Math.max(maxAbs, Math.abs(rows[i].get(q)));
+            if (maxAbs < 1e-30) throw new SingularMatrixError(q);
+
+            // among acceptable rows prefer the one with the fewest entries (least fill)
+            let p = -1, bestLen = Infinity;
+            for (const i of cols[q]) {
+                if (Math.abs(rows[i].get(q)) >= THRESH * maxAbs && rows[i].size < bestLen) {
+                    bestLen = rows[i].size;
+                    p = i;
+                }
+            }
+
+            const prow = rows[p];
+            const pv = prow.get(q);
+
+            for (const i of Array.from(cols[q])) {
+                if (i === p) continue;
+                const ri = rows[i];
+                const f = ri.get(q) / pv;
+                ri.delete(q);
+                if (f !== 0) {
+                    for (const [j, v] of prow) {
+                        if (j === q) continue;
+                        const old = ri.get(j);
+                        if (old === undefined) { ri.set(j, -f * v); cols[j].add(i); }
+                        else ri.set(j, old - f * v);
+                    }
+                    b[i] -= f * b[p];
+                }
+            }
+
+            // retire the pivot row and column
+            for (const j of prow.keys()) cols[j].delete(p);
+            cols[q].clear();
+            rowActive[p] = 0;
+            colActive[q] = 0;
+            pivots.push({ p, q, pv, prow });
+        }
+
+        const x = new Float64Array(n);
+        for (let k = n - 1; k >= 0; k--) {
+            const { p, q, pv, prow } = pivots[k];
+            let sum = b[p];
+            for (const [j, v] of prow) if (j !== q) sum -= v * x[j];
+            x[q] = sum / pv;
+        }
+        return x;
+    }
+}
+
+// Pick the solver by problem size (dense wins for small systems, sparse for large ones).
+const SPARSE_THRESHOLD = { n: 70 };
+function createSystem(n) {
+    return n >= SPARSE_THRESHOLD.n ? new SparseSystem(n) : new DenseSystem(n);
+}
+
 // Complex admittance stamping on a real block system [Re -Im; Im Re].
 class ComplexStamper {
     constructor(n) {
         this.n = n;
-        this.sys = new DenseSystem(2 * n);
+        this.sys = createSystem(2 * n);
     }
 
     clear() { this.sys.clear(); }

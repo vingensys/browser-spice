@@ -3,7 +3,8 @@
 // symbol artwork in js/cad/symbol-draw.js (mixed in at the bottom of this file).
 
 const HOTKEYS = {
-    c: "C", l: "L", v: "V", g: "GND", d: "D", q: "BJT_NPN", m: "NMOS", u: "OPAMP", w: "wire"
+    c: "C", l: "L", v: "V", i: "I", g: "GND", d: "D", q: "BJT_NPN", m: "NMOS", u: "OPAMP",
+    e: "E", s: "SW", p: "POT", w: "wire"
 };
 
 class SchematicEditor {
@@ -473,6 +474,11 @@ class SchematicEditor {
         else if (type === "C") defaultValue = "10 µF";
         else if (type === "L") defaultValue = "10 mH";
         else if (type === "V") defaultValue = "5 V";
+        else if (type === "I") defaultValue = "1 mA";
+        else if (type === "E") defaultValue = "10";
+        else if (type === "G") defaultValue = "10 mS";
+        else if (type === "SW") defaultValue = "open";
+        else if (type === "POT") defaultValue = "10 kΩ";
         else if (type === "IC555") defaultValue = "NE555";
 
         // semiconductors start with their library default model
@@ -491,12 +497,14 @@ class SchematicEditor {
             rotation,
             value: defaultValue,
             model,
-            sourceType: type === "V" ? "DC" : undefined,
-            dcVoltage: type === "V" ? 5 : undefined,
-            dcOffset: type === "V" ? 0 : undefined,
-            acMagnitude: type === "V" ? 5 : undefined,
-            acPhase: type === "V" ? 0 : undefined,
-            frequency: type === "V" ? 1000 : undefined
+            sourceType: (type === "V" || type === "I") ? "DC" : undefined,
+            dcVoltage: type === "V" ? 5 : (type === "I" ? 0.001 : undefined),
+            dcOffset: (type === "V" || type === "I") ? 0 : undefined,
+            acMagnitude: type === "V" ? 5 : (type === "I" ? 0.001 : undefined),
+            acPhase: (type === "V" || type === "I") ? 0 : undefined,
+            frequency: (type === "V" || type === "I") ? 1000 : undefined,
+            closed: type === "SW" ? false : undefined,
+            position: type === "POT" ? 0.5 : undefined
         };
 
         const spot = this.findFreeSpot(component, x, y);

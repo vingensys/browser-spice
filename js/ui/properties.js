@@ -54,7 +54,15 @@ class PropertiesPanel {
         let html = this.text("Name", "name", c.name);
         const type = c.type;
 
-        if (type === "V") html += this.sourceRows(c);
+        if (type === "V") html += this.sourceRows(c, "V");
+        else if (type === "I") html += this.sourceRows(c, "A");
+        else if (type === "E") html += this.text("Voltage gain", "value", c.value, "10");
+        else if (type === "G") html += this.text("Transconductance (S)", "value", c.value, "10m");
+        else if (type === "SW") html += this.select("State", "closed", [["false", "Open"], ["true", "Closed"]], String(!!c.closed), "Double-click the switch to toggle it.");
+        else if (type === "POT") html += this.text("Total resistance", "value", c.value, "10k") +
+            `<div class="property"><label>Wiper position</label>
+                <input type="range" data-prop="position" min="0" max="100" value="${Math.round((c.position === undefined ? 0.5 : c.position) * 100)}">
+                <div class="prop-note">${Math.round((c.position === undefined ? 0.5 : c.position) * 100)}% from pin A</div></div>`;
         else if (type === "R") html += this.text("Resistance", "value", c.value, "e.g. 4.7k");
         else if (type === "C") html += this.text("Capacitance", "value", c.value, "e.g. 10u") + this.text("Initial voltage (UIC)", "ic", c.ic || "", "0");
         else if (type === "L") html += this.text("Inductance", "value", c.value, "e.g. 10m") + this.text("Initial current (UIC)", "ic", c.ic || "", "0");
@@ -86,23 +94,27 @@ class PropertiesPanel {
         this.el.innerHTML = html;
     }
 
-    sourceRows(c) {
+    sourceRows(c, unit) {
         const t = c.sourceType || "DC";
+        const what = unit === "A" ? "Current" : "Voltage";
         let html = this.select("Source type", "sourceType",
-            [["DC", "DC voltage"], ["AC", "Sine wave"], ["PULSE", "Pulse / square"]], t);
+            [["DC", `DC ${what.toLowerCase()}`], ["AC", "Sine wave"], ["PULSE", "Pulse / square"], ["PWL", "Piecewise linear"]], t);
 
         if (t === "DC") {
-            html += this.text("Voltage", "dcVoltage", c.dcVoltage !== undefined ? this.fmt(c.dcVoltage, "V") : c.value, "5 V");
+            html += this.text(what, "dcVoltage", c.dcVoltage !== undefined ? this.fmt(c.dcVoltage, unit) : c.value, unit === "A" ? "1 mA" : "5 V");
             html += this.text("AC sweep magnitude", "acStim", c.acStim || "", "0 (set 1 to drive an AC sweep)");
         } else if (t === "AC") {
-            html += this.text("Amplitude", "acMagnitude", this.fmt(c.acMagnitude, "V", "5 V"), "5 V");
-            html += this.text("DC offset", "dcOffset", this.fmt(c.dcOffset, "V", "0 V"), "0 V");
+            html += this.text("Amplitude", "acMagnitude", this.fmt(c.acMagnitude, unit, unit === "A" ? "1 mA" : "5 V"), "5");
+            html += this.text("DC offset", "dcOffset", this.fmt(c.dcOffset, unit, `0 ${unit}`), `0 ${unit}`);
             html += this.text("Frequency", "frequency", this.fmt(c.frequency, "Hz", "1 kHz"), "1 kHz");
             html += this.text("Phase (deg)", "acPhase", c.acPhase === undefined ? "0" : c.acPhase, "0");
+        } else if (t === "PWL") {
+            html += this.text("Points (time value ...)", "pwl", c.pwl || "0 0 1m 5 2m 0", "0 0 1m 5 2m 0");
+            html += this.text("AC sweep magnitude", "acStim", c.acStim || "", "0");
         } else {
             const p = c.pulse || {};
-            html += this.text("Low level", "pulse.v1", this.fmt(p.v1, "V", "0 V"), "0 V");
-            html += this.text("High level", "pulse.v2", this.fmt(p.v2, "V", "5 V"), "5 V");
+            html += this.text("Low level", "pulse.v1", this.fmt(p.v1, unit, `0 ${unit}`), `0 ${unit}`);
+            html += this.text("High level", "pulse.v2", this.fmt(p.v2, unit, `5 ${unit}`), `5 ${unit}`);
             html += this.text("Delay", "pulse.delay", this.fmt(p.delay, "s", "0 s"), "0 s");
             html += this.text("Rise time", "pulse.rise", this.fmt(p.rise, "s", "1 µs"), "1 µs");
             html += this.text("Fall time", "pulse.fall", this.fmt(p.fall, "s", "1 µs"), "1 µs");
@@ -121,8 +133,10 @@ class PropertiesPanel {
 
     // The label drawn under the symbol
     static sourceLabel(c) {
-        const f = (v, u) => (typeof v === "string" ? v : Units.formatSI(v, u));
+        const u = c.type === "I" ? "A" : "V";
+        const f = (v, unit) => (typeof v === "string" ? v : Units.formatSI(v, unit === "V" ? u : unit));
         const t = c.sourceType || "DC";
+        if (t === "PWL") return "PWL";
         if (t === "AC") return `${f(c.acMagnitude, "V")} @ ${f(c.frequency, "Hz")}`;
         if (t === "PULSE") {
             const p = c.pulse || {};
@@ -155,7 +169,13 @@ class PropertiesPanel {
         const { prop, comp } = t;
         const v = e.target.value;
 
-        this.assign(comp, prop, v);
+        if (prop === "position") {
+            comp.position = Number(v) / 100;
+            const note = e.target.parentElement.querySelector(".prop-note");
+            if (note) note.textContent = `${Math.round(comp.position * 100)}% from pin A`;
+        } else {
+            this.assign(comp, prop, v);
+        }
         this.refreshLabel(comp);
         this.editor.draw();
     }
@@ -167,13 +187,14 @@ class PropertiesPanel {
         const v = e.target.value;
 
         if (e.target.tagName === "SELECT") {
-            this.assign(comp, prop, v);
+            this.assign(comp, prop, prop === "closed" ? v === "true" : v);
             if (prop === "model") {
                 comp.value = v;
                 if (SIM_MODELS[comp.type] && SIM_MODELS[comp.type][v]) delete comp.customParams;
             }
             if (prop === "sourceType") {
                 // seed sensible defaults when switching waveform
+                if (v === "PWL" && !comp.pwl) comp.pwl = "0 0 1m 5 2m 0";
                 if (v === "PULSE" && !comp.pulse) comp.pulse = { v1: 0, v2: 5, delay: 0, rise: 1e-6, fall: 1e-6, width: 5e-4, period: 1e-3 };
                 if (v === "AC" && comp.acMagnitude === undefined) comp.acMagnitude = 5;
             }
@@ -188,7 +209,8 @@ class PropertiesPanel {
     }
 
     refreshLabel(comp) {
-        if (comp.type === "V") comp.value = PropertiesPanel.sourceLabel(comp);
+        if (comp.type === "V" || comp.type === "I") comp.value = PropertiesPanel.sourceLabel(comp);
+        if (comp.type === "SW") comp.value = comp.closed ? "closed" : "open";
     }
 
     // one undo step per edit session

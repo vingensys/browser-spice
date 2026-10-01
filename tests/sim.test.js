@@ -8,12 +8,15 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const files = [
     "js/utils/complex.js", "js/utils/units.js",
-    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/models.js", "js/sim/engine.js"
+    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/models.js", "js/sim/engine.js",
+    "js/sim/spice-parser.js", "js/sim/model-library.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const S = new Function(src + `
 return { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
-         Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard, Complex };`)();
+         Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard, Complex,
+         SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
+if (process.env.SPARSE) S.SPARSE_THRESHOLD.n = 0; // force the sparse solver for every circuit
 
 const { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
     Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard } = S;
@@ -44,6 +47,41 @@ function build(fn) {
 }
 
 // -------------------------------------------------------------- linear
+
+console.log("linear algebra");
+
+test("sparse LU matches dense LU on random MNA-like systems (zero diagonals included)", () => {
+    const { DenseSystem, SparseSystem } = S;
+    let seed = 99;
+    const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
+    for (const n of [5, 17, 60, 150]) {
+        const d = new DenseSystem(n), sp = new SparseSystem(n);
+        for (let i = 0; i < n; i++) {
+            const v = 1 + 10 * rnd();
+            d.add(i, i, v); sp.add(i, i, v);
+            for (let k = 0; k < 3; k++) {
+                const j = Math.floor(rnd() * n), w = rnd() - 0.5;
+                if (j === i) continue;
+                d.add(i, j, w); sp.add(i, j, w);
+            }
+            const b = rnd() * 4 - 2;
+            d.rhs(i, b); sp.rhs(i, b);
+        }
+        // a voltage-source-style row/column pair with a zero diagonal
+        const a = 0, br = n - 1;
+        for (const sys of [d, sp]) { sys.add(a, br, 1); sys.add(br, a, 1); }
+        const xd = d.solve(), xs = sp.solve();
+        for (let i = 0; i < n; i++) near(xs[i], xd[i], 1e-8 * (1 + Math.abs(xd[i])), `n=${n} x[${i}]`);
+    }
+});
+
+test("sparse LU reports a singular matrix", () => {
+    const sp = new S.SparseSystem(3);
+    sp.add(0, 0, 1); sp.add(1, 1, 1); // row / column 2 empty
+    let hit = false;
+    try { sp.solve(); } catch (e) { hit = e instanceof S.SingularMatrixError; }
+    if (!hit) throw new Error("no SingularMatrixError");
+});
 
 console.log("linear circuits");
 
@@ -668,6 +706,26 @@ test("op-amp follows a 1 kHz sine in transient (pole sits before the clamp)", ()
     near(Math.min(...out), -5, 0.3, "trough");
 });
 
+test("555 frequency is accurate to ~1 % even with a coarse step (event localisation)", () => {
+    const R1 = 1000, R2 = 10000, C = 0.1e-6;
+    const e = build(c => {
+        c.add(new VoltageSource("VCC", ["vcc", "0"], vdc(5)));
+        c.add(new Resistor("RA", ["vcc", "dis"], { r: R1 }));
+        c.add(new Resistor("RB", ["dis", "thr"], { r: R2 }));
+        c.add(new Capacitor("CT", ["thr", "0"], { c: C }));
+        c.add(new Timer555("U1", ["0", "thr", "out", "vcc", "vcc", "dis", "thr", "ctl"]));
+        c.add(new Capacitor("CC", ["ctl", "0"], { c: 10e-9 }));
+        c.add(new Resistor("RL", ["out", "0"], { r: 10000 }));
+    });
+    const r = e.transient({ tStop: 0.02, tStep: 10e-6, uic: true });
+    const rising = [];
+    r.nodeHistories.out.forEach((v, i) => { if (i && r.nodeHistories.out[i - 1] < 2.5 && v >= 2.5) rising.push(r.timePoints[i]); });
+    const f = (rising.length - 2) / (rising[rising.length - 1] - rising[1]);
+    // the ideal 555 gives 1.44/((R1+2R2)C); the 1.7 V output drop and CTRL cap shift it slightly
+    rel(f, 1.44 / ((R1 + 2 * R2) * C), 0.025, "frequency");
+    if (r.events < 6) throw new Error("expected comparator events, got " + r.events);
+});
+
 test("ring of three NOT gates oscillates (gate delay model)", () => {
     const e = build(c => {
         for (let i = 0; i < 3; i++) {
@@ -680,6 +738,29 @@ test("ring of three NOT gates oscillates (gate delay model)", () => {
     let edges = 0;
     for (let i = 1; i < v.length; i++) if (v[i - 1] < 2.5 && v[i] >= 2.5) edges++;
     if (edges < 3) throw new Error("only " + edges + " edges");
+});
+
+console.log("interop");
+
+test("a vendor .lib file adds selectable models that simulate", () => {
+    const { SimModelLibrary, SIM_MODELS } = S;
+    const r = SimModelLibrary.importText(`vendor models
+.model VND4148 D(IS=5n N=1.9 RS=0.9 CJO=3p)
+.model VNPN NPN(IS=3e-15 BF=300 VAF=90)
+.model VZ5V6 D(IS=1e-14 BV=5.6 IBV=20m RS=6)
+.model WEIRD JFET(VTO=-2)
+.end`);
+    if (!SIM_MODELS.D.VND4148 || !SIM_MODELS.BJT_NPN.VNPN) throw new Error("models not registered: " + r.added);
+    if (!SIM_MODELS.DZ.VZ5V6) throw new Error("zener-like diode should also be offered as a zener");
+    if (r.skipped.length !== 1) throw new Error("unsupported JFET should be reported, got " + r.skipped);
+    const e = build(c => {
+        c.add(new VoltageSource("V1", ["in", "0"], vdc(5)));
+        c.add(new Resistor("R1", ["in", "d"], { r: 1000 }));
+        c.add(new Diode("D1", ["d", "0"], simModel("D", "VND4148").params));
+    });
+    const vd = e.operatingPoint().nodeVoltages.d;
+    if (vd < 0.5 || vd > 1.0) throw new Error("Vd = " + vd);
+    if (!/^\.model VND4148 D\(IS=5e-9/.test(simModelCard("D", "VND4148"))) throw new Error(simModelCard("D", "VND4148"));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

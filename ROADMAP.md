@@ -15,10 +15,10 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 | Area | State |
 | --- | --- |
 | Schematic editor | Proteus-style wiring (A* router, rubber-banding, junctions), placement ghost, box/multi-select, copy/paste, zoom/pan, undo |
-| Simulation | Built-in SPICE engine: OP, DC sweep, transient, AC. R C L V, diode/LED/zener, BJT, MOSFET, op-amp, gates, 555 |
-| Accuracy | 42 engine tests; 11 reference decks within ~1 % of ngspice; AC to 0.004 dB |
-| Interop | SPICE `.cir` export (models, op-amp and 555 macros) and import (into an editable schematic); ngspice-WASM backend |
-| Examples | 8 working circuits with probes |
+| Simulation | Built-in SPICE engine: OP, DC sweep, transient (adaptive, event-exact), AC, temperature, sparse LU. R C L V I, E/G sources, switch, pot, diode/LED/zener, BJT, MOSFET, op-amp, gates, 555 |
+| Accuracy | 46 engine tests; 16 reference decks within ~1 % of ngspice (OP, transient, AC, temperature, `.ic`); built-in vs ngspice-WASM agree on every example |
+| Interop | SPICE `.cir` export (models, op-amp and 555 macros, PWL, controlled sources) and import (into an editable schematic, `.param`, `.ic`); vendor `.model` libraries; ngspice-WASM backend |
+| Examples | 10 working circuits with probes |
 
 ## Next, in order
 
@@ -34,7 +34,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
   74xx, simple microcontroller model) bridged to the analog solver.
 - **Analyses**: DC sweep UI, parametric sweep, Monte Carlo, temperature, noise, Fourier, Bode
   with phase and margins.
-- **Convergence**: sparse LU for big circuits, LTE-adaptive time-stepping, `.ic` / `.nodeset`.
+- **Convergence**: symbolic reuse in the sparse LU (it re-orders every iteration today), `.nodeset`.
 
 ### 2. Industry-standard interchange
 - **SPICE**: `.include` / `.lib` vendor models, `.subckt` as hierarchical sheets, `.param`,

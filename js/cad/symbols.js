@@ -13,8 +13,16 @@ const GATE2 = {
     box: [-40, -30, 40, 30]
 };
 
+const FOUR_PIN = {
+    // controlled sources: control pair on the left, output pair on the right
+    pins: [["C+", -40, -20, -1, 0], ["C-", -40, 20, -1, 0], ["O+", 40, -20, 1, 0], ["O-", 40, 20, 1, 0]],
+    box: [-40, -40, 40, 40]
+};
+
 const SYMBOL_DEFS = {
-    R: TWO_PIN, C: TWO_PIN, L: TWO_PIN, V: TWO_PIN,
+    R: TWO_PIN, C: TWO_PIN, L: TWO_PIN, V: TWO_PIN, I: TWO_PIN, SW: TWO_PIN,
+    E: FOUR_PIN, G: FOUR_PIN,
+    POT: { pins: [["A", -40, 0, -1, 0], ["B", 40, 0, 1, 0], ["W", 0, -40, 0, -1]], box: [-40, -40, 40, 30] },
     D: TWO_PIN, DZ: TWO_PIN, LED: TWO_PIN,
     BJT_NPN: THREE_PIN,
     BJT_PNP: THREE_PIN,

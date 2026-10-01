@@ -3,7 +3,7 @@
 //   (0, eval)(await (await fetch('tests/roundtrip.js')).text()); await roundtripTests();
 
 window.roundtripTests = async function () {
-    const decks = ["ce_amp", "cs_amp", "diode_clipper", "bridge_rect", "cmos_inv", "darlington", "zener_reg", "npn_switch", "rlc_ring", "diff_pair"];
+    const decks = ["ce_amp", "cs_amp", "diode_clipper", "bridge_rect", "cmos_inv", "darlington", "zener_reg", "npn_switch", "rlc_ring", "diff_pair", "ic_rlc", "controlled", "pwl_current", "mixed_sources"];
     const results = [];
 
     for (const id of decks) {
@@ -24,7 +24,7 @@ window.roundtripTests = async function () {
             const tran = deck.analyses.find(a => a.type === "tran");
             let worst = 0;
             if (tran) {
-                const a = dEng.transient({ tStop: tran.tStop, tStep: tran.tStep, uic: tran.uic });
+                const a = dEng.transient({ tStop: tran.tStop, tStep: tran.tStep, uic: tran.uic, nodeIC: deck.ic });
                 const b = sEng.transient({ tStop: tran.tStop, tStep: tran.tStep, uic: tran.uic });
                 // compare the probes that exist in both: element currents are name-matched
                 const names = Object.keys(a.currentHistories).filter(n => b.currentHistories[n]);
