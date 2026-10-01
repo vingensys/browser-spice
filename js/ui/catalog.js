@@ -6,7 +6,8 @@ const DeviceCatalog = {
     categories: [
         "Resistors", "Capacitors", "Inductors", "Diodes", "Optoelectronics", "Transistors",
         "Operational Amplifiers", "Analog ICs", "Voltage Regulators", "Thyristors", "Switches & Relays", "Electromechanical",
-        "Simulator Primitives", "Generators", "Instruments", "Terminals", "Logic Gates", "Digital ICs", "Miscellaneous"
+        "Simulator Primitives", "Generators", "Instruments", "Terminals", "Logic Gates", "Gate Packages", "Flip-Flops & Latches",
+        "Counters", "Shift Registers", "Decoders & Multiplexers", "Arithmetic", "Display Drivers", "Digital ICs", "Miscellaneous"
     ],
 
     generics() {

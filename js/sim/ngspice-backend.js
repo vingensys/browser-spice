@@ -38,7 +38,7 @@ class NgspiceBackend {
 
     // Parts the exported deck cannot express (they would silently vanish from the run)
     static unsupported(info) {
-        return (info.elements || []).filter(e => ["SCR", "TRIAC", "FF"].includes(e.kind)).map(e => e.name);
+        return (info.elements || []).filter(e => ["SCR", "TRIAC", "FF", "DIGITAL"].includes(e.kind)).map(e => e.name);
     }
 
     // ngspice writes its progress and convergence chatter to the console; capture it so it

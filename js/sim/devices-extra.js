@@ -388,6 +388,95 @@ class CCCS extends NonlinearElement {
 }
 
 
+// ------------------------------------------------------------- digital ICs
+
+// A 74xx / 4000-series chip from js/sim/logic-ics.js. Pins are sampled against vcc / 2, the chip's pure
+// state machine is stepped when the engine accepts a time point, and the outputs are driven through ro
+// toward 0 or vcc (or left floating for a three-state "Z"). Like the flip-flop it reports an event when
+// anything would change, so the engine lands exactly on the clock edge before the new outputs appear.
+// Inputs left open read as the chip's pull direction (see LogicIC.pullsUp). nodes follow LogicIC.pins(spec).
+class DigitalIC extends Element {
+    constructor(name, nodes, spec, { vcc = 5, ro = 50 } = {}) {
+        super(name, nodes);
+        this.spec = spec;
+        this.pins = LogicIC.pins(spec);
+        this.vcc = vcc;
+        this.ro = ro;
+        // nonlinear only so DC analyses iterate: with no clock the outputs follow the inputs, and the
+        // solver has to settle that fixed point. Transient runs use the event-driven state instead.
+        this.nonlinear = true;
+        this.hasEvents = true;
+        this.dcOut = null;
+        // power-up outputs (inputs at their open-circuit levels) so the operating point already drives them
+        const open = {};
+        spec.left.forEach(pin => { open[pin] = LogicIC.pullsUp(spec, pin) ? 1 : 0; });
+        const r = spec.step(spec.init(), open, open);
+        this.st = r.st;
+        this.out = r.out;
+        this.prev = open;
+    }
+
+    levels(ctx) {
+        const v = {};
+        this.spec.left.forEach((pin, i) => { v[pin] = ctx.v(this.n[i]) > this.vcc / 2 ? 1 : 0; });
+        return v;
+    }
+
+    stamp(ctx) {
+        const s = ctx.sys, G = 1 / this.ro, gpu = 1e-6;
+        const nl = this.spec.left.length;
+        this.spec.left.forEach((pin, i) => {
+            const node = this.n[i];
+            if (LogicIC.pullsUp(this.spec, pin)) { s.add(node, node, gpu); s.rhs(node, gpu * this.vcc); }   // open input floats high
+            else s.addG(node, -1, gpu);
+        });
+        let out = this.out;
+        if (ctx.mode !== "tran") {
+            const v = this.levels(ctx);
+            out = this.spec.step(this.st, v, v).out;
+            if (this.dcOut && JSON.stringify(out) !== JSON.stringify(this.dcOut)) ctx.noncon = true;   // keep iterating until it settles
+            this.dcOut = out;
+        }
+        this.spec.right.forEach((pin, i) => {
+            const lvl = out[pin];
+            if (lvl === "Z" || lvl === undefined) return;
+            const node = this.n[nl + i];
+            s.add(node, node, G);
+            s.rhs(node, G * (lvl ? this.vcc : 0));
+        });
+    }
+
+    beginSolve() { this.dcOut = null; }
+
+    // in AC the chip is a set of fixed levels: its outputs hold their node, inputs draw nothing
+    stampAC(ac) {
+        const nl = this.spec.left.length;
+        this.spec.right.forEach((pin, i) => { if (this.out[pin] !== "Z") ac.addY(this.n[nl + i], -1, 1 / this.ro, 0); });
+    }
+
+    evaluate(ctx) { return this.spec.step(this.st, this.levels(ctx), this.prev); }
+
+    wouldFlip(ctx) {
+        const r = this.evaluate(ctx);
+        return JSON.stringify(r.out) !== JSON.stringify(this.out) || JSON.stringify(r.st) !== JSON.stringify(this.st);
+    }
+
+    initState(ctx) {
+        this.st = this.spec.init();
+        const v = this.levels(ctx);
+        this.prev = v;                                   // no edges at power-up
+        const r = this.spec.step(this.st, v, v);
+        this.st = r.st; this.out = r.out;
+    }
+
+    accept(ctx) {
+        const r = this.evaluate(ctx);
+        this.st = r.st; this.out = r.out;
+        this.prev = this.levels(ctx);
+    }
+}
+
+
 // ------------------------------------------------------------ flip-flops
 
 // Edge-triggered flip-flop with asynchronous set / reset (active high).

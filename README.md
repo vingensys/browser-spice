@@ -44,7 +44,7 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 - **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
 - **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
-- **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter.
+- **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
 
 **Your work is kept**
 
@@ -66,12 +66,13 @@ NPN / PNP BJTs, N / P MOSFETs (level 1 with body diode, gate capacitance, series
 logic gates (AND OR NOT NAND NOR XOR XNOR BUF, with propagation delay), D / T / JK flip-flops (rising edge, async set / reset), NE555,
 SCR and TRIAC (latching, gate trigger, holding current), relay (coil + contact with pull-in / drop-out), fuse (blows on I²t),
 voltage regulators (78xx, 79xx, LM317 / LM337, LDOs with dropout), lamp, buzzer, motor, crystal, battery, 7-segment display,
+37 logic ICs (7474, 74112, 74175, 74273, 74373, 74374 flip-flops and latches; 7490, 7493, 74160-74163, 74193, 74393, 4017, 4040 counters; 74164, 74165, 74194, 74595 shift registers; 74138, 74139, 74148, 74151, 74153, 74157 decoders and multiplexers; 7447, 4511 display drivers; 7483, 7485, 74244; 7400/02/04/08/32/86 gate packages) with no power pins to wire and sensible defaults for open inputs,
 LDR, NTC / PTC thermistors, varistor, rheostat and photodiode (their light / temperature / setting can be changed while a simulation runs),
 phototransistor optocouplers (4N25, 4N35, PC817 ...), and power ports / net labels (same name = same net, no wire needed).
 
 **Sources** (Generators mode, Tool > Place Source, or Pick Devices; the symbol shows the waveform): DC, sine, pulse, square / clock (duty cycle), triangle, sawtooth, exponential (`EXP`), frequency-modulated (`SFFM`), piecewise-linear; current sources too.
 
-**Library**: about 220 named parts, with parameters taken from public vendor SPICE models and datasheets (see the comments in
+**Library**: about 260 named parts, with parameters taken from public vendor SPICE models and datasheets (see the comments in
 `js/sim/models-extra.js` for sources and what was fitted). Pick them with **P**. `.model` cards from vendor files can be imported
 (Import SPICE with a model-only file, NJF / PJF included) and are remembered between sessions.
 
@@ -86,7 +87,7 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 
 ## Layout
 
-- `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops), `models`, `models-extra` / `models-parts` (library), `model-library`, `engine`, `spice-parser`, `ngspice-backend`
+- `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops, logic ICs), `logic-ics` (the 74xx / 4000 state machines), `models`, `models-extra` / `models-parts` (library), `model-library`, `engine`, `spice-parser`, `ngspice-backend`
 - `js/cad/` editor internals: `symbols` (pins and bodies), `parts` (the added parts: symbol, properties, netlist, library entries), `router` (A* + rubber-band repair), `symbol-draw`
 - `js/visualization/` schematic editor, waveform plotter and the graph maths (`plot-math`)
 - `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
@@ -105,6 +106,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
   sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
+- `tests/logic.test.js` every logic IC against its truth table / count sequence.
 - `tests/plot.test.js` the graph maths (interpolation, statistics, frequency, edges, AC figures, CSV).
 
 Browser suites (load in the running app and call from the console):

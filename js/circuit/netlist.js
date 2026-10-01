@@ -213,7 +213,8 @@ class NetlistExtractor {
             }
             const unwired = editor.getTerminals(comp)
                 .filter(t => !nets.wired.has(`${comp.id}:${t.name}`)).map(t => t.name);
-            if (unwired.length && comp.type !== "SCOPE") warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
+            const quiet = typeof PartLib !== "undefined" && PartLib.defs[comp.type] && PartLib.defs[comp.type].quietPins;
+            if (unwired.length && comp.type !== "SCOPE" && !quiet) warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
 
             switch (comp.type) {
                 case "R":
@@ -431,6 +432,7 @@ class NetlistExtractor {
                 case "SCR": case "TRIAC": c.add(new Thyristor(e.name, e.nodes, p)); break;
                 case "REG": c.add(new Regulator(e.name, e.nodes, p)); break;
                 case "FF": c.add(new FlipFlop(e.name, e.nodes, e.ff, p)); break;
+                case "DIGITAL": c.add(new DigitalIC(e.name, e.nodes, LOGIC_ICS[e.ic], p)); break;
                 case "CCCS": c.add(new CCCS(e.name, e.nodes, { ctrl: e.ctrl, gain: p.gain, vsat: p.vsat })); break;
             }
         }
@@ -629,8 +631,8 @@ class NetlistExtractor {
                     lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} I=${f(p.gain)}*I(${sense})*tanh(V(${n[0]},${n[1]})/${f(p.vsat)})`);
                     break;
                 }
-                case "SCR": case "TRIAC": case "FF":
-                    lines.push(`* ${e.name}: ${e.kind === "FF" ? "flip-flop" : e.kind} has no SPICE model in this export (built-in simulator only)`);
+                case "SCR": case "TRIAC": case "FF": case "DIGITAL":
+                    lines.push(`* ${e.name}: ${e.kind === "FF" ? "flip-flop" : (e.kind === "DIGITAL" ? e.ic + " logic IC" : e.kind)} has no SPICE model in this export (built-in simulator only)`);
                     break;
                 case "555":
                     uses555 = true;

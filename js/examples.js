@@ -364,6 +364,42 @@ const EXAMPLES = [
         }
     },
     {
+        id: "counter-7seg",
+        name: "Counter with 7-segment display (74161 + 7447)",
+        note: "A 10 Hz clock drives a 74161 4-bit counter; a 7447 decodes it for a common-anode display. Press Play: the digit counts 0 to F (live speed 0.1x = about one count per second). Open inputs need no wires.",
+        settings: { tStop: "2", tStep: "1m" },
+        build(b) {
+            const ck = b.part("V", 140, 360, { rot: 270, sourceType: "SQUARE", gen: { low: 0, high: 5, freq: 10, duty: 50 } });
+            const g = b.part("GND", 140, 460);
+            const cnt = b.part("74161", 400, 360, {});
+            const dec = b.part("7447", 700, 340, {});
+            const ds = b.part("SEG7", 1000, 340, { common: "anode", color: "RED", value: "7SEG-CA" });
+            const rl = b.part("R", 1140, 320, { rot: 90, value: "100 Ω" });
+            const vcc = b.part("POWER", 1140, 220, { net: "VCC", volts: "5" });
+            b.wire(ck, "2", cnt, "CLK"); b.wire(ck, "1", g, "1");
+            ["QA", "QB", "QC", "QD"].forEach((q, i) => b.wire(cnt, q, dec, "ABCD"[i]));
+            "abcdefg".split("").forEach(sg => b.wire(dec, sg, ds, sg));
+            b.wire(ds, "COM", rl, "2"); b.wire(rl, "1", vcc, "1");
+            ["QA", "QB", "QC", "QD"].forEach((q, i) => b.vprobe(cnt, q, q));
+        }
+    },
+    {
+        id: "shift-register",
+        name: "Shift register (74164 serial in, parallel out)",
+        note: "A single 1 is clocked into a 74164 and marches along its eight outputs. Press Play and watch the LIVE graph, or run a transient.",
+        settings: { tStop: "1.6", tStep: "1m" },
+        build(b) {
+            const ck = b.part("V", 140, 380, { rot: 270, sourceType: "SQUARE", gen: { low: 0, high: 5, freq: 10, duty: 50 } });
+            const data = b.part("V", 140, 560, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 0.02, rise: 1e-4, fall: 1e-4, width: 0.1, period: 1 } });
+            const g1 = b.part("GND", 140, 460), g2 = b.part("GND", 140, 640);
+            const sr = b.part("74164", 460, 440, {});
+            const vcc = b.part("POWER", 300, 280, { net: "VCC", volts: "5" });
+            b.wire(data, "2", sr, "A"); b.wire(vcc, "1", sr, "B"); b.wire(ck, "2", sr, "CLK");
+            b.wire(ck, "1", g1, "1"); b.wire(data, "1", g2, "1");
+            "ABCDEFGH".split("").forEach(c => b.vprobe(sr, "Q" + c, "Q" + c));
+        }
+    },
+    {
         id: "boost",
         name: "Boost converter (switching)",
         note: "5 V to about 9.7 V with an IRF540 switched at 50 kHz. Run Transient for 5 ms.",

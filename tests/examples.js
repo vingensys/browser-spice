@@ -182,6 +182,29 @@ window.exampleTests = function () {
         near(edges[0], 10, 1, "Q0 edges in 20 ms (500 Hz)"); near(edges[1], 5, 1, "Q1"); near(edges[2], 2.5, 1, "Q2");
     });
 
+    check("counter-7seg: the 74161 counts the clock and the 7447 shows the digit", () => {
+        const { info, sim } = load("counter-7seg");
+        const r = sim.transient({ tStop: 0.5, tStep: 1e-3, uic: true });
+        const q = (t) => ["QA", "QB", "QC", "QD"].reduce((a, n, i) => a | ((r.nodeHistories[nodeOf(info, "U1", n)][r.timePoints.findIndex(x => x >= t)] > 2.5 ? 1 : 0) << i), 0);
+        // 10 Hz square clock, high first: rising edges at 0, 100, 200 ... ms
+        near(q(0.05), 1, 0, "after the first edge"); near(q(0.15), 2, 0, "after 2"); near(q(0.35), 4, 0, "after 4"); near(q(0.45), 5, 0, "after 5");
+        // the displayed segments after five counts: a, c, d, f, g lit (a "5")
+        const seg = (n, t) => r.nodeHistories[nodeOf(info, "U2", n)][r.timePoints.findIndex(x => x >= t)] < 2.5;   // active low: low = lit
+        const lit = "abcdefg".split("").filter(n => seg(n, 0.45)).join("");
+        if (lit !== "acdfg") throw new Error("display shows segments " + lit);
+    });
+
+    check("shift-register: a single 1 marches along the 74164 outputs", () => {
+        const { info, sim } = load("shift-register");
+        const r = sim.transient({ tStop: 1.0, tStep: 1e-3, uic: true });
+        const at = (n, t) => r.nodeHistories[nodeOf(info, "U1", n)][r.timePoints.findIndex(x => x >= t)] > 2.5;
+        // clock edges at 0, 100, 200 ... ms; the data pulse is high 20-120 ms, so only the edge at 100 ms samples a 1
+        const hot = (t) => "ABCDEFGH".split("").filter(c => at("Q" + c, t)).join("");
+        if (hot(0.05) !== "") throw new Error("nothing yet: " + hot(0.05));
+        if (hot(0.15) !== "A") throw new Error("after the edge at 100 ms: " + hot(0.15));
+        if (hot(0.25) !== "B" || hot(0.55) !== "E") throw new Error("the 1 marches one place per edge: " + hot(0.25) + " / " + hot(0.55));
+    });
+
     // ngspice (WASM) backend vs the built-in engine on the 555 oscillator
     const pending = (async () => {
         try {

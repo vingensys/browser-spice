@@ -8,19 +8,19 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const files = [
     "js/utils/complex.js", "js/utils/units.js",
-    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js",
+    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/logic-ics.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js",
     "js/sim/spice-parser.js", "js/sim/model-library.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const S = new Function(src + `
 return { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
          Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard, Complex,
-         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, Switch, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
+         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, DigitalIC, LOGIC_ICS, Switch, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
 if (process.env.SPARSE) S.SPARSE_THRESHOLD.n = 0; // force the sparse solver for every circuit
 
 const { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
     Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard,
-    JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS } = S;
+    JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, DigitalIC, LOGIC_ICS } = S;
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -944,6 +944,55 @@ test("current-controlled current source: optocoupler transfer and saturation", (
     near(lin.vout, 5 - 0.0032 * 470, 0.15, "linear region");
     const sat = run(10000);
     if (!(sat.vout >= -0.01 && sat.vout < 0.15)) throw new Error("saturated output should sit near 0 V, got " + sat.vout);
+});
+
+test("digital ICs in the analog engine: 74161 counter, ripple BCD, shift register, decoder (DC and transient)", () => {
+    const clock = (f, v = 5) => ({ wave: Waveform.pulse({ v1: 0, v2: v, delay: 0.25 / f, rise: 1e-9, fall: 1e-9, width: 0.5 / f, period: 1 / f }) });
+    const level = (x) => (x > 2.5 ? 1 : 0);
+    const nibble = (r, names, t) => names.reduce((a, n, i) => a | (level(r.nodeHistories[n][r.timePoints.findIndex(x => x >= t)]) << i), 0);
+
+    // 74161 counting a 1 kHz clock: rising edges at 0.25, 1.25, 2.25 ms ...
+    const c = new SimCircuit();
+    c.add(new VoltageSource("CK", ["ck", "0"], clock(1000)));
+    c.add(new DigitalIC("U1", ["0", "0", "0", "0", "ck", "hi", "hi", "hi", "hi", "qa", "qb", "qc", "qd", "rco"], LOGIC_ICS["74161"], { vcc: 5 }));
+    c.add(new VoltageSource("VH", ["hi", "0"], vdc(5)));
+    const r = new SimEngine(c).transient({ tStop: 20.5e-3, tStep: 20e-6 });
+    const q = (t) => nibble(r, ["qa", "qb", "qc", "qd"], t);
+    if (q(0.1e-3) !== 0) throw new Error("starts at 0: " + q(0.1e-3));
+    for (const [t, n] of [[0.6e-3, 1], [2.6e-3, 3], [9.6e-3, 10], [15.6e-3, 0], [16.6e-3, 1]]) {
+        if (q(t) !== n) throw new Error(`count at ${t * 1e3} ms: expected ${n}, got ${q(t)}`);
+    }
+
+    // ripple BCD: 7490 with QA wired to CKB counts to 9 and wraps
+    const d = new SimCircuit();
+    d.add(new VoltageSource("CK", ["ck", "0"], clock(1000)));
+    d.add(new DigitalIC("U1", ["ck", "qa", "0", "0", "0", "0", "qa", "qb", "qc", "qd"], LOGIC_ICS["7490"], { vcc: 5 }));
+    const rd = new SimEngine(d).transient({ tStop: 12.5e-3, tStep: 20e-6 });
+    const bcd = (t) => nibble(rd, ["qa", "qb", "qc", "qd"], t);
+    // 7490 counts on the FALLING edge of CKA: falls at 0.75, 1.75 ...
+    for (const [t, n] of [[0.9e-3, 1], [4.9e-3, 5], [8.9e-3, 9], [9.9e-3, 0], [10.9e-3, 1]]) {
+        if (bcd(t) !== n) throw new Error(`BCD at ${t * 1e3} ms: expected ${n}, got ${bcd(t)}`);
+    }
+
+    // 74164 shifts a serial pattern in: data 1,0,1,1 sampled on the rising edges
+    const sr = new SimCircuit();
+    sr.add(new VoltageSource("CK", ["ck", "0"], clock(1000)));
+    sr.add(new VoltageSource("DA", ["da", "0"], { wave: Waveform.pwl([[0, 5], [1.0e-3, 5], [1.001e-3, 0], [2.0e-3, 0], [2.001e-3, 5], [4.0e-3, 5], [4.001e-3, 0], [8e-3, 0]]) }));
+    sr.add(new VoltageSource("VH", ["hi", "0"], vdc(5)));
+    sr.add(new DigitalIC("U1", ["da", "hi", "ck", "hi", "qa", "qb", "qc", "qd", "qe", "qf", "qg", "qh"], LOGIC_ICS["74164"], { vcc: 5 }));
+    const rs = new SimEngine(sr).transient({ tStop: 5e-3, tStep: 20e-6 });
+    const reg = nibble(rs, ["qa", "qb", "qc", "qd"], 4.2e-3);
+    // rising edges at 0.25 (D=1), 1.25 (D=0), 2.25 (D=1), 3.25 (D=1): QA = newest, so QA..QD = 1,1,0,1
+    if (reg !== 0b1011) throw new Error("shift register holds " + reg.toString(2));
+
+    // combinational: a 3-to-8 decoder from DC sources, in the operating point
+    const dec = new SimCircuit();
+    for (const [n, v] of [["a", 5], ["b", 0], ["c", 5], ["g", 5]]) dec.add(new VoltageSource("V" + n, [n, "0"], vdc(v)));
+    const pins = ["a", "b", "c", "g", "0", "0", ...Array.from({ length: 8 }, (_, i) => "y" + i)];
+    dec.add(new DigitalIC("U1", pins, LOGIC_ICS["74138"], { vcc: 5 }));
+    const op = new SimEngine(dec).operatingPoint().nodeVoltages;
+    const low = Array.from({ length: 8 }, (_, i) => i).filter(i => op["y" + i] < 1);
+    if (low.join() !== "5") throw new Error("decoder output low: " + low.join() + " " + JSON.stringify(op));
 });
 
 test("EXP and SFFM waveforms", () => {

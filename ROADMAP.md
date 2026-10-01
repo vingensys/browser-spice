@@ -31,7 +31,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 - **Virtual instruments**: oscilloscope, function generator, DC voltmeter / ammeter, logic
   analyser as placeable parts (the plot panel becomes the scope).
 - **More parts** (done: relay, transformer, fuse, JFET, SCR / TRIAC, regulators, 7-segment, crystal, buzzer). Also done: LDR, thermistors, varistor, rheostat, photodiode, optocoupler, power ports / net labels.
-  Still to do: LED brightness, counters / shift registers / 74xx, microcontroller model, Darlingtons, more op-amps.
+  Also done: 37 logic ICs (counters, shift registers, decoders, multiplexers, display drivers, adders). Still to do: LED brightness, memories, microcontroller model, Darlingtons, more op-amps.
 - **Digital + mixed-signal**: event-driven logic (flip-flops, counters, shift registers,
   74xx, simple microcontroller model) bridged to the analog solver.
 - **Analyses**: DC sweep UI, parametric sweep, Monte Carlo, temperature, noise, Fourier, Bode

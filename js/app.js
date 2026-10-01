@@ -69,7 +69,8 @@
             if (c.type === "GND") continue;
             for (const t of editor.getTerminals(c)) {
                 const wired = nets.wired.has(`${c.id}:${t.name}`);
-                if (!wired && c.type !== "NODEIC") issues.push(["warn", `${c.name}: pin ${t.name} is not connected.`]);
+                const quiet = PartLib.defs[c.type] && PartLib.defs[c.type].quietPins;
+                if (!wired && c.type !== "NODEIC" && !quiet) issues.push(["warn", `${c.name}: pin ${t.name} is not connected.`]);
                 const net = nets.terminalNode(c, t.name);
                 if (net && net !== "0") pinCount.set(net, (pinCount.get(net) || 0) + 1);
             }

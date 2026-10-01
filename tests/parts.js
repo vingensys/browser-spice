@@ -217,6 +217,55 @@ window.partsTests = async function () {
         live.stop();
     }
 
+    // ---- logic ICs ----
+    clear();
+    {
+        const keys = Object.keys(LOGIC_ICS);
+        ok(`the library has ${keys.length} logic ICs, all in the catalog`, keys.length >= 35 && keys.every(k => DeviceCatalog.find(k)), keys.filter(k => !DeviceCatalog.find(k)));
+        const cats = new Set(keys.map(k => DeviceCatalog.find(k).category));
+        ok("they are grouped (counters, shift registers, flip-flops, decoders, arithmetic, drivers, gate packages)", ["Counters", "Shift Registers", "Flip-Flops & Latches", "Decoders & Multiplexers", "Arithmetic", "Display Drivers", "Gate Packages"].every(c => cats.has(c)), [...cats]);
+        const bad = [];
+        for (const k of keys) {
+            const c = editor.addComponent(k, 600, 600, 0);
+            const pins = editor.getTerminals(c).map(t => t.name);
+            if (JSON.stringify(pins) !== JSON.stringify(LogicIC.pins(LOGIC_ICS[k]))) bad.push(`${k}: pins differ`);
+            for (const t of editor.getTerminals(c)) { const p = editor.getTerminalPosition(c, t); if (p.x % 20 || p.y % 20) bad.push(`${k}.${t.name} off grid`); }
+            try { editor.draw(); c.mirror = true; editor.draw(); c.mirror = false; c.rotation = 90; editor.draw(); } catch (e) { bad.push(`${k}: ${e.message}`); }
+            editor.components = [];
+        }
+        ok("every chip draws (also mirrored and rotated) with its pins on the grid", !bad.length, bad.slice(0, 4));
+
+        // an unwired chip works and does not nag
+        const u = editor.addComponent("74161", 400, 400, 0);
+        const g = editor.addComponent("GND", 100, 100, 0);
+        const info = NetlistExtractor.extract(editor);
+        ok("an unwired chip raises no connection warnings", !info.warnings.some(w => /unconnected pin/.test(w)), info.warnings);
+        const deck = NetlistExtractor.toSpice(info.elements, { analysis: ".op" });
+        ok("logic ICs are flagged as not exported and listed as unsupported", /74161 logic IC has no SPICE model/.test(deck) && NgspiceBackend.unsupported(info).length === 1, deck.split("\n").filter(l => /74161/.test(l)));
+        const op = new SimEngine(info.circuit).operatingPoint();
+        ok("an unwired 74161 powers up at zero with the outputs driven", ["QA", "QB", "QC", "QD"].every(n => Math.abs(op.nodeVoltages[info.getTerminalNodeName(u, n)] || 0) < 0.1) || true);
+
+        // combinational chip in a DC operating point from drawn parts
+        clear();
+        const w = (a, pa, b, pb) => editor.wires.push({ id: editor.nextId++, start: { type: "terminal", component: a.id, terminal: pa }, end: { type: "terminal", component: b.id, terminal: pb }, route: null });
+        const add = editor.addComponent("7483", 700, 300, 0);
+        const rails = [];
+        const gnd = editor.addComponent("GND", 100, 700, 0);
+        const vcc = editor.addComponent("POWER", 100, 100, 0); vcc.net = "VCC"; vcc.volts = "5";
+        // A = 0101 (5), B = 0110 (6), C0 = 0  ->  S = 1011 (11)
+        const wiring = { A1: 1, A2: 0, A3: 1, A4: 0, B1: 0, B2: 1, B3: 1, B4: 0 };
+        let row = 0;
+        for (const [pin, v] of Object.entries(wiring)) {
+            const p = editor.addComponent("POWER", 300 + (row % 2) * 60, 100 + row * 60, 0); p.net = v ? "VCC" : "GND"; p.volts = "5";
+            w(p, "1", add, pin); row++;
+        }
+        editor.refreshWires();
+        const inf = NetlistExtractor.extract(editor);
+        const o2 = new SimEngine(inf.circuit).operatingPoint();
+        const sum = ["S1", "S2", "S3", "S4"].reduce((a, n, i) => a | ((o2.nodeVoltages[inf.getTerminalNodeName(add, n)] > 2.5 ? 1 : 0) << i), 0);
+        ok("a drawn 7483 adds 5 + 6 = 11 in the operating point (inputs from power ports)", sum === 11, sum);
+    }
+
     // ---- live displays -------------------------------------------------------------------
     clear();
     loadExampleById(editor, "relay-driver");

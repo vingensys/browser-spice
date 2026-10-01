@@ -29,7 +29,8 @@ against Proteus / ngspice, **P3** polish.
 ## 2. Simulation
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| No event-driven digital: only gates and edge-triggered flip-flops. No counters, shift registers, 74xx library, memories, microcontroller | P2 | Proteus's main draw. |
+| ~~No counters / shift registers / 74xx~~ | P2 | **Done**: 37 logic ICs as event-driven state machines. Still missing: memories (RAM/ROM), 74181 ALU, monostables, bidirectional buses (74245), propagation delays, and a microcontroller. |
+| Logic ICs cannot be exported to SPICE | P3 | They run in the built-in engine only. |
 | No parametric sweep, Monte Carlo, noise, Fourier, `.measure` | P2 | |
 | BJT has no Gummel-Poon high-injection / resistances (ikf, rb, rc, re); MOSFET is level 1; JFET has constant capacitances | P2 | Vendor models using those parameters are approximated. |
 | `.include` / `.lib` and `.subckt` libraries cannot be loaded as hierarchy; `.subckt` is flattened; no B-source expression parser | P2 | |
@@ -70,6 +71,6 @@ against Proteus / ngspice, **P3** polish.
 ## Suggested order
 1. ~~Autosave and an unsaved-changes prompt (P1)~~ done.
 2. ~~Graph cursors, readouts and CSV export~~ done.
-3. Counters, shift registers and a 74xx set built on the flip-flop (P2).
+3. ~~Counters, shift registers and a 74xx set~~ done.
 4. Text annotation, title block and net highlighting (P2).
 5. ERC rules, then CI for the test suites.

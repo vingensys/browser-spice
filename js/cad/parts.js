@@ -445,7 +445,7 @@ for (const [type, kind, label] of [["DFF", "D", "D"], ["TFF", "T", "T"], ["JKFF"
 // 7-segment display: 8 LEDs sharing a common pin
 const SEGS = ["a", "b", "c", "d", "e", "f", "g"];
 PartLib.add("SEG7", {
-    prefix: "DS", value: "7SEG", props: { common: "cathode", color: "RED" },
+    prefix: "DS", value: "7SEG", props: { common: "cathode", color: "RED" }, quietPins: true,
     symbol: {
         pins: [...SEGS.map((s, i) => [s, -60, -60 + i * 20, -1, 0]), ["DP", 60, -20, 1, 0], ["COM", 60, 20, 1, 0]],
         box: [-60, -80, 60, 80]
@@ -725,6 +725,67 @@ for (const type of ["POWER", "NETLABEL"]) {
         catalog: []   // listed under Terminals
     });
 }
+
+// ====================================================== 74xx / 4000-series logic ICs
+
+// One part per chip in LOGIC_ICS. The symbol has the inputs down the left and the outputs down the right;
+// open inputs and unused outputs are fine (no connection warnings), the chip needs no power pins.
+function logicICGeometry(spec) {
+    const rows = Math.max(spec.left.length, spec.right.length);
+    const top = -20 * Math.ceil((rows + 1) / 2);
+    const bottom = top + 20 * (rows + 1);
+    const pins = [
+        ...spec.left.map((n, i) => [n, -80, top + 20 + 20 * i, -1, 0]),
+        ...spec.right.map((n, i) => [n, 80, top + 20 + 20 * i, 1, 0])
+    ];
+    return { top, bottom, symbol: { pins, box: [-80, top, 80, bottom] } };
+}
+
+// "1CLR_N" -> { text: "1CLR", bar: true }; "SH_LD_N" -> "SH/LD" barred
+function logicPinLabel(name) {
+    const bar = /_N$/.test(name);
+    return { text: name.replace(/_N$/, "").replace(/_/g, "/"), bar };
+}
+
+for (const [key, spec] of Object.entries(LOGIC_ICS)) {
+    const g = logicICGeometry(spec);
+    PartLib.add(key, {
+        prefix: "U", value: key, props: { vcc: "5" }, symbol: g.symbol, quietPins: true,
+        label: () => key,
+        draw(r, c) {
+            const ctx = r.ctx, col = "#f1fa8c";
+            ctx.strokeStyle = r.col(col); ctx.fillStyle = r.col("#171b23"); ctx.lineWidth = r.lw(3);
+            ctx.beginPath(); ctx.rect(-60, g.top, 120, g.bottom - g.top); ctx.fill(); ctx.stroke();
+            r.partText(key, 0, g.top + 9, { size: 11, bold: true, color: col });
+            const side = (names, sign) => names.forEach((name, i) => {
+                const y = g.top + 20 + 20 * i, { text, bar } = logicPinLabel(name);
+                const active = bar && (sign < 0 || !/^Q/.test(name) || true);
+                const x0 = sign * 60, x1 = sign * 80;
+                // lead (with a bubble where the pin is active low)
+                r.partLine([[x1, y], [x0 + sign * (bar ? 6 : 0), y]], col, 2);
+                if (bar) { ctx.beginPath(); ctx.arc(x0 + sign * 3, y, 3, 0, Math.PI * 2); ctx.fillStyle = r.col("#171b23"); ctx.fill(); ctx.strokeStyle = r.col(col); ctx.lineWidth = r.lw(1.5); ctx.stroke(); }
+                if (sign < 0 && spec.clocks.includes(name)) r.partLine([[-60, y - 5], [-52, y], [-60, y + 5]], col, 1.5);
+                const tx = sign * (clockPad(sign, name) ? 50 : 54), align = sign < 0 ? "left" : "right";
+                r.partText(text, tx, y, { size: 9, color: "#c8d0dc", align });
+                if (bar) {
+                    const w = ctx.measureText(text).width;
+                    r.partLine([[sign < 0 ? tx : tx - w, y - 6], [sign < 0 ? tx + w : tx, y - 6]], "#c8d0dc", 1);
+                }
+            });
+            const clockPad = (sign, name) => sign < 0 && spec.clocks.includes(name);
+            side(spec.left, -1);
+            side(spec.right, 1);
+            r.drawLabel(c);
+        },
+        rows: (p, c) => p.text("Supply / logic high (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5") +
+            `<div class="prop-note">${PropertiesPanel.esc(spec.desc)}. No power pins are needed. Inputs left open read high when active-low (barred), and enables read active, so an unwired chip works; unused outputs may stay open.</div>`,
+        netlist(c, k) {
+            return [{ ...k.base, kind: "DIGITAL", ic: key, nodes: LogicIC.pins(spec).map(n => k.pin(n)), params: { vcc: k.num(c.vcc, 5) } }];
+        },
+        catalog: [{ name: key, category: spec.category, desc: `${spec.desc}`, props: { vcc: "5", value: key } }]
+    });
+}
+
 
 // ------------------------------------------------------------- library hooks
 
