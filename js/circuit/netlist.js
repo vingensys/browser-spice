@@ -157,6 +157,22 @@ class NetlistExtractor {
             return x === 0 && (v === undefined || v === "" || v === null) ? fallback : x;
         };
 
+        // a value the user typed that cannot be used is reported instead of silently replaced
+        const positive = (comp, raw, fallback, what) => {
+            const x = Units.parseSI(raw);
+            if (raw !== undefined && raw !== null && String(raw).trim() !== "" && !(x > 0 && isFinite(x))) {
+                warnings.push(`${comp.name}: "${raw}" is not a valid ${what}; using ${fallback}`);
+                return fallback;
+            }
+            return x > 0 ? x : fallback;
+        };
+        const knownModel = (comp, kind) => {
+            const m = comp.model || SIM_DEFAULT_MODEL[kind];
+            if (!comp.customParams && SIM_MODELS[kind] && !SIM_MODELS[kind][m]) {
+                warnings.push(`${comp.name}: model "${m}" is not in the library; using ${SIM_DEFAULT_MODEL[kind]}`);
+            }
+        };
+
         const nodeIC = {};
         const instruments = [];
         for (const comp of editor.components) {
@@ -190,13 +206,13 @@ class NetlistExtractor {
 
             switch (comp.type) {
                 case "R":
-                    els.push({ ...base, kind: "R", nodes: [pin("1"), pin("2")], params: { r: P(comp.value, 1000) || 1000 } });
+                    els.push({ ...base, kind: "R", nodes: [pin("1"), pin("2")], params: { r: positive(comp, comp.value, 1000, "resistance") } });
                     break;
                 case "C":
-                    els.push({ ...base, kind: "C", nodes: [pin("1"), pin("2")], params: { c: P(comp.value, 1e-6) || 1e-6, ic: (comp.ic === undefined || comp.ic === "" || comp.ic === null) ? undefined : Units.parseSI(comp.ic) } });
+                    els.push({ ...base, kind: "C", nodes: [pin("1"), pin("2")], params: { c: positive(comp, comp.value, 1e-6, "capacitance"), ic: (comp.ic === undefined || comp.ic === "" || comp.ic === null) ? undefined : Units.parseSI(comp.ic) } });
                     break;
                 case "L":
-                    els.push({ ...base, kind: "L", nodes: [pin("1"), pin("2")], params: { l: P(comp.value, 1e-3) || 1e-3, ic: Units.parseSI(comp.ic) || 0 } });
+                    els.push({ ...base, kind: "L", nodes: [pin("1"), pin("2")], params: { l: positive(comp, comp.value, 1e-3, "inductance"), ic: Units.parseSI(comp.ic) || 0 } });
                     break;
                 case "V":
                     // pin 2 is the + terminal
@@ -217,7 +233,7 @@ class NetlistExtractor {
                     break;
                 case "POT": {
                     // two resistors on either side of the wiper
-                    const total = Units.parseSI(comp.value) || 10000;
+                    const total = positive(comp, comp.value, 10000, "resistance");
                     const pos = Math.min(1, Math.max(0, comp.position === undefined ? 0.5 : comp.position));
                     const rTop = Math.max(total * pos, 1e-3), rBot = Math.max(total * (1 - pos), 1e-3);
                     els.push({ kind: "R", name: `${comp.name}_A`, comp, nodes: [pin("A"), pin("W")], params: { r: rTop } });
@@ -227,12 +243,14 @@ class NetlistExtractor {
                 case "D":
                 case "LED":
                 case "DZ": {
+                    knownModel(comp, comp.type);
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
                     els.push({ ...base, kind: "D", model, modelKind: comp.type, nodes: [pin("1"), pin("2")], params: comp.customParams || simModel(comp.type, model).params });
                     break;
                 }
                 case "BJT_NPN":
                 case "BJT_PNP": {
+                    knownModel(comp, comp.type);
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
                     els.push({
                         ...base, kind: "Q", model, modelKind: comp.type, pol: comp.type === "BJT_NPN" ? 1 : -1,
@@ -242,6 +260,7 @@ class NetlistExtractor {
                 }
                 case "NMOS":
                 case "PMOS": {
+                    knownModel(comp, comp.type);
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
                     els.push({
                         ...base, kind: "M", model, modelKind: comp.type, pol: comp.type === "NMOS" ? 1 : -1,
@@ -250,6 +269,7 @@ class NetlistExtractor {
                     break;
                 }
                 case "OPAMP": {
+                    knownModel(comp, "OPAMP");
                     const model = comp.model || SIM_DEFAULT_MODEL.OPAMP;
                     const vp = comp.vcc !== undefined && comp.vcc !== "" ? Units.parseSI(comp.vcc) : 15;
                     const vn = comp.vee !== undefined && comp.vee !== "" ? Units.parseSI(comp.vee) : -15;

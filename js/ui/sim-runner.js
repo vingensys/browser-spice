@@ -13,6 +13,10 @@ class SimRunner {
         const num = (id, fallback) => {
             const input = this.el(id);
             const v = input ? Units.parseSI(input.value) : 0;
+            if (!(v > 0) && input && input.value.trim() !== "") {
+                const msg = `Simulation setting "${input.value}" is not a positive number; using ${Units.formatSI(fallback, "").replace(/\s/g, "")}`;
+                if (msg !== this.lastSettingWarning) { this.lastSettingWarning = msg; this.toast(msg, "warn"); }
+            }
             return v > 0 ? v : fallback;
         };
         return {

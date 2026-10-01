@@ -145,10 +145,10 @@ const ShortcutsDialog = {
             ["Place a part", "Pick in the device list, click to drop (R rotates, right-click stops)"],
             ["Wire", "Click or drag from a pin; click a pin or wire to finish; Esc cancels"],
             ["Select / move", "Click, Shift-click, drag a box; drag parts to move them"],
-            ["Edit a part", "Double-click it, or Ctrl+E"],
+            ["Edit a part", "Double-click it, or Ctrl+E"], ["Probes", "Click a probe to select, drag it to move it to another pin or wire, double-click to rename, Del to remove"], ["Right-click", "Menu for the part, wire, probe, selection or empty sheet under the pointer"],
             ["Rotate / mirror", "R / X (left-right) / Y (top-bottom)"], ["Delete", "Del"], ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
             ["Copy / Cut / Paste", "Ctrl+C / Ctrl+X / Ctrl+V"], ["Select all", "Ctrl+A"],
-            ["Zoom", "Mouse wheel, or + / −"], ["Fit to sheet contents", "F"], ["Pan", "Space-drag or middle-drag"],
+            ["Zoom", "Mouse wheel, + / −, or F6 / F7"], ["Pan sideways", "Shift + wheel"], ["Fit to sheet contents", "F or F8"], ["Pan", "Space-drag or middle-drag"],
             ["Tidy wires", "T"], ["Pick devices", "P"],
             ["Run / Pause / Stop simulation", "F12 / Pause / Shift+F12"], ["Step", "F10"],
             ["Run the graph analysis", "Space (with the graph window focused) or the Simulate button"]

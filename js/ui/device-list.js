@@ -90,6 +90,14 @@ class DevicePane {
             li.title = entry.desc || "";
             if (this.selected && this.selected.name === entry.name) li.classList.add("selected");
             li.onclick = () => this.select(entry);
+            li.oncontextmenu = (e) => {
+                e.preventDefault();
+                this.select(entry);
+                const items = [{ label: "Place", run: () => this.select(entry) }];
+                if (this.mode === "devices") items.push({ label: "Remove from list", run: () => this.removeSelected() });
+                items.push("-", { label: "Pick Devices…", key: "P", run: () => PickDialog.open(this) });
+                if (window.popupMenu) window.popupMenu(e, items);
+            };
             this.listEl.appendChild(li);
         }
         this.preview.render(this.selected);

@@ -161,6 +161,111 @@ window.uiTests = async function () {
         AppLog.entries.some(e => /no ground/i.test(e.text)) && AppLog.entries.some(e => /not connected/.test(e.text)));
     Dialog.close("test");
 
+    // ---- probes are real objects ----
+    reset();
+    loadExampleById(editor, "half-wave");
+    {
+        const pointer = (type, x, y, o = {}) => {
+            const r = editor.canvas.getBoundingClientRect();
+            editor.canvas.dispatchEvent(new (type === "contextmenu" ? MouseEvent : PointerEvent)(type, {
+                clientX: r.left + editor.panX + x * editor.zoom, clientY: r.top + editor.panY + y * editor.zoom,
+                button: o.button || 0, buttons: o.buttons === undefined ? (type === "pointerup" ? 0 : 1) : o.buttons, bubbles: true, pointerId: 1
+            }));
+        };
+        const pr = editor.probes[0];
+        pointer("pointerdown", pr.x, pr.y); pointer("pointerup", pr.x, pr.y);
+        ok("clicking a probe selects it", editor.selectedProbe && editor.selectedProbe.id === pr.id);
+
+        // it follows the part it is attached to
+        const owner = editor.components.find(c => editor.getTerminals(c).some(t => { const p = editor.getTerminalPosition(c, t); return p.x === pr.x && p.y === pr.y; }));
+        editor.selection = [owner]; editor.selectedProbe = null;
+        const info0 = NetlistExtractor.extract(editor);
+        const node0 = info0.getPointNodeName(pr.x, pr.y);
+        owner.x += 40; editor.refreshWires();
+        const info1 = NetlistExtractor.extract(editor);
+        ok("a voltage probe follows its pin when the part moves (and still reads the same net)", info1.getPointNodeName(pr.x, pr.y) === node0 && node0 !== "0", [node0, info1.getPointNodeName(pr.x, pr.y)]);
+        owner.x -= 40; editor.refreshWires();
+
+        // drag it onto another pin
+        const probe = editor.probes[0];
+        const orig = { x: probe.x, y: probe.y };
+        const other = editor.components.find(c => c.type !== "GND" && c !== editor.components.find(k => k.id === probe.anchor.component));
+        const t = editor.getTerminals(other)[0], tp = editor.getTerminalPosition(other, t);
+        pointer("pointerdown", probe.x, probe.y); pointer("pointermove", tp.x, tp.y); pointer("pointerup", tp.x, tp.y);
+        const moved = editor.probes[0];
+        ok("dragging a probe re-anchors it on the pin it is dropped on", moved.x === tp.x && moved.y === tp.y && moved.anchor && moved.anchor.component === other.id, [moved.x, moved.y, moved.anchor]);
+        editor.undo();
+        ok("probe moves are undoable", editor.probes[0].x === orig.x && editor.probes[0].y === orig.y);
+
+        // deleting what it measures removes it
+        const n = editor.probes.length;
+        const target = editor.components.find(c => c.id === editor.probes[0].anchor.component);
+        editor.selection = [target]; editor.removeSelected();
+        ok("deleting a part removes the probes attached to it", editor.probes.length === n - 1);
+        editor.undo();
+
+        // delete the probe itself
+        pointer("pointerdown", editor.probes[0].x, editor.probes[0].y); pointer("pointerup", editor.probes[0].x, editor.probes[0].y);
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true }));
+        ok("Delete removes a selected probe", editor.probes.length === n - 1);
+        editor.undo();
+        ok("... and undo brings it back", editor.probes.length === n);
+
+        // rename
+        const rp = editor.probes[0];
+        editor.onEditProbe(rp);
+        const input = document.querySelector("#probe-label"); input.value = "V(supply)";
+        document.querySelector(".dialog .btn.primary").click();
+        ok("double-click / rename edits the probe label", editor.probes.find(p => p.id === rp.id).label === "V(supply)");
+    }
+
+    // ---- context menus depend on the target ----
+    reset();
+    loadExampleById(editor, "ce-amp");
+    {
+        const menu = () => [...document.querySelectorAll("#contextMenu .ctx-item")].map(r => r.firstChild.textContent);
+        const rc = (x, y) => {
+            const r = editor.canvas.getBoundingClientRect();
+            editor.canvas.dispatchEvent(new MouseEvent("contextmenu", { clientX: r.left + editor.panX + x * editor.zoom, clientY: r.top + editor.panY + y * editor.zoom, button: 2, bubbles: true }));
+        };
+        const q = editor.components.find(c => c.type === "BJT_NPN");
+        rc(q.x, q.y);
+        let m = menu();
+        ok("part menu: edit, delete, rotate, mirror, current probe", ["Edit Properties", "Delete Object", "Rotate Clockwise", "Rotate 180°", "Mirror Left-Right", "Mirror Top-Bottom", "Add Current Probe"].every(x => m.includes(x)), m);
+        ok("right-click selects the part under the pointer", editor.selection.length === 1 && editor.selection[0] === q);
+        const w = editor.wires[0], mid = w.route[Math.floor(w.route.length / 2)];
+        rc(mid.x, mid.y); m = menu();
+        ok("wire menu: delete wire, redraw, voltage probe", ["Delete Wire", "Redraw Wire", "Add Voltage Probe Here"].every(x => m.includes(x)) && !m.includes("Rotate Clockwise"), m);
+        const pr = editor.probes[0];
+        rc(pr.x, pr.y); m = menu();
+        ok("probe menu: rename and delete", m.includes("Rename Probe") && m.includes("Delete Probe") && m.length === 2, m);
+        editor.clearSelection();
+        rc(20, 20); m = menu();
+        ok("empty-sheet menu: paste, undo, zoom, pick devices", ["Paste", "Undo", "Select All", "Zoom to Fit", "Pick Devices"].every(x => m.some(y => y.startsWith(x))), m);
+        editor.selection = editor.components.slice(0, 3);
+        rc(editor.components[0].x, editor.components[0].y); m = menu();
+        ok("multi-selection menu offers block operations", m.includes("Delete Objects") && m.includes("Cut"), m);
+        // the menu entry works
+        editor.selection = [q]; rc(q.x, q.y);
+        const rot0 = q.rotation;
+        [...document.querySelectorAll("#contextMenu .ctx-item")].find(r => r.firstChild.textContent === "Rotate Clockwise").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        ok("choosing a menu entry runs it", editor.components.find(c => c.type === "BJT_NPN").rotation === (rot0 + 90) % 360);
+        ok("the menu closes after a choice", document.getElementById("contextMenu").style.display === "none");
+        const sw = (() => { reset(); loadExampleById(editor, "pot-divider"); return editor.components.find(c => c.type === "SW"); })();
+        if (sw) { rc(sw.x, sw.y); ok("switch menu has Toggle Switch", menu().includes("Toggle Switch"), menu()); }
+    }
+
+    // ---- unusable values are reported, not silently replaced ----
+    reset();
+    loadExampleById(editor, "ce-amp");
+    {
+        editor.components.find(c => c.type === "R").value = "abc";
+        editor.components.find(c => c.type === "BJT_NPN").model = "NOPE";
+        const w = NetlistExtractor.extract(editor).warnings;
+        ok("an invalid resistance is flagged", w.some(x => /"abc" is not a valid resistance/.test(x)), w);
+        ok("an unknown model is flagged", w.some(x => /model "NOPE" is not in the library/.test(x)), w);
+    }
+
     reset();
     const failed = results.filter(x => !x.pass);
     return { total: results.length, failed: failed.length, failures: failed };

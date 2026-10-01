@@ -489,6 +489,7 @@ class SchematicRouter {
         for (const wire of [...direct, ...junctions]) {
             this.updateWire(wire, this.buildRouteContext(wire));
         }
+        if (this.syncProbes) this.syncProbes();
     }
 
     rerouteAllWires() {

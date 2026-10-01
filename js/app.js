@@ -49,7 +49,7 @@
     };
 
     const zoom = (f) => editor.zoomAt(editor.width / 2, editor.height / 2, f);
-    const hasSel = () => editor.selection.length > 0 || !!editor.selectedWire;
+    const hasSel = () => editor.selection.length > 0 || !!editor.selectedWire || !!editor.selectedProbe;
 
     // --------------------------------------------------------------- electrical rules
 
@@ -128,6 +128,7 @@
     C("edit.selectall", "Select All", { keys: "Ctrl+A", run: () => editor.selectAll() });
     C("edit.rotate", "Rotate Clockwise", { icon: "rotate", keys: "R", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(1) });
     C("edit.rotateccw", "Rotate Anti-clockwise", { icon: "rotateccw", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(3) });
+    C("edit.rotate180", "Rotate 180°", { enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(2) });
     C("edit.mirrorx", "Mirror Left-Right", { icon: "mirrorx", keys: "X", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => editor.mirrorSelected("x") });
     C("edit.mirrory", "Mirror Top-Bottom", { icon: "mirrory", keys: "Y", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => editor.mirrorSelected("y") });
     C("edit.properties", "Edit Properties…", { keys: "Ctrl+E", global: true, enabled: () => !!editor.selected, run: () => editor.onEdit(editor.selected) });
@@ -279,21 +280,71 @@
     // ---------------------------------------------------------------- context menu
 
     const ctx = $("contextMenu");
-    const ctxEntries = ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "-", "edit.rotate", "edit.mirrorx", "edit.properties", "edit.tidy", "-", "tool.wire", "tool.vprobe", "tool.iprobe"];
-    window.showContextMenu = (e) => {
+
+    // right-click menus depend on what is under the pointer, as in ISIS
+    C("probe.rename", "Rename Probe…", { enabled: () => !!editor.selectedProbe, run: () => editor.onEditProbe(editor.selectedProbe) });
+    C("probe.addI", "Add Current Probe", { enabled: () => editor.selection.length === 1 && editor.selection[0].type !== "GND", run: () => editor.addCurrentProbe(editor.selection[0]) });
+    C("probe.addV", "Add Voltage Probe Here", { run: () => editor.addVoltageProbe(editor.contextPos.x, editor.contextPos.y) });
+    C("part.toggle", "Toggle Switch", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "SW", run: () => editor.onEdit(editor.selection[0]) });
+
+    const CTX = {
+        part: [["edit.properties", "Edit Properties"], "part.toggle", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
+            "edit.cut", "edit.copy", "-", "probe.addI"],
+        multi: ["edit.cut", "edit.copy", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
+        wire: [["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
+        probe: ["probe.rename", ["edit.delete", "Delete Probe"]],
+        empty: ["edit.paste", "-", "edit.undo", "edit.redo", "-", "edit.selectall", "-", "view.zoomin", "view.zoomout", "view.fit", "-", "lib.pick", "tool.wire", ["edit.tidy", "Tidy All Wires"]]
+    };
+
+    // entries: "-" | { label, key?, disabled?, run }
+    window.popupMenu = (e, entries) => {
         ctx.innerHTML = "";
-        for (const id of ctxEntries) {
-            if (id === "-") { ctx.insertAdjacentHTML("beforeend", '<div class="ctx-divider"></div>'); continue; }
-            const cmd = Commands.get(id);
+        for (const entry of entries) {
+            if (entry === "-") { ctx.insertAdjacentHTML("beforeend", '<div class="ctx-divider"></div>'); continue; }
             const row = document.createElement("div");
-            row.className = "ctx-item" + (Commands.enabled(id) === false ? " disabled" : "");
-            row.innerHTML = `<span>${cmd.label.replace(/…$/, "")}</span><span class="ctx-key">${cmd.keys || ""}</span>`;
-            row.onmousedown = (ev) => { ev.preventDefault(); ctx.style.display = "none"; Commands.run(id); };
+            row.className = "ctx-item" + (entry.disabled ? " disabled" : "");
+            row.innerHTML = `<span>${PropertiesPanel.esc(entry.label)}</span><span class="ctx-key">${PropertiesPanel.esc(entry.key || "")}</span>`;
+            row.onmousedown = (ev) => { ev.preventDefault(); ctx.style.display = "none"; if (!entry.disabled) entry.run(); };
             ctx.appendChild(row);
         }
-        ctx.style.left = `${Math.min(e.clientX, window.innerWidth - 200)}px`;
-        ctx.style.top = `${Math.min(e.clientY, window.innerHeight - 330)}px`;
         ctx.style.display = "block";
+        const h = ctx.offsetHeight, w = ctx.offsetWidth;
+        ctx.style.left = `${Math.max(0, Math.min(e.clientX, window.innerWidth - w - 4))}px`;
+        ctx.style.top = `${Math.max(0, Math.min(e.clientY, window.innerHeight - h - 4))}px`;
+    };
+
+    window.showContextMenu = (e, kind = "empty") => {
+        const entries = [];
+        for (const entry of CTX[kind] || CTX.empty) {
+            if (entry === "-") { entries.push("-"); continue; }
+            const [id, label] = Array.isArray(entry) ? entry : [entry];
+            const cmd = Commands.get(id);
+            if (!cmd) continue;
+            const enabled = Commands.enabled(id) !== false;
+            if (!enabled && /^(part\.toggle|probe\.)/.test(id)) continue;   // contextual extras are hidden rather than greyed
+            entries.push({ label: (label || cmd.label).replace(/…$/, ""), key: cmd.keys || "", disabled: !enabled, run: () => { Commands.run(id); editor.canvas.focus({ preventScroll: true }); } });
+        }
+        window.popupMenu(e, entries);
+    };
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") ctx.style.display = "none"; });
+
+    editor.onEditProbe = (probe) => {
+        const wrap = document.createElement("div");
+        wrap.innerHTML = `<div class="property"><label>Label</label><input type="text" id="probe-label"></div>`;
+        const input = wrap.querySelector("input");
+        input.value = probe.label;
+        Dialog.open({
+            title: probe.type === "V" ? "Edit Voltage Probe" : "Edit Current Probe",
+            content: wrap,
+            buttons: [
+                { label: "OK", primary: true, onClick: () => {
+                    const v = input.value.trim();
+                    if (v && v !== probe.label) { editor.saveState(); const live = editor.probes.find(p => p.id === probe.id); if (live) live.label = v; editor.draw(); }
+                } },
+                { label: "Cancel" }
+            ]
+        });
+        setTimeout(() => { input.focus(); input.select(); }, 0);
     };
     document.addEventListener("mousedown", (e) => { if (!ctx.contains(e.target)) ctx.style.display = "none"; });
 

@@ -21,6 +21,8 @@ class SchematicEditor {
 
         this.selection = [];
         this.selectedWire = null;
+        this.selectedProbe = null;
+        this.probeDrag = null;
 
         this.tool = "select";
         this.placeRotation = 0;
@@ -85,6 +87,11 @@ class SchematicEditor {
         canvas.addEventListener("wheel", e => {
             e.preventDefault();
             const rect = canvas.getBoundingClientRect();
+            if (e.shiftKey) {                       // Shift + wheel pans sideways, like most CAD tools
+                this.panX -= (e.deltaY || e.deltaX);
+                this.draw();
+                return;
+            }
             this.zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
         }, { passive: false });
 
@@ -100,22 +107,32 @@ class SchematicEditor {
             }
 
             const pos = this.getMousePosition(e);
-            const comp = this.findComponent(pos.x, pos.y);
-            if (comp) {
-                if (!this.isSelected(comp)) this.selection = [comp];
-                this.selectedWire = null;
+            const probe = this.findProbe(pos.x, pos.y);
+            const comp = probe ? null : this.findComponent(pos.x, pos.y);
+            let kind = "empty";
+            if (probe) {
+                this.selectProbe(probe);
+                kind = "probe";
+            } else if (comp) {
+                if (!this.isSelected(comp)) { this.selection = [comp]; }
+                this.selectedWire = null; this.selectedProbe = null;
+                kind = this.selection.length > 1 ? "multi" : "part";
             } else {
                 const wireHit = this.findWire(pos.x, pos.y);
                 if (wireHit) {
                     this.selectedWire = wireHit;
-                    this.selection = [];
+                    this.selection = []; this.selectedProbe = null;
+                    kind = "wire";
+                } else if (this.selection.length > 1) {
+                    kind = "multi";
                 }
             }
+            this.contextPos = { x: pos.x, y: pos.y };
             this.draw();
             this.notify();
 
             if (typeof window.showContextMenu === "function") {
-                window.showContextMenu(e);
+                window.showContextMenu(e, kind, this.contextPos);
             }
         });
 
@@ -168,6 +185,7 @@ class SchematicEditor {
     selectAll() {
         this.selection = [...this.components];
         this.selectedWire = null;
+        this.selectedProbe = null;
         this.draw();
         this.notify();
     }
@@ -175,10 +193,11 @@ class SchematicEditor {
     clearSelection() {
         this.selection = [];
         this.selectedWire = null;
+        this.selectedProbe = null;
     }
 
     notify() {
-        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.wiring}`;
+        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.selectedProbe ? this.selectedProbe.id : ""}|${this.wiring}`;
         if (key === this._notifyKey) return;
         this._notifyKey = key;
         if (typeof this.onChange === "function") this.onChange();
@@ -443,7 +462,8 @@ class SchematicEditor {
             type: 'V',
             label: `V_PRB${count}`,
             x: snap.x,
-            y: snap.y
+            y: snap.y,
+            anchor: this.anchorFor(snap)
         };
         this.probes.push(probe);
         this.draw();
@@ -643,6 +663,11 @@ class SchematicEditor {
             this.refreshWires();
             this.draw();
             this.notify();
+            return;
+        }
+
+        if (this.selectedProbe) {
+            this.removeProbe(this.selectedProbe);
             return;
         }
 
@@ -965,6 +990,11 @@ class SchematicEditor {
             return;
         }
 
+        if (this.tool === "select") {
+            const probe = this.findProbe(pos.x, pos.y);
+            if (probe) { if (typeof this.onEditProbe === "function") this.onEditProbe(probe); return; }
+        }
+
         if (this.tool === "select" && !this.findTerminal(pos.x, pos.y, 10)) {
             const comp = this.findComponent(pos.x, pos.y);
             if (comp && typeof this.onEdit === "function") this.onEdit(comp);
@@ -1038,6 +1068,16 @@ class SchematicEditor {
 
         // ----- select mode -----
 
+        // probes are objects too: select / drag them (before pins, since they sit on pins)
+        const probe = this.findProbe(pos.x, pos.y);
+        if (probe) {
+            this.selectProbe(probe);
+            if (probe.type === "V") this.startProbeDrag(probe);
+            this.draw();
+            this.notify();
+            return;
+        }
+
         // Proteus-style: grabbing a pin starts a wire
         const pin = this.findTerminal(pos.x, pos.y, 10);
         if (pin) {
@@ -1063,6 +1103,7 @@ class SchematicEditor {
 
             if (!this.isSelected(component)) this.selection = [component];
             this.selectedWire = null;
+            this.selectedProbe = null;
 
             this.move = {
                 clicked: component,
@@ -1081,6 +1122,7 @@ class SchematicEditor {
         if (wireTarget) {
             this.selectedWire = wireTarget.wire;
             this.selection = [];
+            this.selectedProbe = null;
             this.segDrag = { wire: wireTarget.wire, idx: wireTarget.index, moved: false, begun: false };
             this.draw();
             this.notify();
@@ -1113,6 +1155,11 @@ class SchematicEditor {
             this.box.y2 = pos.y;
             this.updateBoxSelection();
             this.draw();
+            return;
+        }
+
+        if (this.probeDrag) {
+            this.doProbeDrag(pos);
             return;
         }
 
@@ -1179,6 +1226,7 @@ class SchematicEditor {
         }
 
         this.box = null;
+        if (this.probeDrag) this.endProbeDrag();
 
         if (this.move) {
             if (this.move.moved) this.refreshWires();
@@ -1385,6 +1433,11 @@ class SchematicEditor {
             return;
         }
 
+        // ISIS zoom keys
+        if (key === "f6") { event.preventDefault(); this.zoomAt(this.width / 2, this.height / 2, 1.2); return; }
+        if (key === "f7") { event.preventDefault(); this.zoomAt(this.width / 2, this.height / 2, 1 / 1.2); return; }
+        if (key === "f8") { event.preventDefault(); this.fitView(); return; }
+
         if (key === "+" || key === "=") { this.zoomAt(this.width / 2, this.height / 2, 1.2); return; }
         if (key === "-") { this.zoomAt(this.width / 2, this.height / 2, 1 / 1.2); return; }
 
@@ -1584,6 +1637,17 @@ class SchematicEditor {
             ctx.arc(prb.x, prb.y, 7, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
+            if (prb === this.selectedProbe || (this.selectedProbe && prb.id === this.selectedProbe.id)) {
+                ctx.save();
+                ctx.strokeStyle = this.tok("preview");
+                ctx.lineWidth = 2 / this.zoom;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.arc(prb.x, prb.y, 11, 0, Math.PI * 2);
+                ctx.stroke();
+                ctx.restore();
+                ctx.lineWidth = 2;
+            }
 
             ctx.font = "11px system-ui";
             ctx.fillStyle = color;
