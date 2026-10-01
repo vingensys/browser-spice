@@ -160,7 +160,7 @@ const ShortcutsDialog = {
 const AboutDialog = {
     open() {
         Dialog.alert("About Browser SPICE",
-            `<b>Browser SPICE</b><br>Schematic capture and SPICE simulation in the browser.<br><br>
+            `<b>Browser SPICE</b> <span style="color:var(--ui-dim)">build ${window.APP_VERSION || "dev"}</span><br>Schematic capture and SPICE simulation in the browser.<br><br>
             Built-in SPICE engine (Newton-Raphson, trapezoidal transient, sparse LU), validated against ngspice,
             plus an optional ngspice WebAssembly backend. Imports and exports standard SPICE netlists.`);
     }

@@ -5,7 +5,7 @@ netlists with standard SPICE tools. No build step. See [ROADMAP.md](ROADMAP.md) 
 
 ```bash
 npm install          # optional: also vendors the ngspice WebAssembly engine
-npm run serve        # http://localhost:8137
+npm run serve        # http://localhost:8137 (no-cache dev server; the build id shows at the bottom right)
 ```
 
 ## Using it
@@ -112,3 +112,5 @@ Browser suites (load in the running app and call from the console):
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each
 within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay (the export models the same lag); MOSFETs are level 1.
+
+See [AUDIT.md](AUDIT.md) for the list of known shortcomings.

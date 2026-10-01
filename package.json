@@ -6,7 +6,7 @@
   "scripts": {
     "postinstall": "node scripts/vendor-ngspice.mjs",
     "vendor": "node scripts/vendor-ngspice.mjs",
-    "serve": "python3 -m http.server 8137",
+    "serve": "node scripts/serve.mjs",
     "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/ngspice-wasm.test.js"
   },
   "dependencies": {

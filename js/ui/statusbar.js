@@ -14,7 +14,9 @@ class StatusBar {
             <div class="sim-state" id="simstate">READY</div>
             <div id="msgbtn" title="Show messages">No Messages</div>
             <div id="statusText"></div>
-            <div id="coords">+0.0 +0.0 th</div>`;
+            <div id="coords">+0.0 +0.0 th</div>
+            <div id="build" title="Build of the code you are running. If this is not the latest commit, reload with Ctrl+Shift+R."></div>`;
+        root.querySelector("#build").textContent = window.APP_VERSION || "dev";
 
         root.querySelectorAll("[data-cmd]").forEach(b => { b.onclick = () => Commands.run(b.dataset.cmd); });
         root.querySelector("#msgbtn").onclick = () => MessagesDialog.open();
