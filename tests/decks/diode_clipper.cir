@@ -1,0 +1,9 @@
+Diode clipper (back-to-back 1N4148)
+V1 in 0 SIN(0 5 1k)
+R1 in out 1k
+D1 out 0 D1N4148
+D2 0 out D1N4148
+RL out 0 10k
+.model D1N4148 D(IS=2.52e-9 N=1.752 RS=0.568 CJO=4p VJ=0.5 M=0.4 TT=20n BV=100 IBV=100u)
+.tran 5u 3m
+.end

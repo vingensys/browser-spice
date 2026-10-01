@@ -1,0 +1,14 @@
+BJT differential pair with tail resistor
+VCC vcc 0 DC 12
+VEE vee 0 DC -12
+V1 in1 0 DC 0 AC 1
+V2 in2 0 DC 0
+RC1 vcc c1 10k
+RC2 vcc c2 10k
+Q1 c1 in1 e QN
+Q2 c2 in2 e QN
+RT e vee 10k
+.model QN NPN(IS=14.34f BF=255.9 BR=6.092 VAF=74.03 CJE=22p CJC=7p TF=400p)
+.op
+.ac dec 10 1k 100Meg
+.end

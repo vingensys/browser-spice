@@ -420,6 +420,73 @@
             border-radius: 6px;
             resize: vertical;
         }
+
+        select#exampleSelect {
+            background: #171b23;
+            color: #e8edf5;
+            border: 1px solid #3a4352;
+            border-radius: 6px;
+            padding: 7px 10px;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        .sim-settings {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+            color: #9aa4b5;
+        }
+
+        .sim-settings input[type="text"],
+        .sim-settings input:not([type]) {
+            background: #0d1117;
+            border: 1px solid #3a4352;
+            border-radius: 4px;
+            color: #e8edf5;
+            padding: 4px 6px;
+            font-size: 12px;
+        }
+
+        .sim-settings select {
+            background: #0d1117;
+            border: 1px solid #3a4352;
+            border-radius: 4px;
+            color: #e8edf5;
+            padding: 3px 6px;
+            font-size: 12px;
+        }
+
+        .sim-settings label.chk { display: flex; align-items: center; gap: 4px; }
+
+        .prop-note {
+            color: #7f8999;
+            font-size: 11px;
+            line-height: 1.4;
+            margin-top: 6px;
+        }
+
+        .toast {
+            position: fixed;
+            left: 50%;
+            bottom: 22px;
+            transform: translateX(-50%) translateY(20px);
+            max-width: 70vw;
+            padding: 10px 16px;
+            border-radius: 8px;
+            background: #1b2230;
+            border: 1px solid #3a4352;
+            color: #e8edf5;
+            font-size: 13px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.18s, transform 0.18s;
+            z-index: 2000;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.error { border-color: #ff5555; color: #ffb3b3; }
+        .toast.warn { border-color: #ffb86c; color: #ffd9a8; }
     </style>
 </head>
 
@@ -434,16 +501,33 @@
 
     <!-- CLEAN TOP TOOLBAR (FILE & SIMULATION) -->
     <div class="toolbar">
-        <button id="saveJson" title="Save Schematic JSON file">💾 Save CAD</button>
-        <button id="loadJson" title="Open Schematic JSON file">📂 Open CAD</button>
-        <button id="exportCir" title="Export SPICE .cir Netlist">⚡ Export Netlist</button>
-        <button id="example">Load Example</button>
+        <button id="saveJson" title="Save schematic as a JSON file">💾 Save CAD</button>
+        <button id="loadJson" title="Open a saved schematic JSON file">📂 Open CAD</button>
+        <button id="exportCir" title="Export a standard SPICE .cir netlist">⚡ Export Netlist</button>
+        <select id="exampleSelect" title="Load an example circuit">
+            <option value="">Examples…</option>
+        </select>
 
         <span class="separator"></span>
 
         <button id="runDC" class="sim-btn">▶ Run DC</button>
         <button id="runAC" class="sim-btn">▶ Run AC Sweep</button>
         <button id="runTransient" class="sim-btn">▶ Run Transient</button>
+
+        <span class="separator"></span>
+
+        <span class="sim-settings" title="Simulation settings">
+            <label>Stop <input id="simTstop" value="20m" size="5"></label>
+            <label>Step <input id="simTstep" value="20u" size="5"></label>
+            <label class="chk"><input id="simUic" type="checkbox" checked> start from 0</label>
+            <label>AC <input id="simFstart" value="10" size="4">–<input id="simFstop" value="1M" size="4"> Hz</label>
+            <label>Engine
+                <select id="simEngine" title="Built-in: instant and interactive. ngspice: the industry-standard solver (loads on first use).">
+                    <option value="builtin">Built-in (fast)</option>
+                    <option value="ngspice">ngspice (accurate)</option>
+                </select>
+            </label>
+        </span>
 
         <input type="file" id="fileInput" accept=".json" style="display: none;">
     </div>
@@ -520,6 +604,10 @@
                     <div class="palette-item" data-tool="NMOS">
                         <span>N-MOSFET</span>
                         <span class="palette-badge">M</span>
+                    </div>
+                    <div class="palette-item" data-tool="PMOS">
+                        <span>P-MOSFET</span>
+                        <span class="palette-badge">Mp</span>
                     </div>
                     <div class="palette-item" data-tool="OPAMP">
                         <span>Op-Amp (LM741)</span>
@@ -651,463 +739,33 @@
         </div>
     </div>
 
+    <div id="toast" class="toast"></div>
+
     <!-- CORE SCRIPTS -->
     <script src="js/utils/complex.js"></script>
     <script src="js/utils/units.js"></script>
 
-    <script src="js/circuit/node.js"></script>
-    <script src="js/circuit/circuit.js"></script>
-    <script src="js/circuit/components/component.js"></script>
-    <script src="js/circuit/components/resistor.js"></script>
-    <script src="js/circuit/components/capacitor.js"></script>
-    <script src="js/circuit/components/inductor.js"></script>
-    <script src="js/circuit/components/ground.js"></script>
-    <script src="js/circuit/components/voltage-source.js"></script>
-    <script src="js/circuit/netlist.js"></script>
+    <!-- simulation engine -->
+    <script src="js/sim/linalg.js"></script>
+    <script src="js/sim/devices.js"></script>
+    <script src="js/sim/models.js"></script>
+    <script src="js/sim/engine.js"></script>
+    <script src="js/sim/spice-parser.js"></script>
+    <script src="js/sim/ngspice-backend.js"></script>
 
-    <script src="js/solver/matrix.js"></script>
-    <script src="js/solver/mna.js"></script>
-    <script src="js/solver/dc.js"></script>
-    <script src="js/solver/ac.js"></script>
-    <script src="js/solver/transient.js"></script>
-
+    <!-- schematic editor -->
     <script src="js/cad/symbols.js"></script>
     <script src="js/cad/router.js"></script>
     <script src="js/cad/symbol-draw.js"></script>
     <script src="js/visualization/schematic.js"></script>
     <script src="js/visualization/waveform.js"></script>
 
-    <!-- APP WIRING -->
-    <script>
-        const canvas = document.getElementById("schematic");
-        const editor = new SchematicEditor(canvas);
-
-        const plotCanvas = document.getElementById("plotCanvas");
-        const plotter = new WaveformPlotter(plotCanvas);
-
-        // Palette Sidebar Item Click Handlers
-        document.querySelectorAll(".palette-item").forEach(item => {
-            item.addEventListener("click", () => {
-                const tool = item.getAttribute("data-tool");
-                document.querySelectorAll(".palette-item").forEach(i => i.classList.remove("active"));
-                item.classList.add("active");
-                editor.setTool(tool);
-                updateStatus();
-            });
-        });
-
-        function updatePaletteActive(tool) {
-            document.querySelectorAll(".palette-item").forEach(i => {
-                if (i.getAttribute("data-tool") === tool) {
-                    i.classList.add("active");
-                } else {
-                    i.classList.remove("active");
-                }
-            });
-        }
-
-        // RIGHT CLICK CONTEXT MENU SYSTEM
-        const ctxMenu = document.getElementById("contextMenu");
-
-        window.showContextMenu = function(e) {
-            const hasSelection = !!(editor.selection.length || editor.selectedWire);
-            const hasClipboard = !!editor.clipboard;
-
-            document.getElementById("ctxCopy").classList.toggle("disabled", !editor.selection.length);
-            document.getElementById("ctxPaste").classList.toggle("disabled", !hasClipboard);
-            document.getElementById("ctxRotate").classList.toggle("disabled", !editor.selection.length);
-            document.getElementById("ctxDelete").classList.toggle("disabled", !hasSelection);
-
-            ctxMenu.style.left = `${e.clientX}px`;
-            ctxMenu.style.top = `${e.clientY}px`;
-            ctxMenu.style.display = "block";
-        };
-
-        document.addEventListener("click", () => {
-            ctxMenu.style.display = "none";
-        });
-
-        document.getElementById("ctxUndo").addEventListener("click", () => editor.undo());
-        document.getElementById("ctxRedo").addEventListener("click", () => editor.redo());
-        
-        document.getElementById("ctxCopy").addEventListener("click", () => {
-            if (editor.selection.length) {
-                editor.copySelected();
-                updateStatus();
-            }
-        });
-
-        document.getElementById("ctxPaste").addEventListener("click", () => {
-            if (editor.clipboard) {
-                editor.paste();
-                updateProperties();
-                updateStatus();
-            }
-        });
-
-        document.getElementById("ctxRotate").addEventListener("click", () => {
-            if (editor.selection.length) {
-                editor.rotateSelected();
-                updateProperties();
-            }
-        });
-
-        document.getElementById("ctxDelete").addEventListener("click", () => {
-            if (editor.selection.length || editor.selectedWire) {
-                editor.removeSelected();
-                updateProperties();
-            }
-        });
-
-        document.getElementById("ctxWire").addEventListener("click", () => {
-            editor.setTool("wire");
-            updateStatus();
-        });
-
-        document.getElementById("ctxVProbe").addEventListener("click", () => {
-            editor.setTool("vProbe");
-            updateStatus();
-        });
-
-        document.getElementById("ctxIProbe").addEventListener("click", () => {
-            editor.setTool("iProbe");
-            updateStatus();
-        });
-
-        // SAVE & LOAD CAD SCHEMATIC JSON
-        document.getElementById("saveJson").addEventListener("click", () => {
-            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify({
-                components: editor.components,
-                wires: editor.wires,
-                probes: editor.probes,
-                nextId: editor.nextId,
-                panX: editor.panX,
-                panY: editor.panY
-            }, null, 2));
-
-            const downloadAnchor = document.createElement("a");
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", "circuit_design.json");
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
-        });
-
-        document.getElementById("loadJson").addEventListener("click", () => {
-            document.getElementById("fileInput").click();
-        });
-
-        document.getElementById("fileInput").addEventListener("change", (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = (evt) => {
-                try {
-                    const state = JSON.parse(evt.target.result);
-                    editor.saveState();
-                    editor.components = state.components || [];
-                    editor.wires = state.wires || [];
-                    editor.probes = state.probes || [];
-                    editor.nextId = state.nextId || 1;
-                    editor.panX = state.panX || 0;
-                    editor.panY = state.panY || 0;
-                    editor.selected = null;
-                    editor.selectedWire = null;
-                    editor.rerouteAllWires();
-                    editor.draw();
-                    updateProperties();
-                    updateStatus();
-                } catch (err) {
-                    alert("Invalid schematic file format: " + err.message);
-                }
-            };
-            reader.readAsText(file);
-        });
-
-        // EXPORT SPICE NETLIST (.cir)
-        document.getElementById("exportCir").addEventListener("click", () => {
-            try {
-                const netlistInfo = NetlistExtractor.extract(editor);
-                let spiceCode = `* Browser SPICE Netlist Export\n`;
-                spiceCode += `* Date: ${new Date().toLocaleString()}\n\n`;
-
-                for (const comp of netlistInfo.circuit.components) {
-                    if (comp.getType() === "VOLTAGE_SOURCE") {
-                        if (comp.sourceType === "AC") {
-                            spiceCode += `${comp.name} ${comp.node1} ${comp.node2} SIN(${comp.dcOffset || 0} ${comp.acMagnitude} ${comp.frequency}Hz 0 0 ${comp.acPhase})\n`;
-                        } else {
-                            spiceCode += `${comp.name} ${comp.node1} ${comp.node2} DC ${comp.dcVoltage}\n`;
-                        }
-                    } else if (comp.getType() === "RESISTOR") {
-                        spiceCode += `${comp.name} ${comp.node1} ${comp.node2} ${comp.resistance}\n`;
-                    } else if (comp.getType() === "CAPACITOR") {
-                        spiceCode += `${comp.name} ${comp.node1} ${comp.node2} ${comp.capacitance}\n`;
-                    } else if (comp.getType() === "INDUCTOR") {
-                        spiceCode += `${comp.name} ${comp.node1} ${comp.node2} ${comp.inductance}\n`;
-                    }
-                }
-
-                spiceCode += `\n.op\n.tran 50u 50m\n.end\n`;
-
-                document.getElementById("netlistText").value = spiceCode;
-                document.getElementById("netlistModal").style.display = "flex";
-            } catch (err) {
-                alert("Error generating SPICE netlist: " + err.message);
-            }
-        });
-
-        document.getElementById("closeNetlistModal").addEventListener("click", () => {
-            document.getElementById("netlistModal").style.display = "none";
-        });
-
-        document.getElementById("downloadCirBtn").addEventListener("click", () => {
-            const text = document.getElementById("netlistText").value;
-            const dataStr = "data:text/plain;charset=utf-8," + encodeURIComponent(text);
-            const downloadAnchor = document.createElement("a");
-            downloadAnchor.setAttribute("href", dataStr);
-            downloadAnchor.setAttribute("download", "circuit.cir");
-            document.body.appendChild(downloadAnchor);
-            downloadAnchor.click();
-            downloadAnchor.remove();
-        });
-
-        // ZOOM CONTROLS
-        document.getElementById("zoomInBtn").addEventListener("click", () => {
-            plotter.zoomX *= 1.2;
-            plotter.zoomY *= 1.2;
-            plotter.draw();
-        });
-        document.getElementById("zoomOutBtn").addEventListener("click", () => {
-            plotter.zoomX *= 0.8;
-            plotter.zoomY *= 0.8;
-            plotter.draw();
-        });
-        document.getElementById("resetZoomBtn").addEventListener("click", () => {
-            plotter.resetZoom();
-        });
-
-        document.getElementById("example").addEventListener("click", () => {
-            editor.loadExample();
-            updateProperties();
-            updateStatus();
-        });
-
-        // SIMULATION CONTROLS WITH PROBE-DRIVEN WAVEFORMS
-        document.getElementById("runDC").addEventListener("click", () => {
-            try {
-                const netlistInfo = NetlistExtractor.extract(editor);
-                const dc = new DCOperatingPoint(netlistInfo.circuit);
-
-                let html = `<table class="results-table"><thead><tr><th>Node / Branch</th><th>Voltage / Current</th></tr></thead><tbody>`;
-                for (const [node, v] of Object.entries(dc.result.nodeVoltages)) {
-                    html += `<tr><td>Node ${node}</td><td class="val">${Units.formatSI(v, "V")}</td></tr>`;
-                }
-                for (const [src, i] of Object.entries(dc.result.sourceCurrents)) {
-                    html += `<tr><td>I(${src})</td><td class="val">${Units.formatSI(i, "A")}</td></tr>`;
-                }
-                html += `</tbody></table>`;
-                document.getElementById("dcResults").innerHTML = html;
-                document.getElementById("plotTitle").textContent = "DC Analysis Probed Values";
-
-                plotter.plotDC(dc.result, editor.probes, netlistInfo);
-            } catch (err) {
-                alert(err.message);
-            }
-        });
-
-        document.getElementById("runAC").addEventListener("click", () => {
-            try {
-                const netlistInfo = NetlistExtractor.extract(editor);
-                const sweepResults = ACAnalysis.sweep(netlistInfo.circuit, 10, 1e6, 20);
-                plotter.plotAC(sweepResults, editor.probes, netlistInfo);
-                document.getElementById("plotTitle").textContent = "AC Frequency Sweep (Bode Plot)";
-            } catch (err) {
-                alert(err.message);
-            }
-        });
-
-        document.getElementById("runTransient").addEventListener("click", () => {
-            try {
-                const netlistInfo = NetlistExtractor.extract(editor);
-                const trans = new TransientAnalysis(netlistInfo.circuit, 0.05, 5e-5);
-                plotter.plotTransient(trans, editor.probes, netlistInfo);
-                document.getElementById("plotTitle").textContent = "Transient Waveform V(t) / I(t)";
-            } catch (err) {
-                alert(err.message);
-            }
-        });
-
-        // PROPERTIES PANEL UPDATE
-        function updateProperties() {
-            const container = document.getElementById("propertiesContent");
-            const component = editor.selected;
-
-            if (!component) {
-                container.innerHTML = `<div class="no-selection">No component selected.<br><br>Click a component on the schematic to view and edit its parameters.</div>`;
-                return;
-            }
-
-            let html = `
-                <div class="property">
-                    <label>Name</label>
-                    <input type="text" id="propName" value="${component.name}">
-                </div>
-            `;
-
-            if (component.type === "V") {
-                const sType = component.sourceType || "DC";
-                html += `
-                    <div class="property">
-                        <label>Source Type</label>
-                        <select id="propSourceType">
-                            <option value="DC" ${sType === "DC" ? "selected" : ""}>DC Voltage</option>
-                            <option value="AC" ${sType === "AC" ? "selected" : ""}>AC Sine Wave</option>
-                        </select>
-                    </div>
-                `;
-
-                if (sType === "DC") {
-                    html += `
-                        <div class="property">
-                            <label>DC Voltage</label>
-                            <input type="text" id="propValue" value="${component.value || "5 V"}">
-                        </div>
-                    `;
-                } else {
-                    html += `
-                        <div class="property">
-                            <label>AC Amplitude</label>
-                            <input type="text" id="propACMag" value="${component.acMagnitude ? Units.formatSI(component.acMagnitude, "V") : "5 V"}">
-                        </div>
-                        <div class="property">
-                            <label>DC Offset</label>
-                            <input type="text" id="propDCOffset" value="${component.dcOffset ? Units.formatSI(component.dcOffset, "V") : "0 V"}">
-                        </div>
-                        <div class="property">
-                            <label>Frequency</label>
-                            <input type="text" id="propFreq" value="${component.frequency ? Units.formatSI(component.frequency, "Hz") : "1 kHz"}">
-                        </div>
-                        <div class="property">
-                            <label>Phase (deg)</label>
-                            <input type="text" id="propPhase" value="${component.acPhase || "0"}">
-                        </div>
-                    `;
-                }
-            } else if (component.type !== "GND") {
-                html += `
-                    <div class="property">
-                        <label>Value</label>
-                        <input type="text" id="propValue" value="${component.value}">
-                    </div>
-                `;
-            }
-
-            container.innerHTML = html;
-
-            // Bind listeners with live input handlers
-            const nameInput = document.getElementById("propName");
-            if (nameInput) {
-                nameInput.addEventListener("input", (e) => {
-                    component.name = e.target.value;
-                    editor.draw();
-                });
-            }
-
-            const sourceTypeSelect = document.getElementById("propSourceType");
-            if (sourceTypeSelect) {
-                sourceTypeSelect.addEventListener("change", (e) => {
-                    editor.saveState();
-                    component.sourceType = e.target.value;
-                    component.value = component.sourceType === "AC"
-                        ? `${component.acMagnitude || "5 V"} ${component.frequency || "1 kHz"}`
-                        : `${component.dcVoltage || "5 V"}`;
-                    updateProperties();
-                    editor.draw();
-                });
-            }
-
-            const valInput = document.getElementById("propValue");
-            if (valInput) {
-                valInput.addEventListener("input", (e) => {
-                    component.value = e.target.value;
-                    component.dcVoltage = Units.parseSI(e.target.value);
-                    editor.draw();
-                });
-            }
-
-            const acMagInput = document.getElementById("propACMag");
-            if (acMagInput) {
-                acMagInput.addEventListener("input", (e) => {
-                    component.acMagnitude = Units.parseSI(e.target.value);
-                    component.value = `${e.target.value} ${component.frequency || "1 kHz"}`;
-                    editor.draw();
-                });
-            }
-
-            const dcOffsetInput = document.getElementById("propDCOffset");
-            if (dcOffsetInput) {
-                dcOffsetInput.addEventListener("input", (e) => {
-                    component.dcOffset = Units.parseSI(e.target.value);
-                    editor.draw();
-                });
-            }
-
-            const freqInput = document.getElementById("propFreq");
-            if (freqInput) {
-                freqInput.addEventListener("input", (e) => {
-                    component.frequency = Units.parseSI(e.target.value);
-                    component.value = `${component.acMagnitude || "5 V"} ${e.target.value}`;
-                    editor.draw();
-                });
-            }
-
-            const phaseInput = document.getElementById("propPhase");
-            if (phaseInput) {
-                phaseInput.addEventListener("input", (e) => {
-                    component.acPhase = Units.parseSI(e.target.value);
-                    editor.draw();
-                });
-            }
-        }
-
-        function updateStatus() {
-            const status = document.getElementById("statusText");
-            if (editor.wiring) {
-                status.textContent = "Wiring: click a pin or wire to finish, click empty grid to add a corner, Backspace removes the last corner, double-click ends in free space, Esc cancels.";
-            } else if (editor.tool === "wire") {
-                status.textContent = "Wire Tool: click a pin or a wire to start. (In Pointer mode you can also just click a pin.)";
-            } else if (editor.tool === "vProbe") {
-                status.textContent = "V-Probe Tool: Click on a wire/node to attach a Voltage Probe.";
-            } else if (editor.tool === "iProbe") {
-                status.textContent = "I-Probe Tool: Click on a component to attach a Current Probe I(comp).";
-            } else if (editor.isPlacing()) {
-                status.textContent = "Placing: click to drop a part (keeps placing), R rotates, right-click or Esc to stop.";
-            } else if (editor.selection.length > 1) {
-                status.textContent = `${editor.selection.length} parts selected. Drag to move, R rotates, Del deletes, Ctrl+C / Ctrl+V copies.`;
-            } else if (editor.selected) {
-                status.textContent = `${editor.selected.name} selected. Drag to move, R rotates, double-click to edit its value, Del deletes.`;
-            } else if (editor.selectedWire) {
-                status.textContent = "Wire selected. Drag a segment to reshape, T re-routes it from scratch, Del deletes.";
-            } else {
-                status.textContent = "Click a pin to wire. Drag to box-select. Scroll to zoom, hold Space or middle-drag to pan, F fits the view, T tidies all wires.";
-            }
-            updatePaletteActive(editor.autoWire ? "select" : editor.tool);
-        }
-
-        editor.onChange = () => {
-            updateProperties();
-            updateStatus();
-        };
-
-        editor.onEdit = () => {
-            const input = document.getElementById("propValue") || document.getElementById("propName");
-            if (input) { input.focus(); input.select(); }
-        };
-
-        updateProperties();
-        updateStatus();
-    </script>
+    <!-- netlist bridge + UI -->
+    <script src="js/circuit/netlist.js"></script>
+    <script src="js/ui/properties.js"></script>
+    <script src="js/ui/sim-runner.js"></script>
+    <script src="js/examples.js"></script>
+    <script src="js/app.js"></script>
 </body>
 
 </html>

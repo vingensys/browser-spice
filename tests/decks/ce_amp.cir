@@ -1,0 +1,15 @@
+Common-emitter amplifier
+VCC vcc 0 DC 12
+VIN in 0 SIN(0 0.005 1k) AC 0.005
+CIN in b 10u
+R1 vcc b 47k
+R2 b 0 10k
+RC vcc c 2.2k
+RE e 0 470
+CE e 0 100u
+Q1 c b e QN
+.model QN NPN(IS=6.734e-15 BF=416.4 BR=0.7371 NF=1 NR=1 VAF=74.03 CJE=4.493e-12 VJE=0.75 MJE=0.2593 CJC=3.638e-12 VJC=0.75 MJC=0.3085 TF=3.012e-10 TR=2.395e-7)
+.op
+.ac dec 10 10 100Meg
+.tran 5u 4m
+.end

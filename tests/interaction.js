@@ -90,11 +90,9 @@ window.interactionTests = function () {
     ok('wire can end on another wire (junction)', e.wires.length === 2 && e.wires[1].end.type === 'wire', JSON.stringify(e.wires[1] && e.wires[1].end));
     ok('junction dot is drawn', e.computeJunctions().length === 1, e.computeJunctions().length);
     const net = NetlistExtractor.extract(e);
-    ok('netlist merges the junction (GND node shared by R pins)',
-        net.circuit.components.length === 2 && (() => {
-            const comps = net.circuit.components;
-            return comps[0].node2 === comps[1].node1;
-        })());
+    ok('netlist merges the junction (both resistor pins land on the GND net)',
+        net.getTerminalNodeName(a, '2') === '0' && net.getTerminalNodeName(b, '1') === '0',
+        [net.getTerminalNodeName(a, '2'), net.getTerminalNodeName(b, '1')]);
 
     // ---- segment drag ----
     reset();

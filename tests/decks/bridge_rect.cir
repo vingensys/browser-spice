@@ -1,0 +1,13 @@
+Bridge rectifier with reservoir capacitor
+V1 a b SIN(0 12 50)
+RG1 b 0 1Meg
+D1 a p DM
+D2 b p DM
+D3 n a DM
+D4 n b DM
+RL p n 500
+C1 p n 470u
+RN n 0 1Meg
+.model DM D(IS=76.9n N=1.45 RS=0.0342 CJO=39.8p VJ=0.7 M=0.333 TT=4.32u BV=1000 IBV=5u)
+.tran 100u 80m
+.end

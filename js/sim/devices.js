@@ -1,0 +1,1073 @@
+// SPICE device models for the engine in engine.js.
+//
+// Every element stamps into a real MNA system:  A x = b,
+//   x = [ node voltages ..., branch currents ... ].
+// Sign convention: KCL rows sum the current LEAVING a node, so a device whose
+// terminal current is I(V) contributes the Newton companion
+//   J * v = J * v0 - I(v0)    ->  A += J,  b -= (I(v0) - J * v0).
+//
+// ctx = { sys, x, mode: "op" | "tran", time, dt, method: "be" | "trap",
+//         gmin, srcScale, uic, noncon, v(i) }
+
+const SIM = {
+    VT: 0.025852,      // kT/q at 27 C
+    GMIN: 1e-12,
+    EXP_MAX: 80
+};
+
+const safeExp = (x) => Math.exp(Math.min(x, SIM.EXP_MAX));
+
+// SPICE3 pn-junction voltage limiter: stops Newton from jumping a forward-biased
+// junction thousands of thermal voltages in one iteration.
+function pnjlim(vnew, vold, vt, vcrit) {
+    if (vnew > vcrit && Math.abs(vnew - vold) > 2 * vt) {
+        if (vold > 0) {
+            const arg = 1 + (vnew - vold) / vt;
+            vnew = arg > 0 ? vold + vt * Math.log(arg) : vcrit;
+        } else {
+            vnew = vt * Math.log(vnew / vt);
+        }
+    }
+    return vnew;
+}
+
+// SPICE3 fetlim: limits gate-source voltage steps around the threshold.
+function fetlim(vnew, vold, vto) {
+    const vtsthi = Math.abs(2 * (vold - vto)) + 2;
+    const vtstlo = vtsthi / 2 + 2;
+    const vtox = vto + 3.5;
+    const delv = vnew - vold;
+
+    if (vold >= vto) {
+        if (vold >= vtox) {
+            if (delv <= 0) {
+                if (vnew >= vtox) {
+                    if (-delv > vtstlo) vnew = vold - vtstlo;
+                } else {
+                    vnew = Math.max(vnew, vto + 2);
+                }
+            } else if (delv >= vtsthi) {
+                vnew = vold + vtsthi;
+            }
+        } else if (delv <= 0) {
+            vnew = Math.max(vnew, vto - 0.5);
+        } else {
+            vnew = Math.min(vnew, vto + 4);
+        }
+    } else if (delv <= 0) {
+        if (-delv > vtsthi) vnew = vold - vtsthi;
+    } else {
+        const vtemp = vto + 0.5;
+        if (vnew <= vtemp) {
+            if (delv > vtstlo) vnew = vold + vtstlo;
+        } else {
+            vnew = vtemp;
+        }
+    }
+    return vnew;
+}
+
+
+// Junction depletion capacitance with the SPICE forward-bias linearisation
+function depletionCap(v, cj0, vj, m, fc) {
+    if (!(cj0 > 0)) return 0;
+    if (v < fc * vj) return cj0 / Math.pow(1 - v / vj, m);
+    return (cj0 / Math.pow(1 - fc, 1 + m)) * (1 - fc * (1 + m) + (m * v) / vj);
+}
+
+// Charge stored in the depletion capacitance (integral of depletionCap), so the
+// transient solver can conserve charge instead of integrating C(v) dv/dt.
+function depletionCharge(v, cj0, vj, m, fc) {
+    if (!(cj0 > 0)) return 0;
+    const vf = fc * vj;
+    const base = (x) => (Math.abs(1 - m) < 1e-9
+        ? -cj0 * vj * Math.log(1 - x / vj)
+        : (cj0 * vj / (1 - m)) * (1 - Math.pow(1 - x / vj, 1 - m)));
+    if (v < vf) return base(v);
+    const f2 = Math.pow(1 - fc, 1 + m);
+    return base(vf) + (cj0 / f2) * ((1 - fc * (1 + m)) * (v - vf) + (m / (2 * vj)) * (v * v - vf * vf));
+}
+
+// Add a nonlinear terminal-current linearisation: J is the Jacobian over `nodes`
+// and Ieq the constant part of the companion current into each node.
+function stampNonlinear(sys, nodes, J, Ieq) {
+    for (let k = 0; k < nodes.length; k++) {
+        for (let j = 0; j < nodes.length; j++) sys.add(nodes[k], nodes[j], J[k][j]);
+        sys.rhs(nodes[k], -Ieq[k]);
+    }
+}
+
+
+// ------------------------------------------------------------------ waveforms
+
+const Waveform = {
+    dc(v) {
+        return { dc: v, at: () => v, breakpoints: () => [] };
+    },
+
+    sin({ offset = 0, amp = 1, freq = 1000, delay = 0, damp = 0, phase = 0 }) {
+        const ph = (phase * Math.PI) / 180;
+        return {
+            dc: offset,
+            at: (t) => {
+                if (t < delay) return offset + amp * Math.sin(ph);
+                const tt = t - delay;
+                return offset + amp * Math.exp(-damp * tt) * Math.sin(2 * Math.PI * freq * tt + ph);
+            },
+            breakpoints: () => (delay > 0 ? [delay] : [])
+        };
+    },
+
+    pulse({ v1 = 0, v2 = 5, delay = 0, rise = 1e-9, fall = 1e-9, width = 1e-3, period = 2e-3 }) {
+        rise = Math.max(rise, 1e-12);
+        fall = Math.max(fall, 1e-12);
+        return {
+            dc: v1,
+            at: (t) => {
+                if (t < delay) return v1;
+                let tt = t - delay;
+                if (period > 0) tt %= period;
+                if (tt < rise) return v1 + (v2 - v1) * (tt / rise);
+                if (tt < rise + width) return v2;
+                if (tt < rise + width + fall) return v2 + (v1 - v2) * ((tt - rise - width) / fall);
+                return v1;
+            },
+            breakpoints: (tStop) => {
+                const pts = [];
+                const per = period > 0 ? period : Infinity;
+                for (let k = 0; delay + k * per <= tStop && k < 100000; k++) {
+                    const base = delay + k * per;
+                    pts.push(base, base + rise, base + rise + width, base + rise + width + fall);
+                    if (!isFinite(per)) break;
+                }
+                return pts;
+            }
+        };
+    },
+
+    pwl(points) {
+        const pts = points.slice().sort((a, b) => a[0] - b[0]);
+        return {
+            dc: pts.length ? pts[0][1] : 0,
+            at: (t) => {
+                if (!pts.length) return 0;
+                if (t <= pts[0][0]) return pts[0][1];
+                for (let i = 1; i < pts.length; i++) {
+                    if (t <= pts[i][0]) {
+                        const [t0, v0] = pts[i - 1], [t1, v1] = pts[i];
+                        return v0 + (v1 - v0) * ((t - t0) / (t1 - t0));
+                    }
+                }
+                return pts[pts.length - 1][1];
+            },
+            breakpoints: () => pts.map(p => p[0])
+        };
+    }
+};
+
+
+// ------------------------------------------------------------------- base
+
+class Element {
+    constructor(name, nodeNames) {
+        this.name = name;
+        this.nodeNames = nodeNames;
+        this.n = [];
+        this.branches = 0;
+        this.br = -1;
+        this.nonlinear = false;
+    }
+
+    bind(circuit) { this.n = this.nodeNames.map(nm => circuit.node(nm)); }
+    beginSolve(ctx) { }
+    stamp(ctx) { }
+    stampAC(ac, omega) { }
+    initState(ctx) { }
+    accept(ctx) { }
+    current(x) { return 0; }
+    breakpoints(tStop) { return []; }
+}
+
+
+// -------------------------------------------------------------- passive
+
+class Resistor extends Element {
+    constructor(name, nodes, { r }) {
+        super(name, nodes);
+        if (!(r > 0)) throw new Error(`${name}: resistance must be positive`);
+        this.r = r;
+    }
+    stamp(ctx) { ctx.sys.addG(this.n[0], this.n[1], 1 / this.r); }
+    stampAC(ac) { ac.addY(this.n[0], this.n[1], 1 / this.r, 0); }
+    current(x) { return (this.v(x, 0) - this.v(x, 1)) / this.r; }
+    v(x, k) { return this.n[k] < 0 ? 0 : x[this.n[k]]; }
+}
+
+class Capacitor extends Element {
+    constructor(name, nodes, { c, ic = 0 }) {
+        super(name, nodes);
+        this.c = c;
+        this.ic = ic;
+        this.vPrev = 0;
+        this.iPrev = 0;
+        this.geq = 0;
+        this.ieq = 0;
+    }
+
+    stamp(ctx) {
+        const [a, b] = this.n;
+        if (ctx.mode === "tran") {
+            const trap = ctx.method === "trap";
+            this.geq = (trap ? 2 : 1) * this.c / ctx.dt;
+            this.ieq = this.geq * this.vPrev + (trap ? this.iPrev : 0);
+            ctx.sys.addG(a, b, this.geq);
+            ctx.sys.rhs(a, this.ieq);
+            ctx.sys.rhs(b, -this.ieq);
+        } else if (ctx.uic) {
+            // hold the node pair at the initial condition (a stiff voltage source)
+            const g = 1e6;
+            ctx.sys.addG(a, b, g);
+            ctx.sys.rhs(a, g * this.ic);
+            ctx.sys.rhs(b, -g * this.ic);
+        }
+    }
+
+    stampAC(ac, omega) { ac.addY(this.n[0], this.n[1], 0, omega * this.c); }
+
+    initState(ctx) {
+        this.vPrev = ctx.uic ? this.ic : ctx.v(this.n[0]) - ctx.v(this.n[1]);
+        this.iPrev = 0;
+    }
+
+    accept(ctx) {
+        const v = ctx.v(this.n[0]) - ctx.v(this.n[1]);
+        this.iPrev = this.geq * v - this.ieq;
+        this.vPrev = v;
+    }
+
+    current() { return this.iPrev; }
+}
+
+class Inductor extends Element {
+    constructor(name, nodes, { l, ic = 0 }) {
+        super(name, nodes);
+        this.l = l;
+        this.ic = ic;
+        this.branches = 1;
+        this.iPrev = 0;
+        this.vPrev = 0;
+    }
+
+    stamp(ctx) {
+        const [a, b] = this.n;
+        const br = this.br;
+        const s = ctx.sys;
+        s.add(a, br, 1);
+        s.add(b, br, -1);
+
+        if (ctx.mode === "tran") {
+            const trap = ctx.method === "trap";
+            const req = (trap ? 2 : 1) * this.l / ctx.dt;
+            s.add(br, a, 1);
+            s.add(br, b, -1);
+            s.add(br, br, -req);
+            s.rhs(br, -req * this.iPrev - (trap ? this.vPrev : 0));
+        } else if (ctx.uic) {
+            s.add(br, br, 1);
+            s.rhs(br, this.ic);
+        } else {
+            s.add(br, a, 1);
+            s.add(br, b, -1);
+        }
+    }
+
+    stampAC(ac, omega) {
+        const [a, b] = this.n;
+        const br = this.br;
+        ac.add(a, br, 1);
+        ac.add(b, br, -1);
+        ac.add(br, a, 1);
+        ac.add(br, b, -1);
+        ac.add(br, br, 0, -omega * this.l);
+    }
+
+    initState(ctx) {
+        this.iPrev = ctx.uic ? this.ic : ctx.x[this.br];
+        this.vPrev = ctx.uic ? 0 : ctx.v(this.n[0]) - ctx.v(this.n[1]);
+    }
+
+    accept(ctx) {
+        this.iPrev = ctx.x[this.br];
+        this.vPrev = ctx.v(this.n[0]) - ctx.v(this.n[1]);
+    }
+
+    current(x) { return x[this.br]; }
+}
+
+
+// -------------------------------------------------------------- sources
+
+class VoltageSource extends Element {
+    // wave: a Waveform; acMag/acPhase (deg) define the small-signal stimulus
+    constructor(name, nodes, { wave, acMag = 0, acPhase = 0 }) {
+        super(name, nodes);
+        this.wave = wave;
+        this.acMag = acMag;
+        this.acPhase = acPhase;
+        this.branches = 1;
+        this.acActive = true;
+    }
+
+    value(ctx) {
+        const v = ctx.mode === "tran" ? this.wave.at(ctx.time) : this.wave.dc;
+        return v * (ctx.srcScale === undefined ? 1 : ctx.srcScale);
+    }
+
+    stamp(ctx) {
+        const [a, b] = this.n;
+        const br = this.br;
+        ctx.sys.add(a, br, 1);
+        ctx.sys.add(b, br, -1);
+        ctx.sys.add(br, a, 1);
+        ctx.sys.add(br, b, -1);
+        ctx.sys.rhs(br, this.value(ctx));
+    }
+
+    stampAC(ac) {
+        const [a, b] = this.n;
+        const br = this.br;
+        ac.add(a, br, 1);
+        ac.add(b, br, -1);
+        ac.add(br, a, 1);
+        ac.add(br, b, -1);
+        if (this.acActive) {
+            const ph = (this.acPhase * Math.PI) / 180;
+            ac.rhs(br, this.acMag * Math.cos(ph), this.acMag * Math.sin(ph));
+        }
+    }
+
+    current(x) { return x[this.br]; }
+    breakpoints(tStop) { return this.wave.breakpoints(tStop); }
+}
+
+class CurrentSource extends Element {
+    constructor(name, nodes, { wave }) {
+        super(name, nodes);
+        this.wave = wave;
+        this.last = 0;
+    }
+
+    stamp(ctx) {
+        const i = (ctx.mode === "tran" ? this.wave.at(ctx.time) : this.wave.dc) *
+            (ctx.srcScale === undefined ? 1 : ctx.srcScale);
+        this.last = i;
+        ctx.sys.rhs(this.n[0], -i);
+        ctx.sys.rhs(this.n[1], i);
+    }
+
+    current() { return this.last; }
+    breakpoints(tStop) { return this.wave.breakpoints(tStop); }
+}
+
+
+// ------------------------------------------------ controlled sources (E / G)
+
+class VCVS extends Element {
+    // nodes: [out+, out-, ctrl+, ctrl-]; v(out) = gain * v(ctrl)
+    constructor(name, nodes, { gain }) {
+        super(name, nodes);
+        this.gain = gain;
+        this.branches = 1;
+    }
+
+    stampAny(add) {
+        const [p, n, cp, cn] = this.n;
+        const br = this.br;
+        add(p, br, 1);
+        add(n, br, -1);
+        add(br, p, 1);
+        add(br, n, -1);
+        add(br, cp, -this.gain);
+        add(br, cn, this.gain);
+    }
+
+    stamp(ctx) { this.stampAny((i, j, v) => ctx.sys.add(i, j, v)); }
+    stampAC(ac) { this.stampAny((i, j, v) => ac.add(i, j, v, 0)); }
+    current(x) { return x[this.br]; }
+}
+
+class VCCS extends Element {
+    // nodes: [out+, out-, ctrl+, ctrl-]; current out+ -> out- = gm * v(ctrl)
+    constructor(name, nodes, { gm }) {
+        super(name, nodes);
+        this.gm = gm;
+        this.last = 0;
+    }
+
+    stampAny(add) {
+        const [p, n, cp, cn] = this.n;
+        add(p, cp, this.gm);
+        add(p, cn, -this.gm);
+        add(n, cp, -this.gm);
+        add(n, cn, this.gm);
+    }
+
+    stamp(ctx) {
+        this.stampAny((i, j, v) => ctx.sys.add(i, j, v));
+        this.last = this.gm * (ctx.v(this.n[2]) - ctx.v(this.n[3]));
+    }
+    stampAC(ac) { this.stampAny((i, j, v) => ac.add(i, j, v, 0)); }
+    current() { return this.last; }
+}
+
+
+// ------------------------------------------------------------ nonlinear base
+
+// Shared handling for junction-style devices: stores the Jacobian from the last
+// stamp so AC analysis can reuse the converged operating point.
+class NonlinearElement extends Element {
+    constructor(name, nodes) {
+        super(name, nodes);
+        this.nonlinear = true;
+        this.acNodes = null;
+        this.acJ = null;
+    }
+
+    keepForAC(nodes, J) {
+        this.acNodes = nodes;
+        this.acJ = J.map(row => row.slice());
+    }
+
+    stampACJacobian(ac) {
+        if (!this.acJ) return;
+        for (let k = 0; k < this.acNodes.length; k++) {
+            for (let j = 0; j < this.acNodes.length; j++) {
+                ac.add(this.acNodes[k], this.acNodes[j], this.acJ[k][j], 0);
+            }
+        }
+    }
+}
+
+
+// -------------------------------------------------------------------- diode
+
+class Diode extends NonlinearElement {
+    // p: is, n, rs, bv, ibv, nbv, cjo, vj, m, fc, tt
+    constructor(name, nodes, p = {}) {
+        super(name, nodes);
+        this.p = Object.assign({
+            is: 1e-14, n: 1, rs: 0, bv: Infinity, ibv: 1e-3, nbv: 1,
+            cjo: 0, vj: 0.7, m: 0.5, fc: 0.5, tt: 0
+        }, p);
+        this.vte = this.p.n * SIM.VT;
+        this.vcrit = this.vte * Math.log(this.vte / (Math.SQRT2 * this.p.is));
+        this.vcritBV = isFinite(this.p.bv)
+            ? this.p.nbv * SIM.VT * Math.log(this.p.nbv * SIM.VT / (Math.SQRT2 * this.p.ibv))
+            : Infinity;
+        this.vd = 0;
+        this.qPrev = 0;
+        this.iPrev = 0;
+        this.kk = 0;
+        this.trap = false;
+        this.hasCap = false;
+        this.id = 0;
+        this.gd = 0;
+    }
+
+    bind(circuit) {
+        super.bind(circuit);
+        // internal anode node when there is series resistance
+        this.ai = this.p.rs > 0 ? circuit.internalNode(`${this.name}#a`) : this.n[0];
+    }
+
+    beginSolve(ctx) {
+        this.vd = ctx.v(this.ai) - ctx.v(this.n[1]);
+    }
+
+    eval(vd) {
+        const { is, bv, ibv, nbv } = this.p;
+        let id, gd;
+        if (vd >= -5 * this.vte) {
+            const e = safeExp(vd / this.vte);
+            id = is * (e - 1);
+            gd = (is * e) / this.vte;
+        } else {
+            id = -is;
+            gd = 0;
+        }
+        if (isFinite(bv)) {
+            const vtb = nbv * SIM.VT;
+            const arg = -(vd + bv) / vtb;
+            if (arg > -30) {
+                const e = safeExp(arg);
+                id -= ibv * e;
+                gd += (ibv * e) / vtb;
+            }
+        }
+        return { id, gd };
+    }
+
+    limit(vnew) {
+        let v = pnjlim(vnew, this.vd, this.vte, this.vcrit);
+        if (isFinite(this.p.bv) && v < -this.p.bv + 10 * this.p.nbv * SIM.VT) {
+            const vtb = this.p.nbv * SIM.VT;
+            let t = -(v + this.p.bv);
+            const told = -(this.vd + this.p.bv);
+            t = pnjlim(t, told, vtb, this.vcritBV);
+            v = -(t + this.p.bv);
+        }
+        return v;
+    }
+
+    junctionCap(vd, gd) {
+        const { cjo, vj, m, fc, tt } = this.p;
+        return depletionCap(vd, cjo, vj, m, fc) + tt * gd;
+    }
+
+    // stored charge: depletion + diffusion (transit time * forward current)
+    charge(vd) {
+        const { cjo, vj, m, fc, tt, is } = this.p;
+        let q = depletionCharge(vd, cjo, vj, m, fc);
+        if (tt > 0) q += tt * is * (safeExp(vd / this.vte) - 1);
+        return q;
+    }
+
+    stamp(ctx) {
+        const a = this.n[0], k = this.n[1], ai = this.ai;
+        const s = ctx.sys;
+
+        if (this.p.rs > 0) s.addG(a, ai, 1 / this.p.rs);
+
+        const vdRaw = ctx.v(ai) - ctx.v(k);
+        const vd = this.limit(vdRaw);
+        if (Math.abs(vd - vdRaw) > 1e-12) ctx.noncon = true;
+        this.vd = vd;
+
+        const { id, gd } = this.eval(vd);
+        const g = gd + ctx.gmin;
+        const ieq = id - gd * vd;
+        this.id = id;
+        this.gd = g;
+
+        s.addG(ai, k, g);
+        s.rhs(ai, -ieq);
+        s.rhs(k, ieq);
+
+        this.hasCap = this.p.cjo > 0 || this.p.tt > 0;
+        if (ctx.mode === "tran" && this.hasCap) {
+            const trap = ctx.method === "trap";
+            const kk = (trap ? 2 : 1) / ctx.dt;
+            const gdf = (this.p.is * safeExp(vd / this.vte)) / this.vte;
+            const c = this.junctionCap(vd, gdf);
+            const i0 = kk * (this.charge(vd) - this.qPrev) - (trap ? this.iPrev : 0);
+            const geq = kk * c;
+            const ieqc = i0 - geq * vd;
+            this.kk = kk;
+            this.trap = trap;
+            s.addG(ai, k, geq);
+            s.rhs(ai, -ieqc);
+            s.rhs(k, ieqc);
+        }
+
+        this.keepForAC([ai, k], [[g, -g], [-g, g]]);
+    }
+
+    stampAC(ac, omega) {
+        if (this.p.rs > 0) ac.addY(this.n[0], this.ai, 1 / this.p.rs, 0);
+        const g = this.gd || SIM.GMIN;
+        const c = this.junctionCap(this.vd, Math.max(0, g - SIM.GMIN));
+        ac.addY(this.ai, this.n[1], g, omega * c);
+    }
+
+    initState(ctx) {
+        this.vd = ctx.v(this.ai) - ctx.v(this.n[1]);
+        this.qPrev = this.charge(this.vd);
+        this.iPrev = 0;
+    }
+
+    accept(ctx) {
+        if (!this.hasCap) return;
+        const v = ctx.v(this.ai) - ctx.v(this.n[1]);
+        const q = this.charge(v);
+        this.iPrev = this.kk * (q - this.qPrev) - (this.trap ? this.iPrev : 0);
+        this.qPrev = q;
+    }
+
+    current(x) {
+        const v = (this.ai < 0 ? 0 : x[this.ai]) - (this.n[1] < 0 ? 0 : x[this.n[1]]);
+        return this.eval(v).id + SIM.GMIN * v;
+    }
+}
+
+
+// --------------------------------------------------------------------- BJT
+
+class BJT extends NonlinearElement {
+    // nodes: [B, C, E]; polarity +1 NPN, -1 PNP
+    // p: is, bf, br, nf, nr, vaf, cje, vje, mje, cjc, vjc, mjc, tf, tr, fc
+    constructor(name, nodes, polarity, p = {}) {
+        super(name, nodes);
+        this.pol = polarity;
+        this.p = Object.assign({
+            is: 1e-16, bf: 100, br: 1, nf: 1, nr: 1, vaf: 0,
+            cje: 0, vje: 0.75, mje: 0.33, cjc: 0, vjc: 0.75, mjc: 0.33, tf: 0, tr: 0, fc: 0.5
+        }, p);
+        this.vtf = this.p.nf * SIM.VT;
+        this.vtr = this.p.nr * SIM.VT;
+        this.vcritF = this.vtf * Math.log(this.vtf / (Math.SQRT2 * this.p.is));
+        this.vcritR = this.vtr * Math.log(this.vtr / (Math.SQRT2 * this.p.is));
+        this.vbe = 0;
+        this.vbc = 0;
+        this.ic = 0;
+        this.ib = 0;
+        this.hasCaps = this.p.cje > 0 || this.p.cjc > 0 || this.p.tf > 0 || this.p.tr > 0;
+        // charge state for the B-E and B-C capacitances (NPN-equivalent coordinates)
+        this.cs = [
+            { qPrev: 0, iPrev: 0, kk: 0, trap: false },
+            { qPrev: 0, iPrev: 0, kk: 0, trap: false }
+        ];
+    }
+
+    beginSolve(ctx) {
+        const [b, c, e] = this.n;
+        this.vbe = this.pol * (ctx.v(b) - ctx.v(e));
+        this.vbc = this.pol * (ctx.v(b) - ctx.v(c));
+    }
+
+    // currents and derivatives for the NPN-equivalent device
+    eval(vbe, vbc) {
+        const { is, bf, br, vaf } = this.p;
+        const ef = safeExp(vbe / this.vtf);
+        const er = safeExp(vbc / this.vtr);
+        const iF = is * (ef - 1), iR = is * (er - 1);
+        const gF = (is * ef) / this.vtf, gR = (is * er) / this.vtr;
+
+        let q = 1, dq = 0;
+        if (vaf > 0) {
+            q = 1 - vbc / vaf;
+            dq = -1 / vaf;
+            if (q < 0.1) { q = 0.1; dq = 0; }
+        }
+        const ict = (iF - iR) * q;
+        const dIct_dbe = gF * q;
+        const dIct_dbc = -gR * q + (iF - iR) * dq;
+
+        const ib = iF / bf + iR / br;
+        const ic = ict - iR / br;
+        return {
+            ic, ib, gF, gR,
+            dIc_dbe: dIct_dbe,
+            dIc_dbc: dIct_dbc - gR / br,
+            dIb_dbe: gF / bf,
+            dIb_dbc: gR / br
+        };
+    }
+
+    // B-E and B-C stored charge (NPN-equivalent coordinates) and capacitance dQ/dV:
+    // depletion + diffusion (transit time * junction current)
+    charges(vbe, vbc, m) {
+        const { cje, vje, mje, cjc, vjc, mjc, tf, tr, fc, is } = this.p;
+        const iF = is * (safeExp(vbe / this.vtf) - 1);
+        const iR = is * (safeExp(vbc / this.vtr) - 1);
+        return [
+            { q: depletionCharge(vbe, cje, vje, mje, fc) + tf * iF, c: depletionCap(vbe, cje, vje, mje, fc) + tf * m.gF },
+            { q: depletionCharge(vbc, cjc, vjc, mjc, fc) + tr * iR, c: depletionCap(vbc, cjc, vjc, mjc, fc) + tr * m.gR }
+        ];
+    }
+
+    capacitances(vbe, vbc, m) {
+        return this.charges(vbe, vbc, m).map(x => x.c);
+    }
+
+    stamp(ctx) {
+        const [b, c, e] = this.n;
+        const p = this.pol;
+
+        const rawBE = p * (ctx.v(b) - ctx.v(e));
+        const rawBC = p * (ctx.v(b) - ctx.v(c));
+        const vbe = pnjlim(rawBE, this.vbe, this.vtf, this.vcritF);
+        const vbc = pnjlim(rawBC, this.vbc, this.vtr, this.vcritR);
+        if (Math.abs(vbe - rawBE) > 1e-12 || Math.abs(vbc - rawBC) > 1e-12) ctx.noncon = true;
+        this.vbe = vbe;
+        this.vbc = vbc;
+
+        const m = this.eval(vbe, vbc);
+        this.ic = p * m.ic;
+        this.ib = p * m.ib;
+
+        // terminal order: B, C, E.  Derivatives w.r.t. (vbe, vbc) -> node voltages.
+        const dB = [m.dIb_dbe, m.dIb_dbc];
+        const dC = [m.dIc_dbe, m.dIc_dbc];
+        const dE = [-(m.dIc_dbe + m.dIb_dbe), -(m.dIc_dbc + m.dIb_dbc)];
+        const rows = [dB, dC, dE];
+        const cur = [m.ib, m.ic, -(m.ic + m.ib)];
+
+        const J = [], Ieq = [];
+        for (let k = 0; k < 3; k++) {
+            const [a1, a2] = rows[k];
+            // node voltage derivatives: vbe = vb - ve, vbc = vb - vc
+            J.push([a1 + a2, -a2, -a1]);
+            Ieq.push(p * (cur[k] - a1 * vbe - a2 * vbc));
+        }
+        // add gmin across the junctions for robustness
+        const g = ctx.gmin;
+        J[0][0] += 2 * g; J[0][1] -= g; J[0][2] -= g;
+        J[1][0] -= g; J[1][1] += g;
+        J[2][0] -= g; J[2][2] += g;
+
+        stampNonlinear(ctx.sys, [b, c, e], J, Ieq);
+        this.keepForAC([b, c, e], J);
+
+        if (this.hasCaps && ctx.mode === "tran") {
+            const trap = ctx.method === "trap";
+            const kk = (trap ? 2 : 1) / ctx.dt;
+            const ch = this.charges(vbe, vbc, m);
+            [[b, e, vbe], [b, c, vbc]].forEach(([n1, n2, vnpn], i) => {
+                const st = this.cs[i];
+                const geq = kk * ch[i].c;
+                // current in NPN coordinates; terminal current flips sign for PNP
+                const iAct = p * (kk * (ch[i].q - st.qPrev) - (trap ? st.iPrev : 0));
+                const ieqc = iAct - geq * (p * vnpn);
+                ctx.sys.addG(n1, n2, geq);
+                ctx.sys.rhs(n1, -ieqc);
+                ctx.sys.rhs(n2, ieqc);
+                st.kk = kk;
+                st.trap = trap;
+            });
+        }
+    }
+
+    stampAC(ac, omega) {
+        this.stampACJacobian(ac);
+        if (!this.hasCaps) return;
+        const [b, c, e] = this.n;
+        const m = this.eval(this.vbe, this.vbc);
+        const [cbe, cbc] = this.capacitances(this.vbe, this.vbc, m);
+        ac.addY(b, e, 0, omega * cbe);
+        ac.addY(b, c, 0, omega * cbc);
+    }
+
+    npnVoltages(ctx) {
+        const [b, c, e] = this.n;
+        return [this.pol * (ctx.v(b) - ctx.v(e)), this.pol * (ctx.v(b) - ctx.v(c))];
+    }
+
+    initState(ctx) {
+        if (!this.hasCaps) return;
+        const [vbe, vbc] = this.npnVoltages(ctx);
+        const ch = this.charges(vbe, vbc, this.eval(vbe, vbc));
+        this.cs.forEach((st, i) => { st.qPrev = ch[i].q; st.iPrev = 0; });
+    }
+
+    accept(ctx) {
+        if (!this.hasCaps) return;
+        const [vbe, vbc] = this.npnVoltages(ctx);
+        const ch = this.charges(vbe, vbc, this.eval(vbe, vbc));
+        this.cs.forEach((st, i) => {
+            st.iPrev = st.kk * (ch[i].q - st.qPrev) - (st.trap ? st.iPrev : 0);
+            st.qPrev = ch[i].q;
+        });
+    }
+
+    current(x) {
+        const v = (i) => (i < 0 ? 0 : x[i]);
+        const m = this.eval(this.pol * (v(this.n[0]) - v(this.n[2])), this.pol * (v(this.n[0]) - v(this.n[1])));
+        return this.pol * m.ic; // collector current
+    }
+}
+
+
+// ------------------------------------------------------------------ MOSFET
+
+class MOSFET extends NonlinearElement {
+    // nodes: [G, D, S]; polarity +1 NMOS, -1 PMOS
+    // p: vto (magnitude, positive), beta (kp*W/L), lambda
+    constructor(name, nodes, polarity, p = {}) {
+        super(name, nodes);
+        this.pol = polarity;
+        this.p = Object.assign({ vto: 2, beta: 0.02, lambda: 0.01 }, p);
+        this.vgs = 0;
+        this.id = 0;
+    }
+
+    bind(circuit) {
+        super.bind(circuit);
+        const [g, d, s] = this.nodeNames;
+        const p = this.p;
+        if (p.bodyDiode) {
+            const pins = this.pol > 0 ? [s, d] : [d, s];
+            circuit.add(new Diode(`${this.name}.bd`, pins, p.bodyDiode));
+        }
+        if (p.cgs > 0) circuit.add(new Capacitor(`${this.name}.cgs`, [g, s], { c: p.cgs }));
+        if (p.cgd > 0) circuit.add(new Capacitor(`${this.name}.cgd`, [g, d], { c: p.cgd }));
+    }
+
+    beginSolve(ctx) {
+        const [g, d, s] = this.n;
+        this.vgs = this.pol * (ctx.v(g) - ctx.v(s));
+    }
+
+    // forward-mode square-law current; returns id, gm, gds
+    fwd(vgs, vds) {
+        const { vto, beta, lambda } = this.p;
+        const vov = vgs - vto;
+        if (vov <= 0) return { id: 0, gm: 0, gds: 0 };
+        const lam = 1 + lambda * vds;
+        if (vds < vov) {
+            const core = vov * vds - (vds * vds) / 2;
+            return {
+                id: beta * core * lam,
+                gm: beta * vds * lam,
+                gds: beta * (vov - vds) * lam + beta * core * lambda
+            };
+        }
+        return {
+            id: (beta / 2) * vov * vov * lam,
+            gm: beta * vov * lam,
+            gds: (beta / 2) * vov * vov * lambda
+        };
+    }
+
+    // drain-current model valid for either sign of vds (source/drain swap)
+    eval(vgs, vds) {
+        if (vds >= 0) return this.fwd(vgs, vds);
+        const f = this.fwd(vgs - vds, -vds);
+        return { id: -f.id, gm: -f.gm, gds: f.gm + f.gds };
+    }
+
+    stamp(ctx) {
+        const [g, d, s] = this.n;
+        const p = this.pol;
+
+        let vgs = p * (ctx.v(g) - ctx.v(s));
+        const vds = p * (ctx.v(d) - ctx.v(s));
+        const vgsLim = fetlim(vgs, this.vgs, this.p.vto);
+        if (Math.abs(vgsLim - vgs) > 1e-12) ctx.noncon = true;
+        vgs = vgsLim;
+        this.vgs = vgs;
+
+        const m = this.eval(vgs, vds);
+        this.id = p * m.id;
+
+        // Id flows into D and out of S.  dId/dvg = gm, dId/dvd = gds, dId/dvs = -(gm+gds)
+        const J = [
+            [0, 0, 0],
+            [m.gm, m.gds, -(m.gm + m.gds)],
+            [-m.gm, -m.gds, m.gm + m.gds]
+        ];
+        const ieqD = p * (m.id - m.gm * vgs - m.gds * vds);
+        stampNonlinear(ctx.sys, [g, d, s], J, [0, ieqD, -ieqD]);
+        ctx.sys.addG(d, s, ctx.gmin);
+        ctx.sys.addG(g, s, ctx.gmin);
+
+        this.keepForAC([g, d, s], J);
+    }
+
+    stampAC(ac) { this.stampACJacobian(ac); }
+
+    current(x) {
+        const v = (i) => (i < 0 ? 0 : x[i]);
+        const p = this.pol;
+        return p * this.eval(p * (v(this.n[0]) - v(this.n[2])), p * (v(this.n[1]) - v(this.n[2]))).id;
+    }
+}
+
+
+// ------------------------------------------------------------ behavioural
+
+// Output driven through ro toward a target voltage; used by op-amp and gates.
+// A first-order lag (tau) is applied in transient analysis via the BE factor.
+class BehavioralDriver extends NonlinearElement {
+    constructor(name, nodes, ro, tau) {
+        super(name, nodes);
+        this.ro = ro;
+        this.tau = tau;
+        this.vf = 0;       // filtered target at last accepted step
+        this.vtEff = 0;
+    }
+
+    lagFactor(ctx) {
+        if (ctx.mode !== "tran" || !(this.tau > 0)) return 1;
+        return ctx.dt / (this.tau + ctx.dt);
+    }
+
+    // subclasses implement target(v) -> { vt, dvt: [d/dv_k...] } over this.inNodes
+    drive(ctx, outNode, inNodes, vt, dvt) {
+        const k = this.lagFactor(ctx);
+        const vtEff = k * vt + (1 - k) * this.vf;
+        this.vtEff = vtEff;
+        const G = 1 / this.ro;
+
+        const nodes = [...inNodes, outNode];
+        const row = [...dvt.map(d => -G * k * d), G];
+        const v0 = nodes.map(n => ctx.v(n));
+        const cur = G * (v0[v0.length - 1] - vtEff);
+        let jv = 0;
+        for (let i = 0; i < row.length; i++) jv += row[i] * v0[i];
+        const ieq = cur - jv;
+
+        for (let i = 0; i < nodes.length; i++) ctx.sys.add(outNode, nodes[i], row[i]);
+        ctx.sys.rhs(outNode, -ieq);
+
+        const J = nodes.map(() => nodes.map(() => 0));
+        J[nodes.length - 1] = row;
+        this.keepForAC(nodes, J);
+    }
+
+    // p.ic seeds the lagged output (like .ic): needed to kick off ring oscillators,
+    // whose DC solution is the unstable all-mid-rail equilibrium.
+    initState(ctx) { this.vf = this.p && this.p.ic !== undefined ? this.p.ic : this.vtEff; }
+    accept() { this.vf = this.vtEff; }
+}
+
+class OpAmp extends BehavioralDriver {
+    // nodes: [IN-, IN+, OUT]; p: gain, vp, vn, drop, ro, rin, gbw
+    //
+    // Single dominant pole BEFORE the output clamp, as in a real op-amp (and in the
+    // exported macromodel): a = lag(gain * vd), then out = clamp(a) to the rails.
+    // Clamping first would cap the slew rate at rail / tau.
+    constructor(name, nodes, p = {}) {
+        const q = Object.assign({ gain: 2e5, vp: 15, vn: -15, drop: 1.5, ro: 75, rin: 2e6, gbw: 1e6 }, p);
+        super(name, nodes, q.ro, q.gain / (2 * Math.PI * q.gbw));
+        this.p = q;
+        this.pole = 2 * Math.PI * q.gbw / q.gain;
+        this.aPrev = 0;
+        this.aNow = 0;
+    }
+
+    lagFactor() { return 1; } // the lag is applied to `a`, not to the clamped output
+
+    stepFactor(ctx) {
+        if (ctx.mode !== "tran" || !(this.tau > 0)) return 1;
+        return ctx.dt / (this.tau + ctx.dt);
+    }
+
+    stamp(ctx) {
+        const [inN, inP, out] = this.n;
+        const { gain, vp, vn, drop, rin } = this.p;
+        ctx.sys.addG(inN, inP, 1 / rin);
+
+        const hi = vp - drop, lo = vn + drop;
+        const mid = (hi + lo) / 2, half = (hi - lo) / 2;
+        const vd = ctx.v(inP) - ctx.v(inN);
+
+        const k = this.stepFactor(ctx);
+        const a = (1 - k) * this.aPrev + k * gain * vd;
+        const th = Math.tanh(a / half);
+        const vt = mid + half * th;
+        const dvt = k * gain * (1 - th * th);
+
+        this.aNow = a;
+        this.drive(ctx, out, [inN, inP], vt, [-dvt, dvt]);
+    }
+
+    stampAC(ac, omega) {
+        const [inN, inP, out] = this.n;
+        ac.addY(inN, inP, 1 / this.p.rin, 0);
+        const G = 1 / this.ro;
+        const dvt = this.acJ ? -this.acJ[2][1] / G : 0; // small-signal gain from the OP
+        // single pole: A(jw) = A0 / (1 + jw/wp)
+        const den = 1 + (omega / this.pole) * (omega / this.pole);
+        const re = dvt / den, im = -dvt * (omega / this.pole) / den;
+        ac.add(out, out, G, 0);
+        ac.add(out, inP, -G * re, -G * im);
+        ac.add(out, inN, G * re, G * im);
+    }
+
+    initState() { this.aPrev = this.aNow; }
+    accept() { this.aPrev = this.aNow; }
+    current() { return 0; }
+}
+
+class LogicGate extends BehavioralDriver {
+    // nodes: [A, (B), Y]; kind AND OR NOT NAND NOR XOR; p: vcc, vlow, ro, tpd
+    constructor(name, nodes, kind, p = {}) {
+        const q = Object.assign({ vcc: 5, vlow: 0, ro: 50, tpd: 10e-9 }, p);
+        super(name, nodes, q.ro, q.tpd);
+        this.kind = kind;
+        this.p = q;
+    }
+
+    stamp(ctx) {
+        const inNodes = this.n.slice(0, -1);
+        const out = this.n[this.n.length - 1];
+        const { vcc, vlow } = this.p;
+        const vth = (vcc + vlow) / 2;
+        const vs = (vcc - vlow) / 20;
+
+        const s = inNodes.map(nd => 1 / (1 + safeExp(-(ctx.v(nd) - vth) / vs)));
+        const ds = s.map(x => (x * (1 - x)) / vs);
+
+        let f, df;
+        const a = s[0], b = s.length > 1 ? s[1] : 0;
+        switch (this.kind) {
+            case "AND": f = a * b; df = [b, a]; break;
+            case "NAND": f = 1 - a * b; df = [-b, -a]; break;
+            case "OR": f = 1 - (1 - a) * (1 - b); df = [1 - b, 1 - a]; break;
+            case "NOR": f = (1 - a) * (1 - b); df = [-(1 - b), -(1 - a)]; break;
+            case "XOR": f = a + b - 2 * a * b; df = [1 - 2 * b, 1 - 2 * a]; break;
+            default: f = 1 - a; df = [-1]; break; // NOT
+        }
+        const span = vcc - vlow;
+        const vt = vlow + span * f;
+        const dvt = inNodes.map((_, i) => span * df[i] * ds[i]);
+
+        this.drive(ctx, out, inNodes, vt, dvt);
+    }
+
+    stampAC(ac) { this.stampACJacobian(ac); }
+}
+
+
+// -------------------------------------------------------------------- 555
+
+class Timer555 extends Element {
+    // nodes: [GND, TRIG, OUT, RESET, VCC, DISCH, THRES, CTRL]
+    constructor(name, nodes, p = {}) {
+        super(name, nodes);
+        this.p = Object.assign({ rdiv: 5000, rout: 10, rdis: 10, dropHigh: 1.7, lowOut: 0.1 }, p);
+        this.q = 0;
+        this.nonlinear = false;
+    }
+
+    bind(circuit) {
+        super.bind(circuit);
+        this.ta = circuit.internalNode(`${this.name}#a`); // 2/3 Vcc tap (CTRL)
+        this.tb = circuit.internalNode(`${this.name}#b`); // 1/3 Vcc tap
+    }
+
+    stamp(ctx) {
+        const [gnd, trig, out, reset, vcc, disch, thres, ctrl] = this.n;
+        const s = ctx.sys;
+        const r = this.p.rdiv;
+
+        s.addG(vcc, this.ta, 1 / r);
+        s.addG(this.ta, this.tb, 1 / r);
+        s.addG(this.tb, gnd, 1 / r);
+        s.addG(ctrl, this.ta, 1 / 1e-3); // CTRL pin is the 2/3 tap (tiny series R)
+
+        const vsup = ctx.v(vcc) - ctx.v(gnd);
+        const target = this.q ? ctx.v(gnd) + Math.max(0, vsup - this.p.dropHigh) : ctx.v(gnd) + this.p.lowOut;
+        const G = 1 / this.p.rout;
+        s.add(out, out, G);
+        s.rhs(out, G * target);
+
+        // RESET floats high if left open (it is active low)
+        s.addG(reset, vcc, 1 / 100e3);
+
+        // discharge transistor conducts while the latch output is low
+        if (!this.q) s.addG(disch, gnd, 1 / this.p.rdis);
+    }
+
+    latch(ctx) {
+        const [gnd, trig, , reset, , , thres] = this.n;
+        const v = (n) => ctx.v(n) - ctx.v(gnd);
+        const va = v(this.ta), vb = v(this.tb);
+        const resetLow = v(reset) < 0.7;
+        if (resetLow || v(thres) > va) this.q = 0;
+        else if (v(trig) < vb) this.q = 1;
+    }
+
+    initState(ctx) { this.q = 0; this.latch(ctx); }
+    accept(ctx) { this.latch(ctx); }
+}

@@ -1,0 +1,12 @@
+NPN switch driving an LED from a pulse
+VCC vcc 0 DC 5
+VIN in 0 PULSE(0 5 20u 1u 1u 100u 250u)
+RB in b 4.7k
+RL vcc a 330
+D1 a c LEDR
+Q1 c b 0 QN
+.model LEDR D(IS=7.7e-18 N=2 RS=3 CJO=30p VJ=0.8 M=0.4)
+.model QN NPN(IS=14.34f BF=255.9 BR=6.092 VAF=74.03 CJE=22p CJC=7p TF=400p TR=46n)
+.op
+.tran 200n 600u
+.end

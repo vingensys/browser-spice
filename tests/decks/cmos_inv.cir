@@ -1,0 +1,11 @@
+CMOS inverter driven by a pulse
+VDD vdd 0 DC 5
+VIN in 0 PULSE(0 5 10u 1u 1u 40u 100u)
+MP out in vdd vdd PM W=2u L=1u
+MN out in 0 0 NM W=1u L=1u
+CL out 0 10p
+.model NM NMOS(LEVEL=1 VTO=1 KP=0.0001 LAMBDA=0.02)
+.model PM PMOS(LEVEL=1 VTO=-1 KP=0.00005 LAMBDA=0.02)
+.op
+.tran 100n 200u
+.end

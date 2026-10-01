@@ -1,0 +1,15 @@
+{
+  "name": "browser-spice",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browser-based schematic capture and SPICE simulation",
+  "scripts": {
+    "postinstall": "node scripts/vendor-ngspice.mjs",
+    "vendor": "node scripts/vendor-ngspice.mjs",
+    "serve": "python3 -m http.server 8137",
+    "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/ngspice-wasm.test.js"
+  },
+  "dependencies": {
+    "eecircuit-engine": "1.8.0"
+  }
+}

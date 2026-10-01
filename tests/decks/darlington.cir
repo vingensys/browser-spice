@@ -1,0 +1,9 @@
+Darlington emitter follower
+VCC vcc 0 DC 12
+VIN in 0 DC 6
+Q1 vcc in m QN
+Q2 vcc m out QN
+RE out 0 100
+.model QN NPN(IS=14.34f BF=255.9 BR=6.092 NF=1 NR=1 VAF=74.03)
+.op
+.end

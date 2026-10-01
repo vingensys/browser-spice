@@ -1,0 +1,15 @@
+NMOS common-source amplifier
+VDD vdd 0 DC 12
+VIN in 0 SIN(0 0.05 10k) AC 0.05
+CIN in g 1u
+R1 vdd g 1Meg
+R2 g 0 470k
+RD vdd d 4.7k
+RS s 0 1k
+CS s 0 47u
+M1 d g s s NM W=1u L=1u
+.model NM NMOS(LEVEL=1 VTO=2 KP=0.02 LAMBDA=0.01)
+.op
+.ac dec 10 10 10Meg
+.tran 1u 1m
+.end

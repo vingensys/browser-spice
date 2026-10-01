@@ -335,6 +335,14 @@ class SymbolRenderer {
 
     drawMOSFETP(component) {
         this.drawMOSFETN(component);
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#50fa7b";
+        ctx.lineWidth = 2;
+        ctx.fillStyle = "#171b23";
+        ctx.beginPath();
+        ctx.arc(-22, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
     }
 
     drawOpAmp(component) {

@@ -473,6 +473,14 @@ class SchematicEditor {
         else if (type === "C") defaultValue = "10 µF";
         else if (type === "L") defaultValue = "10 mH";
         else if (type === "V") defaultValue = "5 V";
+        else if (type === "IC555") defaultValue = "NE555";
+
+        // semiconductors start with their library default model
+        let model;
+        if (typeof SIM_DEFAULT_MODEL !== "undefined" && SIM_DEFAULT_MODEL[type]) {
+            model = SIM_DEFAULT_MODEL[type];
+            defaultValue = model;
+        }
 
         const component = {
             id: this.nextId++,
@@ -482,6 +490,7 @@ class SchematicEditor {
             y: 0,
             rotation,
             value: defaultValue,
+            model,
             sourceType: type === "V" ? "DC" : undefined,
             dcVoltage: type === "V" ? 5 : undefined,
             dcOffset: type === "V" ? 0 : undefined,

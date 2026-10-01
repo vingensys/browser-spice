@@ -1,8 +1,2 @@
-# Dependencies
 node_modules/
-
-# Logs & temporary files
-*.log
-scratch/
-.DS_Store
-Thumbs.db
+vendor/

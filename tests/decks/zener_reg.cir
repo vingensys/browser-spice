@@ -1,0 +1,8 @@
+Zener shunt regulator
+V1 in 0 DC 12
+R1 in out 470
+D1 0 out DZ
+RL out 0 1k
+.model DZ D(IS=1e-14 N=1 RS=7 BV=5.1 IBV=49m)
+.op
+.end
