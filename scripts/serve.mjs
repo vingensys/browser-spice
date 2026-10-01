@@ -24,7 +24,7 @@ function version() {
     } catch (e) { return "dev"; }
 }
 
-http.createServer((req, res) => {
+const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://localhost");
     const headers = { "Cache-Control": "no-store, max-age=0", "Pragma": "no-cache" };
     if (url.pathname === "/version.json") {
@@ -40,4 +40,19 @@ http.createServer((req, res) => {
         res.writeHead(200, { ...headers, "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });
         res.end(data);
     });
-}).listen(port, () => console.log(`Browser SPICE on http://localhost:${port}  (build ${version()})`));
+});
+
+server.on("error", async (err) => {
+    if (err.code !== "EADDRINUSE") throw err;
+    // something already listens here: say whether it is this server (fine) or an old one (stale caching)
+    try {
+        const r = await fetch(`http://localhost:${port}/version.json`);
+        const j = await r.json();
+        console.log(`Port ${port} is already served by Browser SPICE (build ${j.version}). Open http://localhost:${port} and reload; nothing to restart.`);
+    } catch (e) {
+        console.log(`Port ${port} is taken by another server (probably the old python one, which caches JavaScript). Stop it, or run: PORT=8138 npm run serve`);
+    }
+    process.exit(0);
+});
+
+server.listen(port, () => console.log(`Browser SPICE on http://localhost:${port}  (build ${version()})`));
