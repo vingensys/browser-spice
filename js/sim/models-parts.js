@@ -48,5 +48,14 @@ SIM_MODELS.RELAY = {
 SIM_MODELS.JFET_N = Object.assign({ "NJF": { desc: "Generic N-channel JFET (Vp -2 V, Idss 5 mA)", params: { vto: -2, beta: 1.25e-3, lambda: 2e-3, is: 1e-14, cgs: 5e-12, cgd: 2e-12 } } }, SIM_MODELS.JFET_N || {});
 SIM_MODELS.JFET_P = Object.assign({ "PJF": { desc: "Generic P-channel JFET (Vp 2 V, Idss 5 mA)", params: { vto: -2, beta: 1.25e-3, lambda: 2e-3, is: 1e-14, cgs: 5e-12, cgd: 2e-12 } } }, SIM_MODELS.JFET_P || {});
 
-Object.assign(SIM_DEFAULT_MODEL, { REG: "7805", SCR: "C106D", TRIAC: "BT136", RELAY: "12V" });
+// optocouplers: typical current-transfer ratio (collector current / LED current)
+SIM_MODELS.OPTO = {
+    "4N25": { desc: "Phototransistor optocoupler, typical CTR 50 %", params: { ctr: 0.5, vsat: 0.3 } },
+    "4N35": { desc: "Phototransistor optocoupler, typical CTR 100 %", params: { ctr: 1.0, vsat: 0.3 } },
+    "PC817": { desc: "Phototransistor optocoupler, typical CTR 130 %", params: { ctr: 1.3, vsat: 0.2 } },
+    "TLP521": { desc: "Phototransistor optocoupler, typical CTR 100 %", params: { ctr: 1.0, vsat: 0.3 } },
+    "CNY17-3": { desc: "Phototransistor optocoupler, CTR 100-200 %", params: { ctr: 1.5, vsat: 0.3 } }
+};
+
+Object.assign(SIM_DEFAULT_MODEL, { OPTO: "PC817", REG: "7805", SCR: "C106D", TRIAC: "BT136", RELAY: "12V" });
 Object.assign(SIM_DEFAULT_MODEL, { JFET_N: SIM_MODELS.JFET_N.J201 ? "J201" : "NJF", JFET_P: SIM_MODELS.JFET_P["2N5460"] ? "2N5460" : "PJF" });

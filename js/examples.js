@@ -16,12 +16,26 @@ class ExampleBuilder {
     }
 
     wire(a, pa, b, pb) {
-        this.ed.wires.push({
+        const w = {
             id: this.ed.nextId++,
             start: { type: "terminal", component: a.id, terminal: pa },
             end: { type: "terminal", component: b.id, terminal: pb },
             route: null
-        });
+        };
+        this.ed.wires.push(w);
+        return w;
+    }
+
+    // a pin wired to a point on an existing wire (makes a junction, like clicking a wire in the editor)
+    junction(a, pa, wire, x, y) {
+        const w = {
+            id: this.ed.nextId++,
+            start: { type: "terminal", component: a.id, terminal: pa },
+            end: { type: "wire", wireId: wire.id, x, y },
+            route: null
+        };
+        this.ed.wires.push(w);
+        return w;
     }
 
     pin(c, name) {
@@ -120,22 +134,26 @@ const EXAMPLES = [
         note: "2N3904 stage with emitter bypass. Run Transient: the 5 mV input is amplified and inverted.",
         settings: { tStop: "4m", tStep: "5u" },
         build(b) {
-            const vcc = b.part("V", 140, 200, { rot: 270, dcVoltage: 12, value: "12 V" });
-            const vin = b.part("V", 100, 420, { rot: 270, sourceType: "AC", acMagnitude: 0.005, frequency: 1000, dcOffset: 0, acPhase: 0 });
-            const cin = b.part("C", 240, 380, { value: "10 µF" });
+            // bias divider down x = 340, signal in from the left, collector load up, emitter network down
+            const vcc = b.part("V", 60, 200, { rot: 270, dcVoltage: 12, value: "12 V" });
+            const gv = b.part("GND", 60, 320);
+            const vin = b.part("V", 140, 440, { rot: 270, sourceType: "AC", acMagnitude: 0.005, frequency: 1000, dcOffset: 0, acPhase: 0 });
+            const gi = b.part("GND", 140, 560);
+            const cin = b.part("C", 240, 320, { value: "10 µF" });
             const r1 = b.part("R", 340, 200, { rot: 90, value: "47 kΩ" });
             const r2 = b.part("R", 340, 400, { rot: 90, value: "10 kΩ" });
-            const rc = b.part("R", 480, 180, { rot: 90, value: "2.2 kΩ" });
+            const rc = b.part("R", 480, 200, { rot: 90, value: "2.2 kΩ" });
             const q = b.part("BJT_NPN", 460, 320, { model: "2N3904", value: "2N3904" });
             const re = b.part("R", 480, 440, { rot: 90, value: "470 Ω" });
-            const ce = b.part("C", 580, 440, { rot: 90, value: "100 µF" });
+            const ce = b.part("C", 600, 440, { rot: 90, value: "100 µF" });
             const g = b.part("GND", 480, 560);
-            b.wire(vcc, "2", r1, "1"); b.wire(vcc, "2", rc, "1");
-            b.wire(r1, "2", q, "B"); b.wire(r2, "1", q, "B");
-            b.wire(vin, "2", cin, "1"); b.wire(cin, "2", q, "B");
+            b.wire(vcc, "2", r1, "1"); b.wire(r1, "1", rc, "1");
+            const bias = b.wire(r1, "2", r2, "1");            // the divider; the base and the coupling capacitor tap it
+            b.junction(q, "B", bias, 340, 320); b.junction(cin, "2", bias, 340, 320);
+            b.wire(vin, "2", cin, "1");
             b.wire(rc, "2", q, "C"); b.wire(q, "E", re, "1"); b.wire(q, "E", ce, "1");
-            b.wire(r2, "2", g, "1"); b.wire(re, "2", g, "1"); b.wire(ce, "2", g, "1");
-            b.wire(vcc, "1", g, "1"); b.wire(vin, "1", g, "1");
+            b.wire(re, "2", g, "1"); b.wire(ce, "2", re, "2"); b.wire(r2, "2", re, "2");
+            b.wire(vcc, "1", gv, "1"); b.wire(vin, "1", gi, "1");
             b.vprobe(cin, "1", "V(in)"); b.vprobe(q, "C", "V(out)");
         }
     },
@@ -163,21 +181,23 @@ const EXAMPLES = [
         note: "Free-running 555 (about 690 Hz). Run Transient and probe the timing capacitor and output.",
         settings: { tStop: "10m", tStep: "5u" },
         build(b) {
+            // supply and LED on the left, the timing network in a column on the right
             const v = b.part("V", 100, 260, { rot: 270, dcVoltage: 5, value: "5 V" });
-            const u = b.part("IC555", 360, 300, { value: "NE555" });
-            const r1 = b.part("R", 520, 180, { rot: 90, value: "1 kΩ" });
-            const r2 = b.part("R", 520, 300, { rot: 90, value: "10 kΩ" });
-            const c1 = b.part("C", 520, 420, { rot: 90, value: "100 nF" });
-            const cc = b.part("C", 640, 380, { rot: 90, value: "10 nF" });
-            const r3 = b.part("R", 180, 340, { value: "330 Ω" });
+            const u = b.part("IC555", 400, 320, { value: "NE555" });
+            const r1 = b.part("R", 560, 200, { rot: 90, value: "1 kΩ" });
+            const r2 = b.part("R", 560, 320, { rot: 90, value: "10 kΩ" });
+            const c1 = b.part("C", 560, 440, { rot: 90, value: "100 nF" });
+            const cc = b.part("C", 680, 440, { rot: 90, value: "10 nF" });
+            const r3 = b.part("R", 200, 340, { value: "330 Ω" });
             const led = b.part("LED", 100, 420, { rot: 90, model: "RED", value: "RED" });
-            const g = b.part("GND", 360, 540);
-            b.wire(v, "2", u, "VCC"); b.wire(v, "2", u, "RESET"); b.wire(v, "2", r1, "1");
-            b.wire(r1, "2", r2, "1"); b.wire(u, "DISCH", r2, "1");
-            b.wire(r2, "2", u, "THRES"); b.wire(r2, "2", u, "TRIG"); b.wire(r2, "2", c1, "1");
+            const g = b.part("GND", 400, 560);
+            const gu = b.part("GND", 280, 240);
+            b.wire(v, "2", r1, "1"); b.wire(r1, "1", u, "VCC"); b.wire(v, "2", u, "RESET");
+            b.wire(r1, "2", r2, "1"); b.wire(u, "DISCH", r1, "2");
+            b.wire(r2, "2", u, "THRES"); b.wire(u, "THRES", u, "TRIG"); b.wire(r2, "2", c1, "1");
             b.wire(u, "CTRL", cc, "1");
             b.wire(u, "OUT", r3, "2"); b.wire(r3, "1", led, "1");
-            b.wire(u, "GND", g, "1"); b.wire(c1, "2", g, "1"); b.wire(cc, "2", g, "1");
+            b.wire(u, "GND", gu, "1"); b.wire(c1, "2", g, "1"); b.wire(cc, "2", g, "1");
             b.wire(led, "2", g, "1"); b.wire(v, "1", g, "1");
             b.vprobe(u, "OUT", "V(out)"); b.vprobe(u, "THRES", "V(cap)");
         }
@@ -280,19 +300,24 @@ const EXAMPLES = [
         note: "A 5 V logic pulse switches a 2N2222 that drives a 12 V relay; its contact lights a 12 V lamp. The 1N4007 absorbs the coil's kick. Press Play.",
         settings: { tStop: "80m", tStep: "50u" },
         build(b) {
+            // coil and flyback diode in the middle, driver transistor below, lamp on the contact to the right
             const vcc = b.part("V", 100, 300, { rot: 270, dcVoltage: 12, value: "12 V" });
-            const k = b.part("RELAY", 420, 220, { model: "12V", value: "12V" });
-            const d = b.part("D", 300, 220, { rot: 90, model: "1N4007", value: "1N4007" });
-            const q = b.part("BJT_NPN", 420, 400, {});
-            const rb = b.part("R", 280, 400, { value: "4.7 kΩ" });
+            const g1 = b.part("GND", 100, 380);
+            const k = b.part("RELAY", 420, 260, { model: "12V", value: "12V" });
+            const d = b.part("D", 280, 260, { rot: 270, model: "1N4007", value: "1N4007" });
+            const q = b.part("BJT_NPN", 420, 420, {});
+            const rb = b.part("R", 260, 420, { value: "4.7 kΩ" });
             const vin = b.part("V", 100, 500, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 5e-3, rise: 1e-6, fall: 1e-6, width: 30e-3, period: 60e-3 } });
-            const lamp = b.part("LAMP", 700, 260, { rot: 90, vrated: "12", prated: "5", value: "12 V 5 W" });
-            const g = b.part("GND", 440, 600);
-            b.wire(vcc, "2", k, "COIL+"); b.wire(k, "COIL+", d, "2"); b.wire(d, "1", k, "COIL-");
+            const lamp = b.part("LAMP", 600, 300, { rot: 90, vrated: "12", prated: "5", value: "12 V 5 W" });
+            const g = b.part("GND", 440, 560);
+            const g2 = b.part("GND", 100, 600);
+            const g3 = b.part("GND", 600, 420);
+            b.wire(vcc, "2", k, "C1"); b.wire(vcc, "2", k, "COIL+");
+            b.wire(d, "2", k, "COIL+"); b.wire(d, "1", k, "COIL-");
             b.wire(k, "COIL-", q, "C"); b.wire(q, "E", g, "1");
             b.wire(vin, "2", rb, "1"); b.wire(rb, "2", q, "B");
-            b.wire(vcc, "2", k, "C1"); b.wire(k, "C2", lamp, "1"); b.wire(lamp, "2", g, "1");
-            b.wire(vin, "1", g, "1"); b.wire(vcc, "1", g, "1");
+            b.wire(k, "C2", lamp, "1"); b.wire(lamp, "2", g3, "1");
+            b.wire(vcc, "1", g1, "1"); b.wire(vin, "1", g2, "1");
             b.vprobe(k, "COIL-", "V(coil)"); b.vprobe(lamp, "1", "V(lamp)");
         }
     },
@@ -363,6 +388,28 @@ const EXAMPLES = [
         }
     }
 ];
+
+// Build an example off-sheet and return it as a clipboard block, leaving the design, its undo
+// history and the view untouched. The caller then pastes it (editor.beginPaste) next to what is there.
+function exampleAsClipboard(editor, id) {
+    const ex = EXAMPLES.find(e => e.id === id);
+    if (!ex) return null;
+    const saved = editor.snapshot();
+    const view = { zoom: editor.zoom, panX: editor.panX, panY: editor.panY };
+    const history = [editor.historyStack, editor.futureStack];
+    try {
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        editor.clearSelection();
+        ex.build(new ExampleBuilder(editor));
+        editor.refreshWires();
+        return { clip: editor.clipboardFrom(editor.components), ex };
+    } finally {
+        editor.restore(saved);
+        Object.assign(editor, view);
+        [editor.historyStack, editor.futureStack] = history;
+        editor.draw();
+    }
+}
 
 function loadExampleById(editor, id) {
     const ex = EXAMPLES.find(e => e.id === id) || EXAMPLES[0];

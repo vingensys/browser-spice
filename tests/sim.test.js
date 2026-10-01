@@ -15,12 +15,12 @@ const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n
 const S = new Function(src + `
 return { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
          Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard, Complex,
-         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, Switch, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
+         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, Switch, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
 if (process.env.SPARSE) S.SPARSE_THRESHOLD.n = 0; // force the sparse solver for every circuit
 
 const { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
     Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard,
-    JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop } = S;
+    JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS } = S;
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -924,6 +924,26 @@ test("vendor JFET models import as JFET parts", () => {
     const r = SimModelLibrary.importText("m\n.model VJ NJF(VTO=-1.5 BETA=2m)\n.model VP PJF(VTO=-2 BETA=1m)\n.end");
     if (!SIM_MODELS.JFET_N.VJ || !SIM_MODELS.JFET_P.VP) throw new Error(JSON.stringify(r));
     if (!/^\.model VJ NJF\(VTO=-1\.5/.test(S.simModelCard("JFET_N", "VJ"))) throw new Error(S.simModelCard("JFET_N", "VJ"));
+});
+
+test("current-controlled current source: optocoupler transfer and saturation", () => {
+    const run = (rload) => {
+        const c = new SimCircuit();
+        c.add(new VoltageSource("V1", ["in", "0"], vdc(5)));
+        c.add(new Resistor("R1", ["in", "a"], { r: 1000 }));
+        c.add(new VoltageSource("VS", ["a", "m"], vdc(0)));              // ammeter in series with the LED
+        c.add(new Diode("D1", ["m", "0"], simModel("LED", "RED").params));
+        c.add(new VoltageSource("V2", ["vcc", "0"], vdc(5)));
+        c.add(new Resistor("RL", ["vcc", "out"], { r: rload }));
+        c.add(new CCCS("F1", ["out", "0"], { ctrl: "VS", gain: 1.0, vsat: 0.3 }));
+        const op = new SimEngine(c).operatingPoint();
+        return { vout: op.nodeVoltages.out, iled: (5 - op.nodeVoltages.m - op.nodeVoltages.a + op.nodeVoltages.a) };
+    };
+    // 3.2 mA LED current x CTR 1 = 3.2 mA through 470 ohm -> 5 - 1.5 V
+    const lin = run(470);
+    near(lin.vout, 5 - 0.0032 * 470, 0.15, "linear region");
+    const sat = run(10000);
+    if (!(sat.vout >= -0.01 && sat.vout < 0.15)) throw new Error("saturated output should sit near 0 V, got " + sat.vout);
 });
 
 test("EXP and SFFM waveforms", () => {

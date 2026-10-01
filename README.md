@@ -23,9 +23,12 @@ The classic cream-sheet theme is the default; **View > Theme** switches to dark.
 | Wire | Click or drag from any pin. Click empty grid to pin a corner, click a pin or wire to finish (a wire makes a junction). **Backspace** removes a corner, **Esc** cancels. |
 | Reshape / tidy | Drag a segment. **T** re-routes the selection (nothing selected: all wires). |
 | Move, select | Drag parts (wires follow). Click, **Shift**-click or box-select; **Ctrl+A** selects all. |
-| Copy / paste, undo | **Ctrl+C / X / V**, **Ctrl+Z / Y**. |
+| Copy / paste, undo | **Ctrl+C / X / V**, **Ctrl+Z / Y**. Paste attaches the block to the cursor: click to drop it, **Esc** or right-click cancels. |
+| Drag Object | Right-click > Drag Object (or Edit menu): the selection follows the pointer until you click; **Esc** puts it back. |
+| Probes | Click to select, drag onto another pin or wire, double-click to rename, **Del** removes. They follow the pin or wire they measure. |
+| Menus | Mouse, or **Alt+letter** / **F10**, arrows, **Enter**, **Esc**. Right-click menus depend on what is under the pointer. |
 | Edit a part | Double-click it or **Ctrl+E**: the Edit Component dialog (name, values, models, waveforms). **OK** keeps, **Cancel** reverts. |
-| Zoom / pan | Wheel, **Space**-drag or middle-drag, **F** fits, **Ctrl+0** resets. The overview pane also pans. |
+| Zoom / pan | Wheel, **Space**-drag or middle-drag, **F** / **F8** fits, **F6 / F7** zoom, **Shift**+wheel pans sideways, **Ctrl+0** resets. The overview pane also pans. |
 
 Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** rotates and **X** / **Y** mirror left-right / top-bottom (Edit menu, rotate toolbar, also on the placement ghost); wires follow.
 
@@ -39,7 +42,7 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 - **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
 - **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
-- **Examples** menu: rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter.
+- **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter.
 
 **Interchange**
 
@@ -54,11 +57,13 @@ ideal switch, potentiometer, per-node initial-condition flags, diodes (rectifier
 NPN / PNP BJTs, N / P MOSFETs (level 1 with body diode, gate capacitance, series RD / RS), N / P JFETs, op-amps (single pole, rail clamp),
 logic gates (AND OR NOT NAND NOR XOR XNOR BUF, with propagation delay), D / T / JK flip-flops (rising edge, async set / reset), NE555,
 SCR and TRIAC (latching, gate trigger, holding current), relay (coil + contact with pull-in / drop-out), fuse (blows on I²t),
-voltage regulators (78xx, 79xx, LM317 / LM337, LDOs with dropout), lamp, buzzer, motor, crystal, battery, 7-segment display.
+voltage regulators (78xx, 79xx, LM317 / LM337, LDOs with dropout), lamp, buzzer, motor, crystal, battery, 7-segment display,
+LDR, NTC / PTC thermistors, varistor, rheostat and photodiode (their light / temperature / setting can be changed while a simulation runs),
+phototransistor optocouplers (4N25, 4N35, PC817 ...), and power ports / net labels (same name = same net, no wire needed).
 
-**Sources**: DC, sine, pulse, square / clock (duty cycle), triangle, sawtooth, exponential (`EXP`), frequency-modulated (`SFFM`), piecewise-linear; current sources too.
+**Sources** (Generators mode, Tool > Place Source, or Pick Devices; the symbol shows the waveform): DC, sine, pulse, square / clock (duty cycle), triangle, sawtooth, exponential (`EXP`), frequency-modulated (`SFFM`), piecewise-linear; current sources too.
 
-**Library**: about 190 named parts, with parameters taken from public vendor SPICE models and datasheets (see the comments in
+**Library**: about 220 named parts, with parameters taken from public vendor SPICE models and datasheets (see the comments in
 `js/sim/models-extra.js` for sources and what was fitted). Pick them with **P**. `.model` cards from vendor files can be imported
 (Import SPICE with a model-only file, NJF / PJF included) and are remembered between sessions.
 

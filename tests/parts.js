@@ -127,6 +127,96 @@ window.partsTests = async function () {
         try { propertiesPanel.render(); if (!propertiesPanel.el.innerHTML.includes('data-prop="name"')) propBad.push(type); } catch (err) { propBad.push(`${type}: ${err.message}`); }
     }
     ok("every part has a working property panel", !propBad.length, propBad);
+    // ---- sensors, protection, optocoupler, power ports ----
+    clear();
+    {
+        const part = (type, props = {}) => { const c = editor.addComponent(type, 300 + editor.components.length * 140, 300, 0); Object.assign(c, props); return c; };
+        const w = (a, pa, b, pb) => editor.wires.push({ id: editor.nextId++, start: { type: "terminal", component: a.id, terminal: pa }, end: { type: "terminal", component: b.id, terminal: pb }, route: null });
+        const elementsOf = () => NetlistExtractor.elements(editor, NetlistExtractor.nets(editor)).els;
+
+        const ldr = part("LDR", { lux: "10", r10: "10k", gamma: "0.7" });
+        ok("LDR: R10 at 10 lux, falling with light", near(PartLib.defs.LDR.resistance(ldr), 10000, 1) && PartLib.defs.LDR.resistance({ lux: "1000", r10: "10k", gamma: "0.7" }) < 2500);
+        const ntc = part("NTC", { r25: "10k", beta: "3950", temp: "25" });
+        ok("NTC: R25 at 25 °C, lower when hot, higher when cold", near(PartLib.defs.NTC.resistance(ntc), 10000, 1) && PartLib.defs.NTC.resistance({ r25: "10k", beta: "3950", temp: "50" }) < 4500 && PartLib.defs.NTC.resistance({ r25: "10k", beta: "3950", temp: "0" }) > 25000);
+        ok("PTC: rises with temperature", PartLib.defs.PTC.resistance({ r25: "1k", tc: "0.7", temp: "75" }) > 1300);
+        const rh = part("RHEO", { value: "10k", position: 0.25 });
+        ok("rheostat: setting scales the resistance", near(PartLib.defs.RHEO.resistance(rh), 2500, 1));
+        ok("the sensors and the rheostat expand to one resistor", [ldr, ntc, rh].every(c => elementsOf().filter(e => e.comp === c).length === 1 && elementsOf().find(e => e.comp === c).kind === "R"));
+        ok("photodiode: photocurrent is lux x sensitivity", near(PartLib.defs.PHOTODIODE.photocurrent({ lux: "100", sens: "70n" }), 7e-6, 1e-9));
+
+        // varistor clamps both ways
+        clear();
+        const v = part("V", { sourceType: "DC", dcVoltage: 0 }); const r = part("R", { value: "100" }); const mov = part("MOV", { vz: "22" }); const g = part("GND");
+        w(v, "2", r, "1"); w(r, "2", mov, "1"); w(mov, "2", g, "1"); w(v, "1", g, "1");
+        editor.refreshWires();
+        const clampAt = (volts) => { v.dcVoltage = volts; const info = NetlistExtractor.extract(editor); const op = new SimEngine(info.circuit).operatingPoint(); return op.nodeVoltages[info.getTerminalNodeName(mov, "1")]; };
+        const lo = clampAt(10), hi = clampAt(60), neg = clampAt(-60);
+        ok("varistor: stays open below the clamp voltage", near(lo, 10, 0.05), lo);
+        ok("varistor: clamps near its rating in both directions", hi > 20 && hi < 30 && neg < -20 && neg > -30, [hi, neg]);
+
+        // optocoupler
+        clear();
+        const vin = part("V", { sourceType: "DC", dcVoltage: 5 }); const rf = part("R", { value: "1k" });
+        const oc = part("OPTO", { model: "4N35" }); const vcc = part("V", { sourceType: "DC", dcVoltage: 5 }); const rl = part("R", { value: "470" }); const g2 = part("GND");
+        w(vin, "2", rf, "1"); w(rf, "2", oc, "A"); w(oc, "K", g2, "1"); w(vin, "1", g2, "1");
+        w(vcc, "2", rl, "1"); w(rl, "2", oc, "C"); w(oc, "E", g2, "1"); w(vcc, "1", g2, "1");
+        editor.refreshWires();
+        const info = NetlistExtractor.extract(editor);
+        const op = new SimEngine(info.circuit).operatingPoint();
+        const vc = op.nodeVoltages[info.getTerminalNodeName(oc, "C")];
+        ok("optocoupler: collector current follows the LED current (CTR 1)", vc > 5 - 0.0045 * 470 && vc < 5 - 0.0025 * 470, vc);
+        ok("optocoupler exports as an LED, a sense source and a controlled current", (() => { const d = NetlistExtractor.toSpice(info.elements, { analysis: ".op" }); return /^B\w+ \S+ \S+ I=1\*I\(V/m.test(d) && /^D\w+ /m.test(d); })());
+
+        // power ports and net labels
+        clear();
+        const p1 = part("POWER", { net: "VCC", volts: "5" }), p2 = part("POWER", { net: "VCC", volts: "5" });
+        const r1 = part("R", { value: "1k" }), r2 = part("R", { value: "1k" }), gg = part("GND");
+        w(p1, "1", r1, "1"); w(p2, "1", r2, "1"); w(r1, "2", gg, "1"); w(r2, "2", gg, "1");
+        editor.refreshWires();
+        const els = elementsOf();
+        ok("a power port supplies its rail once, however many ports share the name", els.filter(e => e.kind === "V").length === 1 && els.find(e => e.kind === "V").params.dc === 5);
+        const inf = NetlistExtractor.extract(editor);
+        const op2 = new SimEngine(inf.circuit).operatingPoint();
+        ok("ports with the same name are one net with no wire between them", inf.getTerminalNodeName(r1, "1") === inf.getTerminalNodeName(r2, "1") && near(op2.nodeVoltages[inf.getTerminalNodeName(r1, "1")], 5, 1e-6));
+
+        clear();
+        const a = part("R", { value: "1k" }), b2 = part("R", { value: "1k" }), l1 = part("NETLABEL", { net: "X" }), l2 = part("NETLABEL", { net: "x" }), g3 = part("GND");
+        w(a, "2", l1, "1"); w(b2, "1", l2, "1"); w(a, "1", g3, "1"); w(b2, "2", g3, "1");
+        editor.refreshWires();
+        const i3 = NetlistExtractor.extract(editor);
+        ok("net labels join nets by name (case-insensitive)", i3.getTerminalNodeName(a, "2") === i3.getTerminalNodeName(b2, "1") && i3.getTerminalNodeName(a, "2") !== "0");
+        clear();
+        const gl = part("POWER", { net: "GND" }), rr = part("R", { value: "1k" }), vv = part("V", { sourceType: "DC", dcVoltage: 5 });
+        w(vv, "2", rr, "1"); w(rr, "2", gl, "1"); w(vv, "1", gl, "1");
+        editor.refreshWires();
+        ok("a port named GND is ground", NetlistExtractor.nets(editor).hasGround && !elementsOf().some(e => e.kind === "V" && e.comp === gl));
+    }
+
+    // live: turning a knob changes the running circuit without restarting it
+    clear();
+    {
+        const w = (a, pa, b, pb) => editor.wires.push({ id: editor.nextId++, start: { type: "terminal", component: a.id, terminal: pa }, end: { type: "terminal", component: b.id, terminal: pb }, route: null });
+        const v = editor.addComponent("V", 100, 300, 270); v.dcVoltage = 5;
+        const ldr = editor.addComponent("LDR", 300, 240, 0); ldr.lux = "10";
+        const rr = editor.addComponent("R", 300, 380, 0); rr.value = "10k";
+        const g = editor.addComponent("GND", 300, 520, 0);
+        w(v, "2", ldr, "1"); w(ldr, "2", rr, "1"); w(rr, "2", g, "1"); w(v, "1", g, "1");
+        editor.refreshWires();
+        document.getElementById("liveSpeed").value = "0.05";
+        live.start();
+        stepTo(1e-3);
+        const node = live.info.getTerminalNodeName(rr, "1");
+        const v0 = live.run.voltage(node);
+        const sig0 = live.circuitSignature();
+        ldr.lux = "1000"; ldr.value = "1000 lux";
+        ok("turning the light knob does not restart the run", live.circuitSignature() === live.signature && live.circuitSignature() === sig0);
+        live.syncControls();
+        stepTo(live.run.t + 1e-3);
+        const v1 = live.run.voltage(node);
+        ok("... and the new resistance takes effect (brighter = more current)", v1 > v0 + 0.5, [v0, v1]);
+        live.stop();
+    }
+
     // ---- live displays -------------------------------------------------------------------
     clear();
     loadExampleById(editor, "relay-driver");

@@ -123,11 +123,12 @@
     C("edit.redo", "Redo", { icon: "redo", keys: "Ctrl+Y", enabled: () => editor.futureStack.length > 0, run: () => editor.redo() });
     C("edit.cut", "Cut", { icon: "cut", keys: "Ctrl+X", enabled: () => editor.selection.length > 0, run: () => editor.cutSelected() });
     C("edit.copy", "Copy", { icon: "copy", keys: "Ctrl+C", enabled: () => editor.selection.length > 0, run: () => editor.copySelected() });
-    C("edit.paste", "Paste", { icon: "paste", keys: "Ctrl+V", enabled: () => !!editor.clipboard, run: () => editor.paste() });
+    C("edit.paste", "Paste", { icon: "paste", keys: "Ctrl+V", enabled: () => !!editor.clipboard, run: () => editor.beginPaste() });
     C("edit.delete", "Delete", { icon: "delete", keys: "Del", enabled: hasSel, run: () => editor.removeSelected() });
     C("edit.selectall", "Select All", { keys: "Ctrl+A", run: () => editor.selectAll() });
     C("edit.rotate", "Rotate Clockwise", { icon: "rotate", keys: "R", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(1) });
     C("edit.rotateccw", "Rotate Anti-clockwise", { icon: "rotateccw", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(3) });
+    C("edit.drag", "Drag Object", { enabled: () => editor.selection.length > 0, run: () => editor.beginDragObject() });
     C("edit.rotate180", "Rotate 180°", { enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(2) });
     C("edit.mirrorx", "Mirror Left-Right", { icon: "mirrorx", keys: "X", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => editor.mirrorSelected("x") });
     C("edit.mirrory", "Mirror Top-Bottom", { icon: "mirrory", keys: "Y", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => editor.mirrorSelected("y") });
@@ -181,24 +182,44 @@
 
     // -------------------------------------------------------------------------- menus
 
+    // One Examples list. On an empty sheet an example opens (with its suggested run settings);
+    // on a sheet that already holds a design it attaches to the cursor so it can be placed beside it.
     const exampleItems = () => EXAMPLES.map(ex => ({
         id: `ex.${ex.id}`, label: ex.name, keys: "",
         run() {
             live.stop();
-            const loaded = loadExampleById(editor, ex.id);
-            afterLoad();
-            runner.toast(loaded.note, "info");
+            const empty = !editor.components.length && !editor.wires.length && !editor.probes.length;
+            if (empty) {
+                const loaded = loadExampleById(editor, ex.id);
+                afterLoad();
+                runner.toast(loaded.note, "info");
+                return;
+            }
+            const built = exampleAsClipboard(editor, ex.id);
+            if (!built) return;
+            editor.clipboard = built.clip;
+            editor.beginPaste(true);
+            runner.toast(`${ex.name}: move onto the sheet and click to place it. Esc cancels. (File > New first to open it on its own.)`, "info");
         }
+    }));
+
+    // arm placement of a source / instrument / terminal straight from the menu
+    const placeItems = (mode, entries) => entries.map(e => ({
+        id: `place.${e.name}`, label: e.name, keys: "",
+        run() { pane.setMode(mode); pane.select(entries.find(x => x.name === e.name)); }
     }));
 
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
-        { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.rotate", "edit.rotateccw", "edit.mirrorx", "edit.mirrory", "edit.properties", "edit.tidy"] },
+        { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "-", "view.classic", "view.dark"] },
-        { title: "Tool", items: ["tool.select", "tool.wire", "tool.vprobe", "tool.iprobe"] },
+        { title: "Tool", items: ["tool.select", "tool.wire", "tool.vprobe", "tool.iprobe", "-",
+            { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
+            { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
+            { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
         { title: "Design", items: ["design.settings", "design.erc"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.sweep", "graph.dc", "-", "graph.simulate"] },
-        { title: "Debug", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
+        { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
         { title: "Help", items: ["help.keys", "help.about"] }
     ]);
@@ -247,6 +268,8 @@
         else if (editor.tool === "wire") text = "Wire tool: click a pin or wire to start.";
         else if (editor.tool === "vProbe") text = "Click a wire or pin to attach a voltage probe.";
         else if (editor.tool === "iProbe") text = "Click a component to attach a current probe.";
+        else if (editor.pasteMode) text = "Click to place the pasted block. Esc or right-click cancels.";
+        else if (editor.dragObject) text = "Move the pointer, click to drop the object. Esc puts it back.";
         else if (editor.isPlacing()) text = "Click to place (keeps placing). R rotates, right-click or Esc to stop.";
         else if (editor.selection.length > 1) text = `${editor.selection.length} objects selected.`;
         else if (editor.selected) text = `${editor.selected.name} selected. Double-click or Ctrl+E to edit.`;
@@ -288,9 +311,9 @@
     C("part.toggle", "Toggle Switch", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "SW", run: () => editor.onEdit(editor.selection[0]) });
 
     const CTX = {
-        part: [["edit.properties", "Edit Properties"], "part.toggle", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
+        part: [["edit.properties", "Edit Properties"], "part.toggle", "edit.drag", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
             "edit.cut", "edit.copy", "-", "probe.addI"],
-        multi: ["edit.cut", "edit.copy", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
+        multi: ["edit.cut", "edit.copy", "edit.drag", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
         wire: [["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
         probe: ["probe.rename", ["edit.delete", "Delete Probe"]],
         empty: ["edit.paste", "-", "edit.undo", "edit.redo", "-", "edit.selectall", "-", "view.zoomin", "view.zoomout", "view.fit", "-", "lib.pick", "tool.wire", ["edit.tidy", "Tidy All Wires"]]

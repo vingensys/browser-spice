@@ -22,7 +22,16 @@ class DevicePane {
     loadDevices() {
         let names = null;
         try { names = JSON.parse(localStorage.getItem("browser-spice/devices") || "null"); } catch (e) { /* ignore */ }
-        if (!Array.isArray(names)) names = ["RES", "CAP", "IND", "1N4148", "LED-RED", "2N2222", "2N3906", "LM741", "NE555"];
+        const DEFAULTS = ["RES", "CAP", "IND", "1N4148", "LED-RED", "2N2222", "2N3906", "LM741", "NE555"];
+        // sources, ground and the instruments are listed from the start (a one-time addition for older saved lists)
+        const BASICS = ["DC", "SINE", "PULSE", "SQUARE", "GROUND", "VOLTMETER", "OSCILLOSCOPE"];
+        let migrated = false;
+        try { migrated = localStorage.getItem("browser-spice/devices-v2") === "1"; } catch (e) { /* ignore */ }
+        if (!Array.isArray(names)) names = DEFAULTS.slice();
+        if (!migrated) {
+            for (const n of BASICS) if (!names.includes(n)) names.push(n);
+            try { localStorage.setItem("browser-spice/devices", JSON.stringify(names)); localStorage.setItem("browser-spice/devices-v2", "1"); } catch (e) { /* ignore */ }
+        }
         return names;
     }
 

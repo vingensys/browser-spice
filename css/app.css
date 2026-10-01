@@ -107,16 +107,17 @@ input, select, textarea, button { font: inherit; color: inherit; }
     cursor: default;
     position: relative;
 }
-.menu-item:hover { background: var(--ui-select); color: #fff; }
+.menu-item:hover, .menu-item.kb { background: var(--ui-select); color: #fff; }
 .menu-item.disabled { color: var(--ui-dim); pointer-events: none; }
 .menu-item .check { width: 14px; text-align: center; }
 .menu-item .label { flex: 1; }
 .menu-item .keys { color: var(--ui-dim); margin-left: 24px; }
-.menu-item:hover .keys { color: #dfe8ff; }
+.menu-item:hover .keys, .menu-item.kb .keys { color: #dfe8ff; }
+.menu-title u { text-decoration: underline; }
 .menu-sep { height: 1px; background: var(--ui-border); margin: 3px 2px; }
 
 .menu-item.has-sub > .menu-panel { left: 100%; top: -3px; }
-.menu-item.has-sub:hover > .menu-panel { display: block; }
+.menu-item.has-sub:hover > .menu-panel, .menu-item.has-sub.open-sub > .menu-panel { display: block; }
 .menu-item.has-sub::after { content: "▸"; margin-left: auto; padding-left: 12px; }
 
 /* ------------------------------------------------------------------- toolbar */

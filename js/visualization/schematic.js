@@ -23,6 +23,8 @@ class SchematicEditor {
         this.selectedWire = null;
         this.selectedProbe = null;
         this.probeDrag = null;
+        this.pasteMode = false;
+        this.dragObject = false;
 
         this.tool = "select";
         this.placeRotation = 0;
@@ -97,6 +99,8 @@ class SchematicEditor {
 
         canvas.addEventListener("contextmenu", e => {
             e.preventDefault();
+            if (this.pasteMode) { this.cancelPaste(); return; }
+            if (this.dragObject) { this.cancelDragObject(); return; }
             if (this.wiring) {
                 this.cancelWire();
                 return;
@@ -197,7 +201,7 @@ class SchematicEditor {
     }
 
     notify() {
-        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.selectedProbe ? this.selectedProbe.id : ""}|${this.wiring}`;
+        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.selectedProbe ? this.selectedProbe.id : ""}|${this.wiring}|${this.pasteMode}|${this.dragObject}`;
         if (key === this._notifyKey) return;
         this._notifyKey = key;
         if (typeof this.onChange === "function") this.onChange();
@@ -254,44 +258,110 @@ class SchematicEditor {
     }
 
 
+    // ISIS "Drag Object": the selection follows the pointer until you click (Esc puts it back)
+    beginDragObject() {
+        if (!this.selection.length || !this.mouseInside) return;
+        const first = this.selection[0];
+        this.dragObject = true;
+        this.move = {
+            clicked: first,
+            orig: new Map(this.selection.map(c => [c, { x: c.x, y: c.y }])),
+            offX: this.mouse.x - first.x,
+            offY: this.mouse.y - first.y,
+            last: { dx: 0, dy: 0 },
+            moved: false
+        };
+        this.updateCursor();
+        this.draw();
+        this.notify();
+    }
+
+    endDragObject() {
+        if (this.move && this.move.moved) this.refreshWires();
+        this.move = null;
+        this.dragObject = false;
+        this.updateCursor();
+        this.draw();
+        this.notify();
+    }
+
+    cancelDragObject() {
+        const moved = this.move && this.move.moved;
+        this.move = null;
+        this.dragObject = false;
+        if (moved) this.undo();
+        this.updateCursor();
+        this.draw();
+        this.notify();
+    }
+
     // ============================================================
     // COPY & PASTE (multi-selection, keeps wires between copied parts)
     // ============================================================
 
     copySelected() {
         if (!this.selection.length) return null;
+        this.clipboard = this.clipboardFrom(this.selection);
+        return this.selection;
+    }
 
-        const ids = new Set(this.selection.map(c => c.id));
-        const comps = this.selection.map(c => JSON.parse(JSON.stringify(c)));
-        const wires = this.wires
-            .filter(w => w.route && w.start.type === "terminal" && w.end.type === "terminal" &&
-                ids.has(w.start.component) && ids.has(w.end.component))
-            .map(w => JSON.parse(JSON.stringify({ start: w.start, end: w.end, route: w.route })));
+    // Snapshot of some parts, the wires between them (junction wires included) and the probes on them
+    clipboardFrom(parts) {
+        const ids = new Set(parts.map(c => c.id));
+        const comps = parts.map(c => JSON.parse(JSON.stringify(c)));
+
+        // a wire is copied when each end is a copied pin or a copied wire (found by repeated passes)
+        const wireIds = new Set();
+        const inside = (e) => (e.type === "terminal" && ids.has(e.component)) || (e.type === "wire" && wireIds.has(e.wireId));
+        for (let pass = 0; pass < 6; pass++) {
+            for (const w of this.wires) {
+                if (!wireIds.has(w.id) && w.route && inside(w.start) && inside(w.end)) wireIds.add(w.id);
+            }
+        }
+        const wires = this.wires.filter(w => wireIds.has(w.id))
+            .map(w => JSON.parse(JSON.stringify({ id: w.id, start: w.start, end: w.end, route: w.route })));
+
+        const probes = this.probes.filter(p => {
+            if (p.type === "I") return ids.has(p.target);
+            const a = p.anchor;
+            return a && ((a.type === "terminal" && ids.has(a.component)) || (a.type === "wire" && wireIds.has(a.wire)));
+        }).map(p => JSON.parse(JSON.stringify(p)));
 
         const xs = comps.map(c => c.x), ys = comps.map(c => c.y);
-        this.clipboard = {
-            comps,
-            wires,
+        return {
+            comps, wires, probes,
             cx: (Math.min(...xs) + Math.max(...xs)) / 2,
             cy: (Math.min(...ys) + Math.max(...ys)) / 2
         };
-        return this.selection;
     }
 
     cutSelected() {
         if (this.copySelected()) this.removeSelected();
     }
 
-    paste() {
-        if (!this.clipboard) return null;
+    // ISIS style: the copied block rides on the cursor until you click (Esc / right-click cancels)
+    beginPaste(force = false) {
+        if (!this.clipboard) return;
+        if (!this.mouseInside && !force) { this.paste(); return; }
+        this.setTool("select");
+        this.pasteMode = true;
+        this.draw();
+        this.notify();
+    }
 
+    cancelPaste() {
+        if (!this.pasteMode) return;
+        this.pasteMode = false;
+        this.draw();
+        this.notify();
+    }
+
+    // where the block lands for a pointer position: snapped, and nudged to the nearest free spot
+    pasteOffset(px, py) {
         const g = this.gridSize;
         const cb = this.clipboard;
-        const targetX = this.mouseInside ? this.snap(this.mouse.x) : this.snap(cb.cx + 2 * g);
-        const targetY = this.mouseInside ? this.snap(this.mouse.y) : this.snap(cb.cy + 2 * g);
-        let dx = targetX - this.snap(cb.cx);
-        let dy = targetY - this.snap(cb.cy);
-
+        let dx = this.snap(px) - this.snap(cb.cx);
+        let dy = this.snap(py) - this.snap(cb.cy);
         const fits = (ox, oy) => cb.comps.every(c => this.isPlacementFree(c, c.x + ox, c.y + oy, c.rotation));
         search:
         for (let r = 0; r <= 10; r++) {
@@ -306,6 +376,19 @@ class SchematicEditor {
                 }
             }
         }
+        return { dx, dy, free: fits(dx, dy) };
+    }
+
+    paste(at = null) {
+        if (!this.clipboard) return null;
+
+        const g = this.gridSize;
+        const cb = this.clipboard;
+        const p = at || (this.mouseInside ? this.mouse : { x: cb.cx + 2 * g, y: cb.cy + 2 * g });
+        const { dx, dy, free } = this.pasteOffset(p.x, p.y);
+        if (at && !free) return null;      // a click where the block cannot go does nothing (the ghost shows red)
+        this.pasteMode = false;
+
 
         this.saveState();
 
@@ -323,13 +406,32 @@ class SchematicEditor {
             created.push(comp);
         }
 
+        // wires: allocate every new id first so junction wires can point at their copied neighbours
+        const wireMap = new Map(cb.wires.map(w => [w.id, this.nextId++]));
+        const end = (e) => {
+            if (e.type === "terminal") return Object.assign({}, e, { component: idMap.get(e.component) });
+            if (e.type === "wire") return Object.assign({}, e, { wireId: wireMap.get(e.wireId), x: e.x + dx, y: e.y + dy });
+            return Object.assign({}, e);
+        };
         for (const w of cb.wires) {
             this.wires.push({
-                id: this.nextId++,
-                start: Object.assign({}, w.start, { component: idMap.get(w.start.component) }),
-                end: Object.assign({}, w.end, { component: idMap.get(w.end.component) }),
+                id: wireMap.get(w.id),
+                start: end(w.start),
+                end: end(w.end),
                 route: w.route.map(p => ({ x: p.x + dx, y: p.y + dy }))
             });
+        }
+
+        for (const src of cb.probes || []) {
+            const p = Object.assign({}, JSON.parse(JSON.stringify(src)), { id: this.nextId++, x: src.x + dx, y: src.y + dy });
+            if (p.type === "I") {
+                p.target = idMap.get(src.target);
+                const owner = this.components.find(c => c.id === p.target);
+                p.targetName = owner.name;
+                p.label = `I(${owner.name})`;
+            } else if (p.anchor && p.anchor.type === "terminal") p.anchor.component = idMap.get(p.anchor.component);
+            else if (p.anchor && p.anchor.type === "wire") p.anchor.wire = wireMap.get(p.anchor.wire);
+            this.probes.push(p);
         }
 
         this.selection = created;
@@ -418,6 +520,7 @@ class SchematicEditor {
         let cursor = "default";
         if (this.isPanning) cursor = "grabbing";
         else if (this.isSpacePressed) cursor = "grab";
+        else if (this.pasteMode || this.dragObject) cursor = "move";
         else if (this.tool !== "select" || this.wiring) cursor = "crosshair";
         else if (this.hoverSnap && this.hoverSnap.type === "terminal") cursor = "crosshair";
         else if (this.hoverTarget === "component") cursor = "move";
@@ -435,6 +538,7 @@ class SchematicEditor {
     }
 
     setTool(tool, props = null) {
+        this.pasteMode = false;
         this.cancelWire();
         this.tool = tool;
         this.placeProps = props;
@@ -1034,6 +1138,16 @@ class SchematicEditor {
         if (event.button !== 0) return;
         this.pointerDownAt = { x: pos.screenX, y: pos.screenY };
 
+        if (this.pasteMode) {
+            this.paste(pos);
+            return;
+        }
+
+        if (this.dragObject) {          // the click drops the dragged object
+            this.endDragObject();
+            return;
+        }
+
         if (this.tool === "vProbe") {
             this.addVoltageProbe(pos.x, pos.y);
             this.setTool("select");
@@ -1183,7 +1297,7 @@ class SchematicEditor {
             return;
         }
 
-        if (this.isPlacing()) {
+        if (this.isPlacing() || this.pasteMode) {
             this.draw();
             return;
         }
@@ -1228,7 +1342,7 @@ class SchematicEditor {
         this.box = null;
         if (this.probeDrag) this.endProbeDrag();
 
-        if (this.move) {
+        if (this.move && !this.dragObject) {
             if (this.move.moved) this.refreshWires();
             this.move = null;
         }
@@ -1373,7 +1487,7 @@ class SchematicEditor {
         if (isCtrl) {
             if (key === "c") { event.preventDefault(); this.copySelected(); }
             else if (key === "x") { event.preventDefault(); this.cutSelected(); }
-            else if (key === "v") { event.preventDefault(); this.paste(); }
+            else if (key === "v") { event.preventDefault(); this.beginPaste(); }
             else if (key === "a") { event.preventDefault(); this.selectAll(); }
             else if (key === "z") { event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); }
             else if (key === "y") { event.preventDefault(); this.redo(); }
@@ -1382,7 +1496,9 @@ class SchematicEditor {
         }
 
         if (key === "escape") {
-            if (this.wiring) this.cancelWire();
+            if (this.pasteMode) this.cancelPaste();
+            else if (this.dragObject) this.cancelDragObject();
+            else if (this.wiring) this.cancelWire();
             else if (this.tool !== "select") this.setTool("select");
             else { this.clearSelection(); this.draw(); }
             this.notify();
@@ -1701,7 +1817,28 @@ class SchematicEditor {
     }
 
     // Translucent preview of the part being placed, red where it can't go
+    drawPasteGhost() {
+        if (!this.pasteMode || !this.mouseInside || !this.clipboard) return;
+        const cb = this.clipboard;
+        const { dx, dy, free } = this.pasteOffset(this.mouse.x, this.mouse.y);
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.strokeStyle = this.tok("preview");
+        ctx.globalAlpha = 0.6;
+        ctx.lineWidth = 2;
+        for (const w of cb.wires) {
+            ctx.beginPath();
+            w.route.forEach((p, i) => (i ? ctx.lineTo(p.x + dx, p.y + dy) : ctx.moveTo(p.x + dx, p.y + dy)));
+            ctx.stroke();
+        }
+        ctx.restore();
+        for (const c of cb.comps) {
+            this.drawComponent(Object.assign({}, c, { id: -1, x: c.x + dx, y: c.y + dy, name: c.name }), { free });
+        }
+    }
+
     drawGhost() {
+        this.drawPasteGhost();
         if (!this.isPlacing() || !this.mouseInside) return;
         const x = this.snap(this.mouse.x);
         const y = this.snap(this.mouse.y);

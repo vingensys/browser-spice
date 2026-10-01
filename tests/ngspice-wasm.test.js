@@ -12,7 +12,7 @@ if (!fs.existsSync(path.join(root, "node_modules", "eecircuit-engine"))) {
 
 const files = ["js/utils/complex.js", "js/utils/units.js", "js/sim/models.js", "js/circuit/netlist.js", "js/sim/ngspice-backend.js"];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
-const { NgspiceBackend, NetlistExtractor, Complex } = new Function(src + "\nreturn { NgspiceBackend, NetlistExtractor, Complex };")();
+const { NgspiceBackend, NetlistExtractor, Complex, SIM_MODELS } = new Function(src + "\nreturn { NgspiceBackend, NetlistExtractor, Complex, SIM_MODELS };")();
 
 let passed = 0, failed = 0;
 const check = (name, cond, extra = "") => {
@@ -83,6 +83,20 @@ const check = (name, cond, extra = "") => {
     };
     const rop = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(rinfo.elements, { analysis: ".op" })), rinfo);
     check("regulator card holds 5 V", Math.abs(rop.nodeVoltages.out - 5) < 0.02, `${rop.nodeVoltages.out}`);
+
+    const oinfo = {
+        elements: [
+            { kind: "V", name: "V1", nodes: ["in", "0"], params: { sourceType: "DC", dc: 5 } },
+            { kind: "R", name: "R1", nodes: ["in", "a"], params: { r: 1000 } },
+            { kind: "V", name: "U1_s", nodes: ["a", "m"], params: { sourceType: "DC", dc: 0 } },
+            { kind: "D", name: "D1", nodes: ["m", "0"], model: "RED", modelKind: "LED", params: SIM_MODELS.LED.RED.params },
+            { kind: "V", name: "V2", nodes: ["vcc", "0"], params: { sourceType: "DC", dc: 5 } },
+            { kind: "R", name: "RL", nodes: ["vcc", "out"], params: { r: 470 } },
+            { kind: "CCCS", name: "U1_c", nodes: ["out", "0"], ctrl: "U1_s", params: { gain: 1, vsat: 0.3 } }
+        ]
+    };
+    const oop = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(oinfo.elements, { analysis: ".op" })), oinfo);
+    check("optocoupler cards: collector current follows the LED current", Math.abs(oop.nodeVoltages.out - (5 - 0.0032 * 470)) < 0.2, `${oop.nodeVoltages.out}`);
 
     let refused = false;
     try { await NgspiceBackend.run("bad\nR1 a 0 undefined\n.op\n.end"); } catch (e) { refused = /invalid value/.test(e.message); }

@@ -143,6 +143,8 @@ window.interactionTests = function () {
     key('c', { ctrlKey: true });
     ptr('pointermove', 300, 400);
     key('v', { ctrlKey: true });
+    ok('Ctrl+V attaches the block to the cursor', e.pasteMode && e.components.length === 2);
+    ptr('pointerdown', 300, 400); ptr('pointerup', 300, 400);
     ok('paste duplicates parts and their wire', e.components.length === 4 && e.wires.length === 2, [e.components.length, e.wires.length]);
     ok('pasted wire is valid', wireValid(e.wires[1]));
     ok('pasted parts are selected', e.selection.length === 2);

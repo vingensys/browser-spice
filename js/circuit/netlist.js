@@ -101,8 +101,19 @@ class NetlistExtractor {
             }
         }
 
+        // net labels / power ports with the same name are one net (no wire needed)
+        const labelled = new Map();
+        for (const comp of editor.components) {
+            if (comp.type !== "NETLABEL" && comp.type !== "POWER") continue;
+            const key = terminalNodeKeys.get(`${comp.id}:1`);
+            if (!key) continue;
+            const name = String(comp.net || (comp.type === "POWER" ? "VCC" : "NET")).trim().toUpperCase();
+            if (labelled.has(name)) ds.union(labelled.get(name), key); else labelled.set(name, key);
+        }
+
         // ground: every GND symbol's net is node "0"
         const groundRoots = new Set();
+        for (const [name, key] of labelled) if (name === "GND" || name === "0") groundRoots.add(ds.find(key));
         for (const comp of editor.components) {
             if (comp.type === "GND") {
                 const key = terminalNodeKeys.get(`${comp.id}:1`);
@@ -288,7 +299,7 @@ class NetlistExtractor {
                 }
                 default: {
                     const part = typeof PartLib !== "undefined" && PartLib.defs[comp.type];
-                    if (part && part.netlist) els.push(...part.netlist(comp, PartLib.kit(comp, nets, P)));
+                    if (part && part.netlist) els.push(...part.netlist(comp, PartLib.kit(comp, nets, P, editor)));
                     break;
                 }
                 case "IC555":
@@ -420,6 +431,7 @@ class NetlistExtractor {
                 case "SCR": case "TRIAC": c.add(new Thyristor(e.name, e.nodes, p)); break;
                 case "REG": c.add(new Regulator(e.name, e.nodes, p)); break;
                 case "FF": c.add(new FlipFlop(e.name, e.nodes, e.ff, p)); break;
+                case "CCCS": c.add(new CCCS(e.name, e.nodes, { ctrl: e.ctrl, gain: p.gain, vsat: p.vsat })); break;
             }
         }
         return c;
@@ -609,6 +621,12 @@ class NetlistExtractor {
                     lines.push(`B${nm}_T ${nm}_o 0 V=V(${n[2]})${neg ? "-" : "+"}${sm}`,
                         `R${nm}_O ${nm}_o ${n[1]} ${f(p.ro)}`,
                         `B${nm}_I ${n[0]} ${n[2]} I=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}+${f(p.iq)}`);
+                    break;
+                }
+                case "CCCS": {
+                    // output current = gain * I(sense source) with a smooth saturation near 0 V
+                    const sense = NetlistExtractor.spiceName({ kind: "V", name: e.ctrl });
+                    lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} I=${f(p.gain)}*I(${sense})*tanh(V(${n[0]},${n[1]})/${f(p.vsat)})`);
                     break;
                 }
                 case "SCR": case "TRIAC": case "FF":

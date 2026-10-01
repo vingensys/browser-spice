@@ -28,6 +28,9 @@ class LiveSim {
     circuitSignature() {
         const comps = this.editor.components.map(c => {
             const { closed, position, live, scopeTrace, scopeScale, glow, seg, energized, blown, on, ...rest } = c;
+            const part = PartLib.defs[c.type];
+            for (const k of (part && part.tweak) || []) delete rest[k];   // knobs you can turn during a run
+            if (part && part.tweak) delete rest.value;                     // its label shows the knob
             return rest;
         });
         return JSON.stringify([comps, this.editor.wires.map(w => [w.start, w.end])]);
@@ -236,6 +239,12 @@ class LiveSim {
             }
         }
         for (const comp of this.editor.components) {
+            const part = PartLib.defs[comp.type];
+            if (part && part.sync) part.sync(comp, this.engine.c.elements);
+            if (part && part.resistance) {
+                const el = this.engine.c.elements.find(e => e.name === comp.name);
+                if (el) el.r = part.resistance(comp);
+            }
             if (comp.type !== "POT") continue;
             const total = Units.parseSI(comp.value) || 10000;
             const pos = Math.min(1, Math.max(0, comp.position === undefined ? 0.5 : comp.position));

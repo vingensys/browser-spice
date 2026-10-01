@@ -3,6 +3,18 @@
 
 class SymbolRenderer {
 
+    // waveform glyphs for the source symbol (path in a 24 x 16 box around the origin)
+    static WAVE_GLYPHS = {
+        AC: (c) => { c.moveTo(-12, 0); for (let i = 0; i <= 24; i++) c.lineTo(-12 + i, -7 * Math.sin((i / 24) * 2 * Math.PI)); },
+        PULSE: (c) => { c.moveTo(-12, 6); c.lineTo(-12, 6); c.lineTo(-12, -6); c.lineTo(-2, -6); c.lineTo(-2, 6); c.lineTo(8, 6); c.lineTo(8, -6); c.lineTo(12, -6); },
+        SQUARE: (c) => { c.moveTo(-12, 6); c.lineTo(-12, -6); c.lineTo(-4, -6); c.lineTo(-4, 6); c.lineTo(4, 6); c.lineTo(4, -6); c.lineTo(12, -6); },
+        TRIANGLE: (c) => { c.moveTo(-12, 6); c.lineTo(-6, -6); c.lineTo(0, 6); c.lineTo(6, -6); c.lineTo(12, 6); },
+        SAWTOOTH: (c) => { c.moveTo(-12, 6); c.lineTo(-2, -6); c.lineTo(-2, 6); c.lineTo(8, -6); c.lineTo(8, 6); },
+        EXP: (c) => { c.moveTo(-12, 6); for (let i = 0; i <= 24; i++) c.lineTo(-12 + i, 6 - 12 * (1 - Math.exp(-i / 7))); },
+        SFFM: (c) => { c.moveTo(-12, 0); for (let i = 0; i <= 24; i++) c.lineTo(-12 + i, -7 * Math.sin((i / 24) * 2 * Math.PI * 3 + 2 * Math.sin((i / 24) * 2 * Math.PI))); },
+        PWL: (c) => { c.moveTo(-12, 6); c.lineTo(-5, 6); c.lineTo(0, -6); c.lineTo(6, -6); c.lineTo(12, 2); }
+    };
+
     // theme-aware colour: literals from the dark palette are remapped by the active theme
     col(color) { return Theme.map(color); }
     tok(name) { return Theme.token(name); }
@@ -196,12 +208,26 @@ class SymbolRenderer {
         ctx.arc(0, 0, 24, 0, Math.PI * 2);
         ctx.stroke();
 
-        ctx.font = "18px system-ui";
-        ctx.fillStyle = this.col("#50fa7b");
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("−", -11, 0);
-        ctx.fillText("+", 11, 0);
+        const shape = SymbolRenderer.WAVE_GLYPHS[component.sourceType];
+        if (shape) {
+            // a miniature of the waveform inside the circle, so a sine source looks like one
+            ctx.lineWidth = this.lw(2);
+            ctx.beginPath();
+            shape(ctx);
+            ctx.stroke();
+            ctx.font = "bold 11px system-ui";
+            ctx.fillStyle = this.col("#50fa7b");
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("+", 15, -13);
+        } else {
+            ctx.font = "18px system-ui";
+            ctx.fillStyle = this.col("#50fa7b");
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText("−", -11, 0);
+            ctx.fillText("+", 11, 0);
+        }
 
         this.drawTerminal(-40, 0);
         this.drawTerminal(40, 0);

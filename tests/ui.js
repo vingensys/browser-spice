@@ -26,7 +26,7 @@ window.uiTests = async function () {
     const menus = [...document.querySelectorAll("#menubar .menu")];
     ok("menu bar has the ISIS menus", menus.map(m => m.querySelector(".menu-title").textContent).join(",") ===
         "File,Edit,View,Tool,Design,Graph,Debug,Library,Help", menus.map(m => m.querySelector(".menu-title").textContent).join(","));
-    const missing = [...document.querySelectorAll("#menubar .menu-item[data-cmd]")].map(r => r.dataset.cmd).filter(id => !id.startsWith("ex.") && !Commands.get(id));
+    const missing = [...document.querySelectorAll("#menubar .menu-item[data-cmd]")].map(r => r.dataset.cmd).filter(id => !id.startsWith("ex.") && !id.startsWith("ins.") && !id.startsWith("place.") && !Commands.get(id));
     ok("every menu entry maps to a command", missing.length === 0, missing);
     menus[0].querySelector(".menu-title").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     ok("clicking a menu title opens it", menus[0].classList.contains("open"));
@@ -264,6 +264,171 @@ window.uiTests = async function () {
         const w = NetlistExtractor.extract(editor).warnings;
         ok("an invalid resistance is flagged", w.some(x => /"abc" is not a valid resistance/.test(x)), w);
         ok("an unknown model is flagged", w.some(x => /model "NOPE" is not in the library/.test(x)), w);
+    }
+
+    // ---- paste rides on the cursor; Drag Object follows it until a click ----
+    reset();
+    loadExampleById(editor, "half-wave");
+    {
+        const pointer = (type, x, y, o = {}) => {
+            const r = editor.canvas.getBoundingClientRect();
+            editor.canvas.dispatchEvent(new (type === "contextmenu" ? MouseEvent : PointerEvent)(type, {
+                clientX: r.left + editor.panX + x * editor.zoom, clientY: r.top + editor.panY + y * editor.zoom,
+                button: o.button || 0, buttons: type === "pointerup" ? 0 : 1, bubbles: true, pointerId: 1
+            }));
+        };
+        const key = (k, o = {}) => document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, ...o }));
+        const r1 = editor.components.find(c => c.type === "R") || editor.components.find(c => c.type === "D");
+        editor.selection = [r1];
+        key("c", { ctrlKey: true });
+        const n = editor.components.length;
+        pointer("pointermove", 700, 600);
+        key("v", { ctrlKey: true });
+        ok("Ctrl+V starts a paste that follows the cursor (nothing placed yet)", editor.pasteMode && editor.components.length === n);
+        pointer("pointermove", 760, 640);
+        editor.draw();
+        pointer("pointerdown", 760, 640); pointer("pointerup", 760, 640);
+        const added = editor.components[editor.components.length - 1];
+        ok("a click drops the pasted block at the cursor", !editor.pasteMode && editor.components.length === n + 1 && Math.abs(added.x - 760) <= 40 && Math.abs(added.y - 640) <= 40, [added.x, added.y]);
+        key("v", { ctrlKey: true });
+        key("Escape");
+        ok("Esc cancels a paste", !editor.pasteMode && editor.components.length === n + 1);
+
+        // drag object
+        editor.selection = [added];
+        pointer("pointermove", added.x, added.y);
+        const x0 = added.x, y0 = added.y;
+        Commands.run("edit.drag");
+        ok("Drag Object picks the selection up", editor.dragObject === true && !!editor.move);
+        pointer("pointermove", x0 + 80, y0 + 60);
+        ok("the object follows the pointer without a button held", added.x === x0 + 80 && added.y === y0 + 60, [added.x, added.y]);
+        pointer("pointerup", x0 + 80, y0 + 60);
+        ok("releasing the button does not drop it", editor.dragObject === true);
+        pointer("pointerdown", x0 + 80, y0 + 60); pointer("pointerup", x0 + 80, y0 + 60);
+        ok("the next click drops it", !editor.dragObject && !editor.move && added.x === x0 + 80);
+        Commands.run("edit.drag");
+        pointer("pointermove", x0 + 200, y0 + 100);
+        key("Escape");
+        const back = editor.components.find(c => c.id === added.id);
+        ok("Esc puts a dragged object back", !editor.dragObject && back.x === x0 + 80 && back.y === y0 + 60, [back.x, back.y]);
+    }
+
+    // ---- keyboard in the menus ----
+    reset();
+    {
+        const k = (key, o = {}) => document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...o }));
+        const menus = [...document.querySelectorAll("#menubar .menu")];
+        const open = () => menus.findIndex(m => m.classList.contains("open"));
+        const lit = () => { const r = document.querySelector("#menubar .menu.open .menu-item.kb"); return r ? r.textContent : null; };
+        ok("menu titles underline their Alt letter", document.querySelector("#menubar .menu-title u").textContent === "F");
+        k("e", { altKey: true });
+        ok("Alt+E opens the Edit menu with its first enabled item lit", open() === 1 && !!lit(), [open(), lit()]);
+        k("ArrowRight");
+        ok("Right arrow moves to the next menu", open() === 2);
+        k("ArrowLeft"); k("ArrowLeft");
+        ok("Left arrow wraps around to the previous menu", open() === 0);
+        k("ArrowDown");
+        const first = lit();
+        k("ArrowDown");
+        ok("Down arrow moves the highlight", lit() !== first);
+        k("Escape");
+        ok("Esc closes the menu", open() === -1);
+        k("F10");
+        ok("F10 opens the first menu", open() === 0);
+        // Examples submenu by keyboard
+        let guard = 0;
+        while (!/Examples/.test(lit() || "") && guard++ < 20) k("ArrowDown");
+        k("ArrowRight");
+        ok("Right arrow opens a submenu", !!document.querySelector("#menubar .menu-item.open-sub") && document.querySelectorAll("#menubar .open-sub .menu-item.kb").length === 1);
+        k("ArrowLeft");
+        ok("Left arrow closes the submenu", !document.querySelector("#menubar .menu-item.open-sub"));
+        k("Escape");
+        // Enter runs the item
+        loadExampleById(editor, "led");
+        const before = editor.zoom;
+        k("v", { altKey: true });
+        let g2 = 0;
+        while (!/Zoom In/.test(lit() || "") && g2++ < 10) k("ArrowDown");
+        k("Enter");
+        ok("Enter runs the highlighted command and closes the menu", open() === -1 && editor.zoom > before, [before, editor.zoom]);
+    }
+
+    // ---- insert an example next to an existing design ----
+    reset();
+    loadExampleById(editor, "led");
+    {
+        const nBefore = editor.components.length, wBefore = editor.wires.length, pBefore = editor.probes.length;
+        const snapBefore = editor.snapshot(), histBefore = editor.historyStack.length;
+        const built = exampleAsClipboard(editor, "ce-amp");
+        ok("building an example off-sheet leaves the design and its history alone", editor.snapshot() === snapBefore && editor.historyStack.length === histBefore);
+        const exParts = built.clip.comps.length, exWires = built.clip.wires.length, exProbes = built.clip.probes.length;
+        ok("the block holds every part, wire (junctions included) and probe", exParts === 12 && exWires === 14 && exProbes === 2, [exParts, exWires, exProbes]);
+
+        Commands.all.size; // menu entry exists
+        ok("there is a single Examples list (no separate Insert Example)", ![...document.querySelectorAll("#menubar .has-sub .label")].some(l => l.textContent === "Insert Example"));
+
+        editor.clipboard = built.clip;
+        editor.mouse = { x: 900, y: 300, screenX: 0, screenY: 0 }; editor.mouseInside = true;
+        editor.beginPaste(true);
+        ok("the example rides on the cursor", editor.pasteMode && editor.components.length === nBefore);
+        // drop it to the right of the existing circuit
+        const r = editor.canvas.getBoundingClientRect();
+        const at = (x, y) => ({ clientX: r.left + editor.panX + x * editor.zoom, clientY: r.top + editor.panY + y * editor.zoom, bubbles: true, pointerId: 1, button: 0 });
+        editor.canvas.dispatchEvent(new PointerEvent("pointermove", at(900, 300)));
+        editor.canvas.dispatchEvent(new PointerEvent("pointerdown", { ...at(900, 300), buttons: 1 }));
+        editor.canvas.dispatchEvent(new PointerEvent("pointerup", at(900, 300)));
+        ok("a click places all of it", !editor.pasteMode && editor.components.length === nBefore + exParts && editor.wires.length === wBefore + exWires && editor.probes.length === pBefore + exProbes,
+            [editor.components.length, editor.wires.length, editor.probes.length]);
+        const names = editor.components.filter(c => c.type !== "GND").map(c => c.name);
+        ok("inserted parts get fresh reference designators", new Set(names).size === names.length, names);
+        const ids = [...editor.components.map(c => c.id), ...editor.wires.map(w => w.id), ...editor.probes.map(p => p.id)];
+        ok("all ids are unique", new Set(ids).size === ids.length);
+        ok("no wire in the inserted block is unroutable", editor.wires.filter(w => w.blocked).length === 0);
+        const junctions = editor.wires.filter(w => w.end.type === "wire");
+        ok("junction wires point at wires that exist", junctions.length === 2 && junctions.every(w => editor.wires.some(x => x.id === w.end.wireId)), junctions.length);
+        const info = NetlistExtractor.extract(editor);
+        ok("the combined design extracts and simulates", (() => { const op = new SimEngine(info.circuit).operatingPoint(); return Object.values(op.nodeVoltages).every(Number.isFinite); })());
+        ok("inserted probes read live nets", editor.probes.every(p => p.type === "I" || info.getPointNodeName(p.x, p.y) !== "0"));
+        editor.undo();
+        ok("one Undo removes the whole inserted example", editor.components.length === nBefore && editor.wires.length === wBefore && editor.probes.length === pBefore);
+
+        // choosing an example from the menu on a non-empty sheet places it instead of replacing the design
+        const nNow = editor.components.length;
+        document.querySelector('#menubar [data-cmd="ex.half-wave"]') || document.querySelectorAll("#menubar .menu")[0].querySelector(".has-sub").dispatchEvent(new MouseEvent("mouseenter"));
+        document.querySelector('#menubar [data-cmd="ex.half-wave"]').dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        ok("an example chosen on a non-empty sheet rides on the cursor", editor.pasteMode && editor.components.length === nNow, [editor.pasteMode, editor.components.length, nNow]);
+        editor.cancelPaste();
+        reset();
+        document.querySelector('#menubar [data-cmd="ex.led"]').dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        ok("on an empty sheet the same entry opens the example", !editor.pasteMode && editor.components.length > 0);
+        loadExampleById(editor, "led");
+
+        // a click on a spot that cannot hold it does nothing
+        editor.clipboard = built.clip;
+        editor.mouse = { x: 200, y: 200, screenX: 0, screenY: 0 };
+        editor.beginPaste(true);
+        const offset = editor.pasteOffset(editor.components[0].x, editor.components[0].y);
+        ok("the ghost finds a free spot near the cursor", offset.free === true);
+        editor.cancelPaste();
+    }
+
+    // ---- sources and instruments are discoverable ----
+    reset();
+    {
+        const names = (q) => DeviceCatalog.search(q, "(all)").map(d => d.name);
+        ok("Pick Devices finds the sine, square, triangle, pulse and EXP sources", ["SINE", "SQUARE", "TRIANGLE", "PULSE", "EXP", "SFFM", "SAWTOOTH"].every(n => names(n).includes(n)), names("sine"));
+        ok("Pick Devices finds the instruments and ground", names("scope").includes("OSCILLOSCOPE") && names("voltmeter").includes("VOLTMETER") && names("ground").includes("GROUND"));
+        ok("the Tool menu lists every source", (() => {
+            const sub = [...document.querySelectorAll("#menubar .menu")][3];
+            const row = [...sub.querySelectorAll(".has-sub")].find(r => r.textContent.startsWith("Place Source"));
+            row.dispatchEvent(new MouseEvent("mouseenter"));
+            const labels = [...row.querySelectorAll(".menu-item .label")].map(l => l.textContent);
+            return ["DC", "SINE", "PULSE", "SQUARE", "TRIANGLE"].every(n => labels.includes(n));
+        })());
+        const row = [...document.querySelectorAll("#menubar .menu")][3].querySelector(".has-sub .menu-item");
+        row.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+        ok("choosing a source from the menu arms its placement", editor.tool === "V" && pane.mode === "generators", [editor.tool, pane.mode]);
+        editor.setTool("select"); pane.setMode("devices");
     }
 
     reset();

@@ -333,6 +333,61 @@ class Regulator extends NonlinearElement {
 }
 
 
+// -------------------------------------------- current-controlled current source
+
+// Output current gain * I(control) * tanh(v_out / vsat): a transistor-like output that saturates
+// near 0 V instead of pushing a load below ground. The control is a voltage source whose branch
+// current is the input (used for the optocoupler: a 0 V ammeter in series with its LED).
+// nodes: [OUT+, OUT-]; current flows from OUT+ through the device to OUT-.
+class CCCS extends NonlinearElement {
+    constructor(name, nodes, { ctrl, gain = 1, vsat = 0.3 } = {}) {
+        super(name, nodes);
+        this.ctrlName = ctrl;
+        this.gain = gain;
+        this.vsat = vsat;
+        this.th = 0;
+        this.iOut = 0;
+    }
+
+    bind(circuit) {
+        super.bind(circuit);
+        this.ctrl = circuit.elements.find(e => e.name === this.ctrlName);
+        if (!this.ctrl || !this.ctrl.branches) throw new Error(`${this.name}: control source ${this.ctrlName} not found`);
+    }
+
+    stamp(ctx) {
+        const [a, b] = this.n;
+        const br = this.ctrl.br;
+        const iin = ctx.x ? ctx.x[br] : 0;
+        const vo = ctx.v(a) - ctx.v(b);
+        const th = Math.tanh(vo / this.vsat);
+        const dth = (1 - th * th) / this.vsat;
+        const k = this.gain;
+        const i = k * iin * th;
+        // i(iin, va, vb) linearised: columns br (control current), a, b
+        const dI_br = k * th, dI_va = k * iin * dth, dI_vb = -dI_va;
+        const ieq = i - (dI_br * iin + dI_va * ctx.v(a) + dI_vb * ctx.v(b));
+        const s = ctx.sys;
+        // current leaves node a and enters node b
+        s.add(a, br, dI_br); s.add(a, a, dI_va); s.add(a, b, dI_vb);
+        s.add(b, br, -dI_br); s.add(b, a, -dI_va); s.add(b, b, -dI_vb);
+        s.rhs(a, -ieq); s.rhs(b, ieq);
+        this.th = th; this.iOut = i;
+        this.dI = [dI_br, dI_va, dI_vb];
+    }
+
+    stampAC(ac) {
+        if (!this.dI) return;
+        const [a, b] = this.n, br = this.ctrl.br;
+        const [dBr, dA, dB] = this.dI;
+        ac.add(a, br, dBr); ac.add(a, a, dA); ac.add(a, b, dB);
+        ac.add(b, br, -dBr); ac.add(b, a, -dA); ac.add(b, b, -dB);
+    }
+
+    current() { return this.iOut; }
+}
+
+
 // ------------------------------------------------------------ flip-flops
 
 // Edge-triggered flip-flop with asynchronous set / reset (active high).

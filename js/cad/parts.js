@@ -29,11 +29,11 @@ const PartLib = {
     },
 
     // helpers handed to netlist(): pin lookup, SI parsing with a fallback, sub-element names
-    kit(comp, nets, P) {
+    kit(comp, nets, P, editor = null) {
         const num = (v, fallback) => (v === undefined || v === null || v === "" ? fallback : (isFinite(Units.parseSI(v)) ? Units.parseSI(v) : fallback));
         return {
             pin: (name) => nets.terminalNode(comp, name) || "0",
-            P, num,
+            P, num, editor,
             base: { name: comp.name, comp },
             sub: (s) => `${comp.name}_${s}`,
             node: (s) => `${comp.name}_${s}`
@@ -517,6 +517,215 @@ PartLib.add("BRIDGE", {
 });
 
 
+// ============================================== sensors, protection, optocoupler, ports
+
+const slider = (p, c, label, note) => `<div class="property"><label>${label}</label>
+    <input type="range" data-prop="position" min="0" max="100" value="${Math.round((c.position === undefined ? 0.5 : c.position) * 100)}">
+    <div class="prop-note">${note}</div></div>`;
+
+// resistor-like symbol with an overlay: draws the box and leads, the callback adds the extras
+const boxResistor = (r, c, color, extra) => {
+    const ctx = r.ctx;
+    r.partLine([[-40, 0], [-24, 0]], color); r.partLine([[24, 0], [40, 0]], color);
+    ctx.strokeStyle = r.col(color); ctx.lineWidth = r.lw(3);
+    ctx.fillStyle = r.col("#171b23");
+    ctx.beginPath(); ctx.rect(-24, -9, 48, 18); ctx.fill(); ctx.stroke();
+    if (extra) extra(ctx);
+    r.drawLabel(c);
+};
+const arrowHead = (ctx, x, y, dx, dy, size = 5) => {
+    const a = Math.atan2(dy, dx);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - size * Math.cos(a - 0.45), y - size * Math.sin(a - 0.45));
+    ctx.lineTo(x - size * Math.cos(a + 0.45), y - size * Math.sin(a + 0.45));
+    ctx.closePath(); ctx.fill();
+};
+
+PartLib.add("LDR", {
+    prefix: "LDR", value: "100 lux", props: { lux: "100", r10: "10k", gamma: "0.7" }, symbol: TWO, tweak: ["lux"],
+    label: (c) => `${c.lux || 100} lux`,
+    resistance: (c) => {
+        const lux = Math.max(Units.parseSI(c.lux) || 0, 0.01), r10 = Units.parseSI(c.r10) || 1e4, g = isFinite(Number(c.gamma)) ? Number(c.gamma) : 0.7;
+        return Math.min(Math.max(r10 * Math.pow(lux / 10, -g), 50), 5e6);
+    },
+    draw(r, c) {
+        boxResistor(r, c, "#ffb86c", (ctx) => {
+            ctx.fillStyle = r.col("#ffb86c"); ctx.strokeStyle = r.col("#ffb86c"); ctx.lineWidth = r.lw(2);
+            for (const x of [-12, 0]) { ctx.beginPath(); ctx.moveTo(x - 10, -30); ctx.lineTo(x + 2, -12); ctx.stroke(); arrowHead(ctx, x + 2, -12, 12, 18); }
+        });
+    },
+    rows: (p, c) => p.text("Light level (lux)", "lux", c.lux, "100") + p.text("Resistance at 10 lux", "r10", c.r10, "10k") + p.text("Gamma", "gamma", c.gamma, "0.7") +
+        `<div class="prop-note">R = R10 × (lux / 10)^−γ, limited to 50 Ω … 5 MΩ. Change the light level while a simulation runs.</div>`,
+    netlist(c, k) { return [{ ...k.base, kind: "R", nodes: [k.pin("1"), k.pin("2")], params: { r: PartLib.defs.LDR.resistance(c) } }]; },
+    catalog: [{ name: "LDR", category: "Resistors", desc: "Light-dependent resistor (photoresistor)", props: { lux: "100", value: "100 lux" } }]
+});
+
+for (const [type, ntc] of [["NTC", true], ["PTC", false]]) {
+    PartLib.add(type, {
+        prefix: "TH", value: "10 kΩ", props: ntc ? { r25: "10k", beta: "3950", temp: "25" } : { r25: "1k", tc: "0.7", temp: "25" }, symbol: TWO, tweak: ["temp"],
+        label: (c) => `${c.r25 || "10k"}Ω ${c.temp || 25}°C`,
+        resistance: (c) => {
+            const r25 = Units.parseSI(c.r25) || 1e4, T = (isFinite(Number(c.temp)) ? Number(c.temp) : 25);
+            if (ntc) { const B = Units.parseSI(c.beta) || 3950; return Math.max(r25 * Math.exp(B * (1 / (T + 273.15) - 1 / 298.15)), 1e-2); }
+            const tc = (isFinite(Number(c.tc)) ? Number(c.tc) : 0.7) / 100;
+            return Math.max(r25 * (1 + tc * (T - 25)), r25 * 0.02);
+        },
+        draw(r, c) {
+            boxResistor(r, c, "#ff79c6", (ctx) => {
+                r.partLine([[-18, 14], [-12, 14], [12, -14], [18, -14]], "#ff79c6", 2);
+                r.partText(ntc ? "-t°" : "+t°", 0, -18, { size: 9, color: "#ff79c6" });
+            });
+        },
+        rows: (p, c) => p.text("Resistance at 25 °C", "r25", c.r25, ntc ? "10k" : "1k") +
+            (ntc ? p.text("Beta (K)", "beta", c.beta, "3950") : p.text("Temperature coefficient (%/°C)", "tc", c.tc, "0.7")) +
+            p.text("Temperature (°C)", "temp", c.temp, "25") +
+            `<div class="prop-note">${ntc ? "R = R25 × exp(B (1/T − 1/298.15 K))" : "R = R25 × (1 + tc (T − 25))"}. Change the temperature while a simulation runs.</div>`,
+        netlist(c, k) { return [{ ...k.base, kind: "R", nodes: [k.pin("1"), k.pin("2")], params: { r: PartLib.defs[type].resistance(c) } }]; },
+        catalog: [{ name: ntc ? "THERMISTOR-NTC" : "THERMISTOR-PTC", category: "Resistors", desc: ntc ? "NTC thermistor (resistance falls as it heats)" : "PTC thermistor / silicon temperature sensor (resistance rises)", props: ntc ? { r25: "10k", beta: "3950", temp: "25", value: "10 kΩ 25°C" } : { r25: "1k", tc: "0.7", temp: "25", value: "1 kΩ 25°C" } }]
+    });
+}
+
+PartLib.add("RHEO", {
+    prefix: "RV", value: "10 kΩ", props: { position: 0.5 }, symbol: TWO, tweak: ["position"],
+    label: (c) => c.value,
+    resistance: (c) => Math.max((Units.parseSI(c.value) || 1e4) * Math.min(1, Math.max(0, c.position === undefined ? 0.5 : c.position)), 1e-3),
+    draw(r, c) {
+        boxResistor(r, c, "#ffb86c", (ctx) => {
+            r.partLine([[-16, 20], [16, -20]], "#ffb86c", 2);
+            ctx.fillStyle = r.col("#ffb86c"); arrowHead(ctx, 16, -20, 8, -10, 6);
+        });
+    },
+    rows: (p, c) => p.text("Maximum resistance", "value", c.value, "10k") +
+        slider(p, c, "Setting", `${Math.round((c.position === undefined ? 0.5 : c.position) * 100)} % of maximum`),
+    netlist(c, k) { return [{ ...k.base, kind: "R", nodes: [k.pin("1"), k.pin("2")], params: { r: PartLib.defs.RHEO.resistance(c) } }]; },
+    catalog: [{ name: "RHEOSTAT", category: "Resistors", desc: "Variable resistor (rheostat), adjustable during a run", props: { value: "10 kΩ", position: 0.5 } }]
+});
+
+PartLib.add("MOV", {
+    prefix: "RV", value: "22 V", props: { vz: "22" }, symbol: TWO,
+    label: (c) => `${c.vz || 22} V`,
+    draw(r, c) {
+        boxResistor(r, c, "#ff79c6", () => {
+            r.partLine([[-18, 14], [-12, 14], [12, -14], [18, -14]], "#ff79c6", 2);
+            r.partText("V", 0, -18, { size: 9, color: "#ff79c6" });
+        });
+    },
+    rows: (p, c) => p.text("Clamping voltage at 1 mA (V)", "vz", c.vz, "22") +
+        `<div class="prop-note">Metal-oxide varistor: open below the clamp voltage, conducts either way above it (two back-to-back breakdown diodes).</div>`,
+    netlist(c, k) {
+        const vz = Math.max(k.num(c.vz, 22), 2);
+        const model = `MOV_${String(vz).replace(/[^0-9]/g, "p")}`;
+        const params = { is: 1e-14, n: 1, rs: Math.max(vz * 0.02, 0.5), bv: Math.max(vz - 0.7, 1), ibv: 1e-3, nbv: 1 };
+        const mid = k.node("m");
+        return [
+            { name: k.sub("D1"), comp: c, kind: "D", model, modelKind: "DZ", nodes: [k.pin("1"), mid], params },
+            { name: k.sub("D2"), comp: c, kind: "D", model, modelKind: "DZ", nodes: [k.pin("2"), mid], params }
+        ];
+    },
+    catalog: [
+        { name: "VARISTOR", category: "Resistors", desc: "Metal-oxide varistor (surge clamp)", props: { vz: "22", value: "22 V" } },
+        { name: "MOV-14V", category: "Resistors", desc: "Varistor, 14 V AC rated (about 22 V clamp)", props: { vz: "22", value: "22 V" } },
+        { name: "MOV-275V", category: "Resistors", desc: "Varistor, 275 V AC rated (about 430 V clamp)", props: { vz: "430", value: "430 V" } }
+    ]
+});
+
+PartLib.add("PHOTODIODE", {
+    prefix: "D", value: "100 lux", props: { lux: "100", sens: "70n" }, symbol: TWO, tweak: ["lux"],
+    label: (c) => `${c.lux || 100} lux`,
+    photocurrent: (c) => Math.max((Units.parseSI(c.lux) || 0) * (Units.parseSI(c.sens) || 70e-9), 0),
+    draw(r, c) {
+        r.drawDiode(c);
+        const ctx = r.ctx;
+        ctx.strokeStyle = r.col("#50fa7b"); ctx.fillStyle = r.col("#50fa7b"); ctx.lineWidth = r.lw(2);
+        for (const x of [-8, 4]) { ctx.beginPath(); ctx.moveTo(x - 4, -26); ctx.lineTo(x + 6, -14); ctx.stroke(); arrowHead(ctx, x + 6, -14, 10, 12); }
+    },
+    rows: (p, c) => p.text("Light level (lux)", "lux", c.lux, "100") + p.text("Sensitivity (A per lux)", "sens", c.sens, "70n") +
+        `<div class="prop-note">A reverse photocurrent of lux × sensitivity flows from cathode to anode. Change the light while a simulation runs.</div>`,
+    netlist(c, k) {
+        const model = "PHOTODIODE";
+        const params = { is: 2e-11, n: 1.2, rs: 1, cjo: 70e-12, vj: 0.7, m: 0.5, bv: 32, ibv: 1e-5 };
+        return [
+            { name: k.sub("d"), comp: c, kind: "D", model, modelKind: "D", nodes: [k.pin("1"), k.pin("2")], params },
+            { name: k.sub("i"), comp: c, kind: "I", nodes: [k.pin("2"), k.pin("1")], params: { sourceType: "DC", dc: PartLib.defs.PHOTODIODE.photocurrent(c), acMag: 0 } }
+        ];
+    },
+    sync(c, elements) {
+        const el = elements.find(e => e.name === `${c.name}_i`);
+        if (el) el.wave = Waveform.dc(PartLib.defs.PHOTODIODE.photocurrent(c));
+    },
+    catalog: [{ name: "PHOTODIODE", category: "Optoelectronics", desc: "Photodiode (about 70 nA per lux)", props: { lux: "100", sens: "70n", value: "100 lux" } }]
+});
+
+PartLib.add("OPTO", {
+    prefix: "U", value: "",
+    symbol: { pins: [["A", -40, -20, -1, 0], ["K", -40, 20, -1, 0], ["C", 40, -20, 1, 0], ["E", 40, 20, 1, 0]], box: [-40, -40, 40, 40] },
+    draw(r, c) {
+        const ctx = r.ctx, col = "#ff79c6", col2 = "#bd93f9";
+        r.partLine([[-40, -20], [-18, -20]], col); r.partLine([[-40, 20], [-18, 20]], col);
+        // LED (left): diode pointing down from anode to cathode
+        r.triangle([[-26, -14], [-10, -14], [-18, 4]], col);
+        r.partLine([[-26, 4], [-10, 4]], col);
+        r.partLine([[-18, 4], [-18, 20]], col); r.partLine([[-18, -20], [-18, -14]], col);
+        // phototransistor (right)
+        r.partLine([[40, -20], [22, -20], [10, -8]], col2); r.partLine([[40, 20], [22, 20], [10, 8]], col2);
+        r.partLine([[10, -12], [10, 12]], col2, 3);
+        ctx.fillStyle = r.col(col2); arrowHead(ctx, 10, 8, -9, 8, 6);
+        // light between them
+        ctx.strokeStyle = r.col("#50fa7b"); ctx.fillStyle = r.col("#50fa7b"); ctx.lineWidth = r.lw(1.5);
+        for (const y of [-6, 2]) { ctx.beginPath(); ctx.moveTo(-6, y); ctx.lineTo(4, y); ctx.stroke(); arrowHead(ctx, 5, y, 8, 0, 4); }
+        ctx.setLineDash([3, 3]); ctx.strokeStyle = r.col("#9aa4b5"); ctx.beginPath(); ctx.moveTo(0, -38); ctx.lineTo(0, 38); ctx.stroke(); ctx.setLineDash([]);
+        r.drawLabel(c);
+    },
+    netlist(c, k) {
+        const model = c.model || SIM_DEFAULT_MODEL.OPTO;
+        const m = simModel("OPTO", model);
+        const led = (SIM_MODELS.LED.IR || SIM_MODELS.LED.RED).params;
+        const mid = k.node("m");
+        return [
+            { name: k.sub("s"), comp: c, kind: "V", nodes: [k.pin("A"), mid], params: { sourceType: "DC", dc: 0, acMag: 0 } },
+            { name: k.sub("d"), comp: c, kind: "D", model: SIM_MODELS.LED.IR ? "IR" : "RED", modelKind: "LED", nodes: [mid, k.pin("K")], params: led },
+            { name: k.sub("c"), comp: c, kind: "CCCS", ctrl: k.sub("s"), nodes: [k.pin("C"), k.pin("E")], params: { gain: m.params.ctr, vsat: m.params.vsat } }
+        ];
+    },
+    catalog: []
+});
+
+// power ports and net labels: same name = same net, no wire needed
+for (const type of ["POWER", "NETLABEL"]) {
+    const power = type === "POWER";
+    PartLib.add(type, {
+        prefix: power ? "P" : "NL", value: power ? "VCC" : "NET1", props: power ? { net: "VCC", volts: "5" } : { net: "NET1" },
+        symbol: { pins: [["1", 0, 20, 0, 1]], box: [-24, -30, 24, 20] },
+        label: (c) => c.net || (power ? "VCC" : "NET1"),
+        draw(r, c) {
+            const col = power ? "#ff5555" : "#8be9fd", name = String(c.net || (power ? "VCC" : "NET1"));
+            if (power) {
+                r.partLine([[0, 20], [0, -6]], col); r.partLine([[-14, -6], [14, -6]], col);
+                r.partText(name, 0, -17, { size: 11, bold: true, color: col });
+                if (!/^(gnd|0)$/i.test(name)) r.partText(`${c.volts || 5} V`, 0, -28, { size: 9, color: "#9aa4b5" });
+            } else {
+                r.partLine([[0, 20], [0, 0]], col);
+                const ctx = r.ctx;
+                ctx.strokeStyle = r.col(col); ctx.lineWidth = r.lw(2); ctx.fillStyle = r.col("#171b23");
+                ctx.beginPath(); ctx.moveTo(-22, -16); ctx.lineTo(18, -16); ctx.lineTo(24, -8); ctx.lineTo(18, 0); ctx.lineTo(-22, 0); ctx.closePath(); ctx.fill(); ctx.stroke();
+                r.partText(name, -2, -8, { size: 10, bold: true, color: col });
+            }
+        },
+        rows: (p, c) => p.text("Net name", "net", c.net, power ? "VCC" : "NET1") + (power ? p.text("Voltage (V)", "volts", c.volts, "5") : "") +
+            `<div class="prop-note">All ports and labels with the same name are connected, with no wire between them.${power ? " The first port of each name supplies the voltage; a net called GND is ground." : ""}</div>`,
+        netlist(c, k) {
+            if (!power) return [];
+            const name = String(c.net || "VCC").trim().toUpperCase();
+            if (name === "GND" || name === "0") return [];
+            const first = k.editor.components.find(o => o.type === "POWER" && String(o.net || "VCC").trim().toUpperCase() === name);
+            if (first !== c) return [];
+            return [{ name: k.sub("v"), comp: c, kind: "V", nodes: [k.pin("1"), "0"], params: { sourceType: "DC", dc: k.num(c.volts, 5), acMag: 0 } }];
+        },
+        catalog: []   // listed under Terminals
+    });
+}
+
 // ------------------------------------------------------------- library hooks
 
 // models of the semiconductor-like parts show up in the catalog like any other model
@@ -526,5 +735,6 @@ Object.assign(DeviceCatalog.kindInfo, {
     REG: { category: "Voltage Regulators", label: (n) => n },
     SCR: { category: "Thyristors", label: (n) => n },
     TRIAC: { category: "Thyristors", label: (n) => n },
-    RELAY: { category: "Electromechanical", label: (n) => `RELAY-${n}` }
+    RELAY: { category: "Electromechanical", label: (n) => `RELAY-${n}` },
+    OPTO: { category: "Optoelectronics", label: (n) => n }
 });

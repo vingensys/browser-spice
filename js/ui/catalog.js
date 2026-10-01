@@ -6,7 +6,7 @@ const DeviceCatalog = {
     categories: [
         "Resistors", "Capacitors", "Inductors", "Diodes", "Optoelectronics", "Transistors",
         "Operational Amplifiers", "Analog ICs", "Voltage Regulators", "Thyristors", "Switches & Relays", "Electromechanical",
-        "Simulator Primitives", "Logic Gates", "Digital ICs", "Miscellaneous"
+        "Simulator Primitives", "Generators", "Instruments", "Terminals", "Logic Gates", "Digital ICs", "Miscellaneous"
     ],
 
     generics() {
@@ -50,6 +50,11 @@ const DeviceCatalog = {
                 list.push({ name, category: info.category, type: kind, desc: def.desc + (def.imported ? " (imported)" : ""), props, model });
             }
         }
+        // sources, instruments and terminals are parts too: Pick Devices finds them (search "sine", "scope", "ground")
+        const extra = (entries, category) => entries.forEach(e => list.push({ ...e, category }));
+        extra(DeviceCatalog.generators(), "Generators");
+        extra(DeviceCatalog.instruments(), "Instruments");
+        extra(DeviceCatalog.terminals(), "Terminals");
         return list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
     },
 
@@ -66,6 +71,8 @@ const DeviceCatalog = {
     terminals() {
         return [
             { name: "GROUND", type: "GND", desc: "Ground reference (0 V)", props: {} },
+            { name: "POWER", type: "POWER", desc: "Power port: a named supply rail (all ports with the same name are one net)", props: { net: "VCC", volts: "5", value: "VCC" } },
+            { name: "NET LABEL", type: "NETLABEL", desc: "Net label: connects every label with the same name without a wire", props: { net: "NET1", value: "NET1" } },
             { name: "INITIAL COND", type: "NODEIC", desc: "Initial voltage of a net for 'start from 0' transients", props: { value: "0 V" } }
         ];
     },
