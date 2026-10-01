@@ -124,7 +124,7 @@ window.partsTests = async function () {
         clear();
         const c = editor.addComponent(type, 400, 400, 0);
         editor.selection = [c];
-        try { propertiesPanel.render(); if (!propertiesPanel.el.innerHTML.includes('data-prop="name"')) propBad.push(type); } catch (err) { propBad.push(`${type}: ${err.message}`); }
+        try { propertiesPanel.render(); if (!propertiesPanel.el.innerHTML.includes(type === "TEXT" ? 'data-prop="text"' : 'data-prop="name"')) propBad.push(type); } catch (err) { propBad.push(`${type}: ${err.message}`); }
     }
     ok("every part has a working property panel", !propBad.length, propBad);
     // ---- sensors, protection, optocoupler, power ports ----

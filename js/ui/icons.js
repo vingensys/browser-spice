@@ -7,6 +7,7 @@ const Icons = {
         save: '<path d="M5 3h12l3 3v15H5z"/><path d="M8 3v6h8V3"/><path d="M8 21v-7h8v7"/>',
         import: '<path d="M12 3v12m-4-4 4 4 4-4"/><path d="M4 20h16"/>',
         export: '<path d="M12 15V3m-4 4 4-4 4 4"/><path d="M4 20h16"/>',
+        text: '<path d="M5 20 12 4l7 16"/><path d="M8 14h8"/>',
         undo: '<path d="M8 6 3 11l5 5"/><path d="M3 11h11a5 5 0 0 1 0 10h-4"/>',
         redo: '<path d="m16 6 5 5-5 5"/><path d="M21 11H10a5 5 0 0 0 0 10h4"/>',
         cut: '<circle cx="6" cy="18" r="3"/><circle cx="18" cy="18" r="3"/><path d="M8 16 18 4M16 16 6 4"/>',

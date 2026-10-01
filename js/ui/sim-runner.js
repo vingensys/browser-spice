@@ -207,7 +207,9 @@ class SimRunner {
         const s = this.settings();
         const fmt = (v) => Number(v.toPrecision(4)).toString();
         const analysis = `.op\n.tran ${fmt(s.tStep)} ${fmt(s.tStop)}${s.uic ? " UIC" : ""}\n.ac dec 20 ${fmt(s.fStart)} ${fmt(s.fStop)}`;
-        return { info, text: NetlistExtractor.toSpice(info.elements, { analysis }) };
+        const tb = this.editor.titleBlock;
+        const title = tb && tb.title ? tb.title + (tb.rev ? ` (rev ${tb.rev})` : "") : undefined;
+        return { info, text: NetlistExtractor.toSpice(info.elements, { analysis, title }) };
     }
 
     showNetlist() {

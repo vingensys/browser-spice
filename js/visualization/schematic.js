@@ -4,7 +4,7 @@
 
 const HOTKEYS = {
     c: "C", l: "L", v: "V", i: "I", g: "GND", d: "D", q: "BJT_NPN", m: "NMOS", u: "OPAMP",
-    e: "E", s: "SW", w: "wire"
+    e: "E", s: "SW", w: "wire", a: "TEXT"
 };
 
 class SchematicEditor {
@@ -18,6 +18,7 @@ class SchematicEditor {
         this.components = [];
         this.wires = [];
         this.probes = [];
+        this.titleBlock = SchematicEditor.defaultTitleBlock();
 
         this.selection = [];
         this.selectedWire = null;
@@ -217,6 +218,7 @@ class SchematicEditor {
             components: this.components,
             wires: this.wires,
             probes: this.probes,
+            titleBlock: this.titleBlock,
             nextId: this.nextId
         });
     }
@@ -236,6 +238,7 @@ class SchematicEditor {
         this.components = state.components;
         this.wires = state.wires;
         this.probes = state.probes;
+        this.titleBlock = Object.assign(SchematicEditor.defaultTitleBlock(), state.titleBlock || {});
         this.nextId = state.nextId;
 
         this.clearSelection();
@@ -677,6 +680,14 @@ class SchematicEditor {
         const comp = this.addComponent(this.tool, gx, gy, this.placeRotation);
         if (this.placeMirror) comp.mirror = true;
         if (this.placeProps) Object.assign(comp, JSON.parse(JSON.stringify(this.placeProps)));
+        if (comp.type === "TEXT") {            // one note at a time: place it, then type it
+            this.setTool("select");
+            this.selection = [comp];
+            this.draw();
+            this.notify();
+            if (typeof this.onEdit === "function") this.onEdit(comp);
+            return comp;
+        }
         this.draw();
         return comp;
     }
@@ -726,12 +737,14 @@ class SchematicEditor {
             }
             return;
         }
-        const xs = this.selection.map(c => c.x), ys = this.selection.map(c => c.y);
+        const movable = this.selection.filter(c => !this.isOverlay(c));    // text is not mirrored
+        if (!movable.length) return;
+        const xs = movable.map(c => c.x), ys = movable.map(c => c.y);
         const px = this.snap((Math.min(...xs) + Math.max(...xs)) / 2);
         const py = this.snap((Math.min(...ys) + Math.max(...ys)) / 2);
-        const single = this.selection.length === 1;
+        const single = movable.length === 1;
 
-        const poses = this.selection.map(c => {
+        const poses = movable.map(c => {
             let x = c.x, y = c.y;
             if (!single) { if (axis === "x") x = 2 * px - c.x; else y = 2 * py - c.y; }
             const rotation = axis === "x" ? c.rotation : (c.rotation + 180) % 360;
@@ -792,7 +805,18 @@ class SchematicEditor {
     // ============================================================
 
     getSymbolDef(component) {
-        return SYMBOL_DEFS[component.type] || SYMBOL_DEFS.R;
+        const def = SYMBOL_DEFS[component.type] || SYMBOL_DEFS.R;
+        return def.dynamic ? def.dynamic(component) : def;      // annotations size their box to their text
+    }
+
+    // annotations (text) sit on top of everything: they never block parts or wires
+    isOverlay(component) {
+        const def = SYMBOL_DEFS[component.type];
+        return !!(def && def.overlay);
+    }
+
+    static defaultTitleBlock() {
+        return { show: false, title: "", company: "", doc: "", rev: "", author: "", date: "", sheet: "1/1" };
     }
 
     // mirror flips the symbol left-right before it is rotated (Proteus "mirror X")
@@ -848,6 +872,7 @@ class SchematicEditor {
     // front of it) may land on a foreign body. That keeps every pin escapable, so
     // wires can always leave and the router never gets boxed in.
     isPlacementFree(component, x, y, rotation, ignore = null) {
+        if (this.isOverlay(component)) return true;
         const pose = { type: component.type, x, y, rotation, mirror: !!component.mirror };
         const box = this.getComponentBox(pose, pose);
         const g = this.gridSize;
@@ -862,7 +887,7 @@ class SchematicEditor {
         const mine = pinNodes(pose, pose);
 
         for (const other of this.components) {
-            if (other === component || (ignore && ignore.has(other))) continue;
+            if (other === component || (ignore && ignore.has(other)) || this.isOverlay(other)) continue;
             const ob = this.getComponentBox(other);
             if (this.boxesOverlap(box, ob)) return false;
             if (mine.some(n => inClosed(n.x, n.y, ob))) return false;
@@ -890,10 +915,13 @@ class SchematicEditor {
     }
 
     findComponent(x, y) {
-        for (let i = this.components.length - 1; i >= 0; i--) {
-            const box = this.getComponentBoundingBox(this.components[i], 4);
-            if (x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2) {
-                return this.components[i];
+        for (const overlay of [false, true]) {
+            for (let i = this.components.length - 1; i >= 0; i--) {
+                if (this.isOverlay(this.components[i]) !== overlay) continue;
+                const box = this.getComponentBoundingBox(this.components[i], 4);
+                if (x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2) {
+                    return this.components[i];
+                }
             }
         }
         return null;
@@ -1156,7 +1184,7 @@ class SchematicEditor {
 
         if (this.tool === "iProbe") {
             const component = this.findComponent(pos.x, pos.y);
-            if (component && component.type !== "GND") this.addCurrentProbe(component);
+            if (component && component.type !== "GND" && !this.isOverlay(component)) this.addCurrentProbe(component);
             this.setTool("select");
             return;
         }
@@ -1629,6 +1657,56 @@ class SchematicEditor {
         ctx.strokeRect(r.x, r.y, r.w, r.h);
         ctx.lineWidth = 1;
         ctx.strokeRect(r.x + 14, r.y + 14, r.w - 28, r.h - 28);
+        this.drawTitleBlock(r);
+    }
+
+    // ISIS-style title block in the bottom-right corner of the frame
+    drawTitleBlock(r) {
+        const t = this.titleBlock;
+        if (!t || !t.show) return;
+        const ctx = this.ctx;
+        const w = 520, h = 120;
+        const x = r.x + r.w - 14 - w, y = r.y + r.h - 14 - h;
+        const line = this.tok("border"), text = this.tok("label"), dim = this.tok("value");
+        ctx.save();
+        ctx.fillStyle = this.tok("sheet");
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = line;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(x, y, w, h);
+        // rows: company | title | doc / author / date; right column: revision and sheet
+        const col = x + 380;
+        ctx.beginPath();
+        ctx.moveTo(x, y + 30); ctx.lineTo(x + w, y + 30);
+        ctx.moveTo(x, y + 84); ctx.lineTo(x + w, y + 84);
+        ctx.moveTo(col, y + 30); ctx.lineTo(col, y + h);
+        ctx.moveTo(col, y + 57); ctx.lineTo(x + w, y + 57);
+        ctx.moveTo(x + 190, y + 84); ctx.lineTo(x + 190, y + h);
+        ctx.moveTo(x + 300, y + 84); ctx.lineTo(x + 300, y + h);
+        ctx.stroke();
+        const fit = (s, max, font) => {                     // shorten to fit the cell
+            ctx.font = font;
+            let out = String(s || "");
+            while (out.length > 1 && ctx.measureText(out).width > max) out = out.slice(0, -2) + "…";
+            return out;
+        };
+        const cell = (label, value, cx, cy, cw, big = false) => {
+            ctx.textAlign = "left"; ctx.textBaseline = "top";
+            ctx.font = "8px system-ui"; ctx.fillStyle = dim;
+            ctx.fillText(label, cx + 5, cy + 3);
+            ctx.fillStyle = text;
+            const font = `${big ? "bold 20px" : "12px"} system-ui`;
+            ctx.font = font;
+            ctx.fillText(fit(value, cw - 10, font), cx + 5, cy + (big ? 13 : 14));
+        };
+        cell("COMPANY", t.company, x, y, w);
+        cell("TITLE", t.title, x, y + 30, col - x, true);
+        cell("REV", t.rev, col, y + 30, x + w - col);
+        cell("SHEET", t.sheet, col, y + 57, x + w - col);
+        cell("DOC NO.", t.doc, x, y + 84, 190);
+        cell("AUTHOR", t.author, x + 190, y + 84, 110);
+        cell("DATE", t.date, x + 300, y + 84, w - 300);
+        ctx.restore();
     }
 
     drawGrid() {
@@ -1842,7 +1920,7 @@ class SchematicEditor {
         if (!this.isPlacing() || !this.mouseInside) return;
         const x = this.snap(this.mouse.x);
         const y = this.snap(this.mouse.y);
-        const ghost = { id: -1, type: this.tool, x, y, rotation: this.placeRotation, mirror: this.placeMirror, name: "", value: "" };
+        const ghost = Object.assign({ id: -1, type: this.tool, x, y, rotation: this.placeRotation, mirror: this.placeMirror, name: "", value: "" }, this.placeProps ? JSON.parse(JSON.stringify(this.placeProps)) : {});
         this.drawComponent(ghost, { free: this.isPlacementFree(ghost, x, y, this.placeRotation) });
     }
 

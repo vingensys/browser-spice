@@ -35,6 +35,15 @@ class PropertiesPanel {
             <input type="text" data-prop="${prop}" value="${e(value)}" ${hint ? `placeholder="${e(hint)}"` : ""}></div>`;
     }
 
+    area(label, prop, value, rows = 3) {
+        return `<div class="property"><label>${label}</label>
+            <textarea data-prop="${prop}" rows="${rows}" spellcheck="false">${PropertiesPanel.esc(value)}</textarea></div>`;
+    }
+
+    check(label, prop, checked) {
+        return `<div class="property"><label class="checkrow"><input type="checkbox" data-prop="${prop}" ${checked ? "checked" : ""}> ${label}</label></div>`;
+    }
+
     select(label, prop, options, current, note = "") {
         const e = PropertiesPanel.esc;
         const opts = options.map(([v, text]) => `<option value="${e(v)}" ${v === current ? "selected" : ""}>${e(text)}</option>`).join("");
@@ -60,8 +69,8 @@ class PropertiesPanel {
         }
 
         const c = sel[0];
-        let html = this.text("Name", "name", c.name);
         const type = c.type;
+        let html = type === "TEXT" ? "" : this.text("Name", "name", c.name);
 
         if (type === "V") html += this.sourceRows(c, "V");
         else if (type === "I") html += this.sourceRows(c, "A");
@@ -209,7 +218,7 @@ class PropertiesPanel {
 
     onInput(e) {
         const t = this.target(e);
-        if (!t || e.target.tagName === "SELECT") return;
+        if (!t || e.target.tagName === "SELECT" || e.target.type === "checkbox") return;
         const { prop, comp } = t;
         const v = e.target.value;
 
@@ -230,7 +239,11 @@ class PropertiesPanel {
         const { prop, comp } = t;
         const v = e.target.value;
 
-        if (e.target.tagName === "SELECT") {
+        if (e.target.type === "checkbox") {
+            this.assign(comp, prop, e.target.checked);
+            this.refreshLabel(comp);
+            this.commit();
+        } else if (e.target.tagName === "SELECT") {
             this.assign(comp, prop, prop === "closed" ? v === "true" : v);
             if (prop === "model") {
                 comp.value = v;

@@ -36,6 +36,7 @@ class DocumentStore {
             components: ed.components.map(c => this.strip(c)),
             wires: ed.wires.map(({ blocked, ...w }) => w),
             probes: ed.probes.map(p => this.strip(p)),
+            titleBlock: ed.titleBlock,
             nextId: ed.nextId,
             view: { zoom: ed.zoom, panX: ed.panX, panY: ed.panY },
             settings: this.runner.settings()
@@ -45,7 +46,7 @@ class DocumentStore {
     // what counts as an edit: the design and the run settings, not the view
     signature() {
         const s = this.serialize();
-        return JSON.stringify([s.components, s.wires, s.probes, s.settings]);
+        return JSON.stringify([s.components, s.wires, s.probes, s.titleBlock, s.settings]);
     }
 
     isEmpty() { return !this.editor.components.length && !this.editor.wires.length && !this.editor.probes.length; }
@@ -87,6 +88,7 @@ class DocumentStore {
         ed.wires = wires;
         ed.probes = probes;
         ed.nextId = Math.max(Number(state.nextId) || 1, maxId + 1);
+        ed.titleBlock = Object.assign(SchematicEditor.defaultTitleBlock(), state.titleBlock && typeof state.titleBlock === "object" ? state.titleBlock : {});
         const v = state.view || { zoom: 1, panX: state.panX || 0, panY: state.panY || 0 };
         ed.zoom = v.zoom || 1; ed.panX = v.panX || 0; ed.panY = v.panY || 0;
         ed.clearSelection();

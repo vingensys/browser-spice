@@ -523,3 +523,7 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 #center, #graphwin, .graph-body { min-width: 0; }
 .graph-head button, .graph-head select, #plotTitle { white-space: nowrap; }
 #plotTitle { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* text annotation / title block fields */
+.property textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; background: var(--ui-input); border: 1px solid var(--ui-border); padding: 4px 6px; font-family: system-ui; }
+.property .checkrow { display: flex; align-items: center; gap: 6px; }

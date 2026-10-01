@@ -17,7 +17,7 @@ against Proteus / ngspice, **P3** polish.
 ## 1. Schematic capture
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| No text / graphic annotation, title block, notes | P2 | Cannot document a design on the sheet. |
+| ~~No text annotation / title block~~ | P2 | **Done**: multi-line text notes (size, colour, bold / italic, alignment, rotation) and a title block. Still missing: lines / boxes / circles, images, hyperlinks. |
 | No multi-sheet or hierarchical designs, no buses | P2 | Everything is one flat sheet. Net labels and power ports exist (same name = same net). |
 | ~~No autosave / unsaved-changes warning~~ | P1 | **Done**: autosave to browser storage with restore, dirty tracking, Save / Don't Save / Cancel prompts. Remaining: autosave is per browser profile (no cloud), and two tabs on the same address overwrite each other's copy. |
 | No wire / net labels shown on wires, no net highlighting or cross-probing | P2 | |
@@ -72,5 +72,5 @@ against Proteus / ngspice, **P3** polish.
 1. ~~Autosave and an unsaved-changes prompt (P1)~~ done.
 2. ~~Graph cursors, readouts and CSV export~~ done.
 3. ~~Counters, shift registers and a 74xx set~~ done.
-4. Text annotation, title block and net highlighting (P2).
+4. ~~Text annotation and title block~~ done; net highlighting still open.
 5. ERC rules, then CI for the test suites.

@@ -31,7 +31,7 @@ class SchematicRouter {
 
     buildRouteContext(excludeWire) {
         const g = this.gridSize;
-        const boxes = this.components.map(c => this.getComponentBox(c));
+        const boxes = this.components.filter(c => !this.isOverlay(c)).map(c => this.getComponentBox(c));
         const pins = [];
         for (const c of this.components) {
             for (const t of this.getTerminals(c)) pins.push(this.getTerminalPosition(c, t));
@@ -74,7 +74,7 @@ class SchematicRouter {
     }
 
     pointInsideAnyBody(x, y) {
-        return this.components.some(c => this.pointInsideBox(x, y, this.getComponentBox(c)));
+        return this.components.some(c => !this.isOverlay(c) && this.pointInsideBox(x, y, this.getComponentBox(c)));
     }
 
     // Is the straight grid segment p->q clear of bodies and foreign pins?

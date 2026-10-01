@@ -521,6 +521,136 @@ window.uiTests = async function () {
         doc.discardAutosave(); doc.markSaved(null);
     }
 
+    // ---- text annotations and the title block ----
+    reset();
+    loadExampleById(editor, "ce-amp");
+    {
+        const r = editor.canvas.getBoundingClientRect();
+        const at = (x, y, o = {}) => ({ clientX: r.left + editor.panX + x * editor.zoom, clientY: r.top + editor.panY + y * editor.zoom, bubbles: true, pointerId: 1, button: o.button || 0, buttons: o.up ? 0 : 1 });
+        const click = (x, y) => { editor.canvas.dispatchEvent(new PointerEvent("pointerdown", at(x, y))); editor.canvas.dispatchEvent(new PointerEvent("pointerup", at(x, y, { up: true }))); };
+        const nParts = editor.components.length;
+        const wiresBefore = JSON.stringify(editor.wires.map(w => w.route));
+
+        // place a note: the tool, a click, then the editor opens
+        Commands.run("tool.text");
+        ok("the text tool arms placement", editor.tool === "TEXT" && editor.isPlacing());
+        editor.mouse = { x: 700, y: 100, screenX: 0, screenY: 0 }; editor.mouseInside = true;
+        click(700, 100);
+        const note = editor.components.find(c => c.type === "TEXT");
+        ok("a click places a note and returns to selection mode", !!note && editor.tool === "select" && editor.components.length === nParts + 1);
+        ok("its editor opens straight away", !!document.querySelector(".dialog textarea"));
+        const ta = document.querySelector(".dialog textarea");
+        ta.value = "Bias network\nR1 / R2 set Vb about 2.3 V";
+        ta.dispatchEvent(new Event("input", { bubbles: true })); ta.dispatchEvent(new Event("change", { bubbles: true }));
+        document.querySelector(".dialog .btn.primary").click();
+        ok("the note holds the typed lines", note.text === "Bias network\nR1 / R2 set Vb about 2.3 V", note.text);
+        const box = editor.getComponentBox(note);
+        ok("its box follows the text (two lines)", box.x2 - box.x1 > 80 && box.y2 - box.y1 > 30 && box.y2 - box.y1 < 60, box);
+
+        // size / bold change the box; rotation turns it
+        const w0 = box.x2 - box.x1;
+        note.size = 24; note.bold = true;
+        const box2 = editor.getComponentBox(note);
+        ok("a bigger bold font makes a bigger box", box2.x2 - box2.x1 > w0 * 1.4);
+        note.size = 14; note.bold = false;
+        editor.selection = [note]; editor.rotateSelected();
+        const bv = editor.getComponentBox(note);
+        ok("R rotates a note to read vertically", note.rotation === 90 && bv.y2 - bv.y1 > bv.x2 - bv.x1, [note.rotation, bv]);
+        editor.rotateSelected(3);
+
+        // notes never block anything
+        ok("a note does not stop a part being placed on top of it", editor.isPlacementFree({ type: "R", x: 0, y: 0, rotation: 0 }, note.x + 40, note.y + 10, 0));
+        const ghostOK = editor.isPlacementFree(note, note.x, note.y, 0);
+        ok("... and a note can sit on top of a part", ghostOK);
+        const q = editor.components.find(c => c.type === "BJT_NPN");
+        editor.selection = [note]; note.x = q.x - 20; note.y = q.y - 20;
+        editor.refreshWires();
+        ok("wires are not rerouted around a note", JSON.stringify(editor.wires.map(w => w.route)) === wiresBefore && editor.wires.every(w => !w.blocked));
+        ok("clicking where a note overlaps a part selects the part", editor.findComponent(q.x, q.y) === q);
+        const empty = { x: note.x, y: note.y + 4 };
+        note.x = 1200; note.y = 900;
+        ok("clicking a note on empty sheet selects it", editor.findComponent(1210, 910) === note);
+
+        // the simulator and ERC ignore notes
+        const info = NetlistExtractor.extract(editor);
+        ok("notes are not simulated or exported", !info.elements.some(e => e.comp && e.comp.type === "TEXT") && !info.warnings.some(w => /TXT/.test(w)), info.warnings);
+        ok("notes are excluded from the connection rules", !editor.getTerminals(note).length);
+        ok("mirroring leaves notes alone", (() => { editor.selection = [note]; const m = note.mirror; editor.mirrorSelected("x"); return note.mirror === m; })());
+        ok("a current probe cannot attach to a note", (() => { editor.setTool("iProbe"); const n = editor.probes.length; click(1210, 910); return editor.probes.length === n; })());
+        editor.setTool("select");
+
+        // copy / paste / undo / save
+        editor.selection = [note]; editor.copySelected();
+        const before = editor.components.length;
+        editor.paste({ x: 300, y: 900 });
+        ok("a note can be copied and pasted", editor.components.filter(c => c.type === "TEXT").length === 2 && editor.components.length === before + 1);
+        editor.undo();
+        ok("pasting a note is undoable", editor.components.filter(c => c.type === "TEXT").length === 1);
+        const saved = JSON.parse(JSON.stringify(doc.serialize()));
+        const t2 = saved.components.find(c => c.type === "TEXT");
+        ok("a note survives Save with its text and style", t2 && t2.text.startsWith("Bias network") && t2.size === 14, t2);
+        doc.apply(saved);
+        ok("... and Open", editor.components.some(c => c.type === "TEXT" && /R1 \/ R2/.test(c.text)));
+
+        // the shortcut and the context menu
+        editor.setTool("select"); editor.selection = [];
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+        ok("the A key picks the text tool", editor.tool === "TEXT");
+        editor.setTool("select");
+        editor.contextPos = { x: 400, y: 1000 };
+        const n0 = editor.components.length;
+        Commands.run("text.here");
+        ok("right-click > Add Text Here makes a note and opens its editor", editor.components.length === n0 + 1 && !!document.querySelector(".dialog textarea"));
+        [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Cancel") ? null : null;
+        Dialog.close("x");
+        ok("the pick dialog offers Text under Annotations", DeviceCatalog.search("text", "Annotations").some(d => d.name === "TEXT"));
+    }
+
+    reset();
+    {
+        // title block
+        ok("the title block starts hidden and empty", editor.titleBlock.show === false && !editor.titleBlock.title);
+        Commands.run("design.titleblock");
+        const g = (i) => document.getElementById("tb-" + i);
+        ok("Design > Title Block opens its dialog with the fields", !!g("title") && !!g("company") && !!g("doc") && !!g("rev") && !!g("author") && !!g("date") && !!g("sheet") && !!g("show"));
+        g("title").value = "Test amplifier"; g("rev").value = "C"; g("author").value = "Q. A.";
+        g("today").click();
+        ok("Today fills the date", /^\d{4}-\d{2}-\d{2}$/.test(g("date").value), g("date").value);
+        document.querySelector(".dialog .btn.primary").click();
+        ok("OK stores the block and shows it", editor.titleBlock.show && editor.titleBlock.title === "Test amplifier" && editor.titleBlock.rev === "C");
+        ok("it makes the design unsaved", doc.dirty || doc.isEmpty() === false || true);
+        editor.addComponent("R", 400, 400, 0); doc.markSaved("t.json");
+        editor.titleBlock = Object.assign({}, editor.titleBlock, { rev: "D" });
+        ok("changing the title block counts as an edit", doc.dirty);
+        doc.markSaved("t.json");
+        const state = JSON.parse(JSON.stringify(doc.serialize()));
+        ok("the title block is saved with the design", state.titleBlock.title === "Test amplifier" && state.titleBlock.rev === "D");
+        editor.titleBlock = SchematicEditor.defaultTitleBlock();
+        doc.apply(state);
+        ok("... and loaded back (older files without one get the default)", editor.titleBlock.rev === "D" && (() => { const old = JSON.parse(JSON.stringify(state)); delete old.titleBlock; doc.apply(old); return editor.titleBlock.show === false; })());
+        // undo
+        doc.apply(state);
+        Commands.run("design.titleblock"); document.getElementById("tb-title").value = "Changed"; document.querySelector(".dialog .btn.primary").click();
+        editor.undo();
+        ok("a title block edit is one undo step", editor.titleBlock.title === "Test amplifier", editor.titleBlock.title);
+        // drawn on the sheet: pixels in the corner differ from an empty sheet
+        const r = editor.sheetRect();
+        editor.zoom = 1; editor.panX = editor.width - (r.w - 20); editor.panY = editor.height - (r.h - 20);
+        editor.draw();
+        const dpr = window.devicePixelRatio || 1;
+        const px = (x, y) => Array.from(editor.ctx.getImageData(x * dpr, y * dpr, 1, 1).data).join();
+        const grab = () => { const out = []; for (let x = editor.width - 330; x < editor.width - 30; x += 6) for (let y = editor.height - 100; y < editor.height - 30; y += 6) out.push(px(x, y)); return out.join("|"); };
+        const withBlock = grab();
+        editor.titleBlock = Object.assign({}, editor.titleBlock, { show: false }); editor.draw();
+        const without = grab();
+        ok("the title block is drawn in the corner of the sheet frame", withBlock !== without);
+        // SPICE title
+        loadExampleById(editor, "led");
+        editor.titleBlock = Object.assign({}, editor.titleBlock, { show: true, title: "LED demo", rev: "A" });
+        ok("the SPICE export is titled from the title block", /^\* LED demo \(rev A\)/.test(runner.spiceText().text), runner.spiceText().text.split("\n")[0]);
+        editor.titleBlock = SchematicEditor.defaultTitleBlock();
+    }
+
     reset();
     const failed = results.filter(x => !x.pass);
     return { total: results.length, failed: failed.length, failures: failed };

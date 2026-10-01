@@ -156,6 +156,15 @@
 
     C("tool.select", "Selection Mode", { icon: "select", keys: "Esc", checked: toolIs("select"), run: () => editor.setTool("select") });
     C("tool.wire", "Wire Tool", { icon: "wire", keys: "W", checked: toolIs("wire"), run: () => editor.setTool("wire") });
+    C("tool.text", "Place Text", { icon: "text", keys: "A", checked: toolIs("TEXT"), run: () => editor.setTool("TEXT") });
+    C("text.here", "Add Text Here", { run() {
+        editor.saveState();
+        const c = editor.addComponent("TEXT", editor.contextPos.x, editor.contextPos.y, 0);
+        editor.selection = [c];
+        editor.draw(); editor.notify();
+        editor.onEdit(c);
+    } });
+    C("design.titleblock", "Title Block…", { icon: "", run: () => openTitleBlock() });
     C("tool.vprobe", "Voltage Probe", { icon: "vprobe", checked: toolIs("vProbe"), run: () => editor.setTool("vProbe") });
     C("tool.iprobe", "Current Probe", { icon: "iprobe", checked: toolIs("iProbe"), run: () => editor.setTool("iProbe") });
 
@@ -219,11 +228,11 @@
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "-", "view.classic", "view.dark"] },
-        { title: "Tool", items: ["tool.select", "tool.wire", "tool.vprobe", "tool.iprobe", "-",
+        { title: "Tool", items: ["tool.select", "tool.wire", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
-        { title: "Design", items: ["design.settings", "design.erc"] },
+        { title: "Design", items: ["design.titleblock", "design.settings", "design.erc"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.sweep", "graph.dc", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
@@ -247,6 +256,7 @@
         { id: "select", icon: "select", title: "Selection Mode (Esc)", run: () => editor.setTool("select") },
         { id: "component", icon: "component", title: "Component Mode: place parts from the device list", run: () => pane.setMode("devices") },
         { id: "wire", icon: "wire", title: "Wire Tool (W)", run: () => editor.setTool("wire") },
+        { id: "text", icon: "text", title: "Text (A): add a note to the sheet", run: () => editor.setTool("TEXT") },
         { id: "terminals", icon: "terminal", title: "Terminals Mode: ground, initial conditions", run: () => pane.setMode("terminals") },
         { id: "generators", icon: "generator", title: "Generator Mode: sources", run: () => pane.setMode("generators") },
         { id: "vprobe", icon: "vprobe", title: "Voltage Probe", run: () => editor.setTool("vProbe") },
@@ -260,6 +270,7 @@
     const modeForTool = () => {
         if (editor.tool === "select") return "select";
         if (editor.tool === "wire") return "wire";
+        if (editor.tool === "TEXT") return "text";
         if (editor.tool === "vProbe") return "vprobe";
         if (editor.tool === "iProbe") return "iprobe";
         return { devices: "component", terminals: "terminals", generators: "generators", instruments: "instruments", graphs: "graphs" }[pane.mode];
@@ -322,7 +333,7 @@
         multi: ["edit.cut", "edit.copy", "edit.drag", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
         wire: [["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
         probe: ["probe.rename", ["edit.delete", "Delete Probe"]],
-        empty: ["edit.paste", "-", "edit.undo", "edit.redo", "-", "edit.selectall", "-", "view.zoomin", "view.zoomout", "view.fit", "-", "lib.pick", "tool.wire", ["edit.tidy", "Tidy All Wires"]]
+        empty: ["edit.paste", "text.here", "-", "edit.undo", "edit.redo", "-", "edit.selectall", "-", "view.zoomin", "view.zoomout", "view.fit", "-", "lib.pick", "tool.wire", ["edit.tidy", "Tidy All Wires"]]
     };
 
     // entries: "-" | { label, key?, disabled?, run }
@@ -437,6 +448,40 @@
     hint();
     Commands.refresh();
     AppLog.add("info", "Ready. Press P to pick devices, or open File > Examples.");
+    // ------------------------------------------------------------------------ title block
+
+    function openTitleBlock() {
+        const t = Object.assign(SchematicEditor.defaultTitleBlock(), editor.titleBlock);
+        const wrap = document.createElement("div");
+        wrap.style.width = "380px";
+        const row = (id, label, value, hint = "") => `<div class="property"><label>${label}</label><input type="text" id="tb-${id}" value="${PropertiesPanel.esc(value)}" placeholder="${PropertiesPanel.esc(hint)}"></div>`;
+        wrap.innerHTML = row("title", "Title", t.title, "e.g. Common-emitter amplifier") + row("company", "Company", t.company) +
+            row("doc", "Document number", t.doc) + row("rev", "Revision", t.rev, "A") + row("author", "Author", t.author) +
+            `<div class="property"><label>Date</label><input type="text" id="tb-date" value="${PropertiesPanel.esc(t.date)}" placeholder="YYYY-MM-DD" style="width:60%">
+                <button class="pane-btn" id="tb-today" type="button">Today</button></div>` +
+            row("sheet", "Sheet", t.sheet, "1/1") +
+            `<div class="property"><label class="checkrow"><input type="checkbox" id="tb-show" ${t.show || !Object.values(t).some(v => v === true || (typeof v === "string" && v && v !== "1/1")) ? "checked" : ""}> Show the title block on the sheet</label></div>`;
+        wrap.querySelector("#tb-today").onclick = () => { wrap.querySelector("#tb-date").value = new Date().toISOString().slice(0, 10); };
+        Dialog.open({
+            title: "Title Block",
+            content: wrap,
+            buttons: [
+                { label: "OK", primary: true, onClick: () => {
+                    const v = (id) => wrap.querySelector(`#tb-${id}`).value.trim();
+                    const next = { show: wrap.querySelector("#tb-show").checked, title: v("title"), company: v("company"), doc: v("doc"), rev: v("rev"), author: v("author"), date: v("date"), sheet: v("sheet") || "1/1" };
+                    if (JSON.stringify(next) !== JSON.stringify(t)) {
+                        editor.saveState();
+                        editor.titleBlock = next;
+                        editor.draw();
+                        editor.notify();
+                    }
+                } },
+                { label: "Cancel" }
+            ]
+        });
+    }
+    window.openTitleBlock = openTitleBlock;
+
     // ------------------------------------------------------------------- autosave / restore
 
     const restored = doc.restore();

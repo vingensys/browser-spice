@@ -107,6 +107,56 @@ applyMixin(SchematicEditor, PartRenderer);
 applyMixin(SymbolPreview, PartRenderer);
 
 
+// ========================================================= text annotations
+
+PartLib.measure = (font, lines) => {
+    PartLib._measureCtx = PartLib._measureCtx || document.createElement("canvas").getContext("2d");
+    const c = PartLib._measureCtx;
+    c.font = font;
+    return Math.max(...lines.map(l => c.measureText(l).width), 4);
+};
+
+PartLib.COLORS = { auto: null, red: "#d32f2f", blue: "#1565c0", green: "#2e7d32", orange: "#ef6c00", grey: "#757575" };
+
+const textLines = (c) => String(c.text === undefined ? "Text" : c.text).split("\n");
+const textFont = (c) => `${c.bold ? "bold " : ""}${c.italic ? "italic " : ""}${Number(c.size) || 14}px system-ui`;
+
+PartLib.add("TEXT", {
+    prefix: "TXT", value: "Text", props: { text: "Text", size: 14, bold: false, italic: false, color: "auto", align: "left" },
+    symbol: {
+        pins: [], box: [0, 0, 60, 20], overlay: true,
+        // the box follows the text so it can be selected, moved and hit-tested
+        dynamic: (c) => {
+            const size = Number(c.size) || 14, lines = textLines(c);
+            const w = Math.ceil(PartLib.measure(textFont(c), lines)) + 6, h = Math.ceil(lines.length * size * 1.25) + 4;
+            return { pins: [], box: [0, 0, w, h], overlay: true };
+        }
+    },
+    label: (c) => String(c.text || "").split("\n")[0].slice(0, 24),
+    draw(r, c) {
+        const ctx = r.ctx, size = Number(c.size) || 14, lines = textLines(c);
+        const w = Math.ceil(PartLib.measure(textFont(c), lines));
+        const color = PartLib.COLORS[c.color] || r.tok("label");
+        ctx.font = textFont(c);
+        ctx.fillStyle = color;
+        ctx.textBaseline = "top";
+        lines.forEach((line, i) => {
+            const tw = ctx.measureText(line).width;
+            const x = c.align === "center" ? 3 + (w - tw) / 2 : c.align === "right" ? 3 + (w - tw) : 3;
+            ctx.textAlign = "left";
+            ctx.fillText(line, x, 2 + i * size * 1.25);
+        });
+    },
+    rows: (p, c) => p.area("Text", "text", c.text === undefined ? "Text" : c.text, 4) +
+        p.select("Size", "size", [8, 10, 12, 14, 18, 24, 36, 48].map(n => [String(n), `${n} px`]), String(Number(c.size) || 14)) +
+        p.select("Colour", "color", [["auto", "Automatic"], ["red", "Red"], ["blue", "Blue"], ["green", "Green"], ["orange", "Orange"], ["grey", "Grey"]], c.color || "auto") +
+        p.select("Alignment", "align", [["left", "Left"], ["center", "Centre"], ["right", "Right"]], c.align || "left") +
+        p.check("Bold", "bold", !!c.bold) + p.check("Italic", "italic", !!c.italic) +
+        `<div class="prop-note">Notes are ignored by the simulator and never block parts or wires. R rotates them.</div>`,
+    netlist() { return []; },
+    catalog: [{ name: "TEXT", category: "Annotations", desc: "Text note on the sheet (also: press A)", props: { text: "Text", size: 14, value: "Text" } }]
+});
+
 // ============================================================== simple parts
 
 const TWO = { pins: [["1", -40, 0, -1, 0], ["2", 40, 0, 1, 0]], box: [-40, -30, 40, 30] };

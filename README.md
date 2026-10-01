@@ -46,6 +46,8 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
 - **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
 
+**Notes and title block**: press **A** (or Tool > Place Text, or right-click the sheet > Add Text Here), click, and type; notes can be multi-line, sized, coloured, bold / italic, aligned and rotated with **R**. They sit on top of everything (they never block parts or wires) and are ignored by the simulator. **Design > Title Block…** fills the ISIS-style block in the sheet's corner (title, company, document number, revision, author, date, sheet); the title also heads the exported `.cir`.
+
 **Your work is kept**
 
 - The design is autosaved in this browser every couple of seconds and restored when you reopen the page (also after a crash). The status bar shows `Saved` / `Unsaved · autosaved hh:mm:ss`, and the window title gets a bullet while there are changes not saved to a file.
