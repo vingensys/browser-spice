@@ -579,7 +579,7 @@
                     <canvas id="schematic" tabindex="0"></canvas>
                     <div class="status">
                         <span id="statusText">Select a tool from the Component Library or right-click canvas for CAD actions.</span>
-                        <span style="color: #6ea8fe; font-size: 11px;">💡 Hold Space + Drag or Middle Click to Pan canvas. Click & Drag wires to move.</span>
+                        <span style="color: #6ea8fe; font-size: 11px;">💡 Scroll = zoom · Space/Middle-drag = pan · F = fit · Shift-click / drag = multi-select</span>
                     </div>
                 </div>
 
@@ -671,6 +671,9 @@
     <script src="js/solver/ac.js"></script>
     <script src="js/solver/transient.js"></script>
 
+    <script src="js/cad/symbols.js"></script>
+    <script src="js/cad/router.js"></script>
+    <script src="js/cad/symbol-draw.js"></script>
     <script src="js/visualization/schematic.js"></script>
     <script src="js/visualization/waveform.js"></script>
 
@@ -707,12 +710,12 @@
         const ctxMenu = document.getElementById("contextMenu");
 
         window.showContextMenu = function(e) {
-            const hasSelection = !!(editor.selected || editor.selectedWire);
+            const hasSelection = !!(editor.selection.length || editor.selectedWire);
             const hasClipboard = !!editor.clipboard;
 
-            document.getElementById("ctxCopy").classList.toggle("disabled", !editor.selected);
+            document.getElementById("ctxCopy").classList.toggle("disabled", !editor.selection.length);
             document.getElementById("ctxPaste").classList.toggle("disabled", !hasClipboard);
-            document.getElementById("ctxRotate").classList.toggle("disabled", !editor.selected);
+            document.getElementById("ctxRotate").classList.toggle("disabled", !editor.selection.length);
             document.getElementById("ctxDelete").classList.toggle("disabled", !hasSelection);
 
             ctxMenu.style.left = `${e.clientX}px`;
@@ -728,7 +731,7 @@
         document.getElementById("ctxRedo").addEventListener("click", () => editor.redo());
         
         document.getElementById("ctxCopy").addEventListener("click", () => {
-            if (editor.selected) {
+            if (editor.selection.length) {
                 editor.copySelected();
                 updateStatus();
             }
@@ -743,14 +746,14 @@
         });
 
         document.getElementById("ctxRotate").addEventListener("click", () => {
-            if (editor.selected) {
+            if (editor.selection.length) {
                 editor.rotateSelected();
                 updateProperties();
             }
         });
 
         document.getElementById("ctxDelete").addEventListener("click", () => {
-            if (editor.selected || editor.selectedWire) {
+            if (editor.selection.length || editor.selectedWire) {
                 editor.removeSelected();
                 updateProperties();
             }
@@ -1070,27 +1073,36 @@
 
         function updateStatus() {
             const status = document.getElementById("statusText");
-            if (editor.tool === "wire") {
-                status.textContent = "Wire Tool: Click to start. Click on canvas to anchor corner waypoints. Right-click for CAD menu.";
+            if (editor.wiring) {
+                status.textContent = "Wiring: click a pin or wire to finish, click empty grid to add a corner, Backspace removes the last corner, double-click ends in free space, Esc cancels.";
+            } else if (editor.tool === "wire") {
+                status.textContent = "Wire Tool: click a pin or a wire to start. (In Pointer mode you can also just click a pin.)";
             } else if (editor.tool === "vProbe") {
                 status.textContent = "V-Probe Tool: Click on a wire/node to attach a Voltage Probe.";
             } else if (editor.tool === "iProbe") {
                 status.textContent = "I-Probe Tool: Click on a component to attach a Current Probe I(comp).";
+            } else if (editor.isPlacing()) {
+                status.textContent = "Placing: click to drop a part (keeps placing), R rotates, right-click or Esc to stop.";
+            } else if (editor.selection.length > 1) {
+                status.textContent = `${editor.selection.length} parts selected. Drag to move, R rotates, Del deletes, Ctrl+C / Ctrl+V copies.`;
             } else if (editor.selected) {
-                status.textContent = `${editor.selected.name} selected. Drag to move, press R to rotate.`;
+                status.textContent = `${editor.selected.name} selected. Drag to move, R rotates, double-click to edit its value, Del deletes.`;
             } else if (editor.selectedWire) {
-                status.textContent = "Wire selected. Click & Drag wire to shift position on grid, press Del to delete.";
+                status.textContent = "Wire selected. Drag a segment to reshape, T re-routes it from scratch, Del deletes.";
             } else {
-                status.textContent = "Select a tool from the Component Library or right-click canvas for CAD actions.";
+                status.textContent = "Click a pin to wire. Drag to box-select. Scroll to zoom, hold Space or middle-drag to pan, F fits the view, T tidies all wires.";
             }
-            updatePaletteActive(editor.tool);
+            updatePaletteActive(editor.autoWire ? "select" : editor.tool);
         }
 
-        const origPointerDown = editor.pointerDown.bind(editor);
-        editor.pointerDown = function (event) {
-            origPointerDown(event);
+        editor.onChange = () => {
             updateProperties();
             updateStatus();
+        };
+
+        editor.onEdit = () => {
+            const input = document.getElementById("propValue") || document.getElementById("propName");
+            if (input) { input.focus(); input.select(); }
         };
 
         updateProperties();

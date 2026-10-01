@@ -197,7 +197,8 @@ class NetlistExtractor {
                     break;
                 case "V":
                     const dcVal = Units.parseSI(comp.dcVoltage || comp.value) || 5;
-                    solverComp = new VoltageSource(comp.name, n1, n2, dcVal);
+                    // pin 2 is the + terminal (matches the "+" drawn beside it)
+                    solverComp = new VoltageSource(comp.name, n2, n1, dcVal);
                     solverComp.sourceType = comp.sourceType || "DC";
                     solverComp.dcVoltage = dcVal;
                     solverComp.dcOffset = Units.parseSI(comp.dcOffset) || 0;

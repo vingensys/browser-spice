@@ -1,3 +1,11 @@
+// Schematic editor core: view, selection, placement, wiring interaction, drawing.
+// Pin/body tables live in js/cad/symbols.js, routing in js/cad/router.js and
+// symbol artwork in js/cad/symbol-draw.js (mixed in at the bottom of this file).
+
+const HOTKEYS = {
+    c: "C", l: "L", v: "V", g: "GND", d: "D", q: "BJT_NPN", m: "NMOS", u: "OPAMP", w: "wire"
+};
+
 class SchematicEditor {
 
     constructor(canvas) {
@@ -10,62 +18,70 @@ class SchematicEditor {
         this.wires = [];
         this.probes = [];
 
-        this.selected = null;
+        this.selection = [];
         this.selectedWire = null;
 
         this.tool = "select";
+        this.placeRotation = 0;
 
-        this.dragging = false;
-        this.draggingWire = false;
-        this.draggingWireTarget = null; // { wire, type: 'segment' | 'waypoint', index }
-
-        this.isPanning = false;
-
-        this.dragOffsetX = 0;
-        this.dragOffsetY = 0;
-
-        // Viewport Pan
+        // View
+        this.zoom = 1;
         this.panX = 0;
         this.panY = 0;
-        this.panStart = { x: 0, y: 0 };
+        this.isPanning = false;
         this.isSpacePressed = false;
+        this.panStart = { x: 0, y: 0 };
+
+        // Interaction state
+        this.move = null;        // group move of components
+        this.segDrag = null;     // wire segment drag
+        this.box = null;         // rubber-band selection rectangle (world coords)
+        this.pointerDownAt = null;
 
         this.clipboard = null;
-
-        // History Stacks
         this.historyStack = [];
         this.futureStack = [];
 
         // Wiring state
         this.wiring = false;
         this.wireStart = null;
-        this.wireWaypoints = [];
+        this.wireAnchors = [];
+        this.previewRoute = null;
+        this.autoWire = false;
         this.hoverSnap = null;
+        this.hoverTarget = null;
 
         this.mouse = { x: 0, y: 0 };
+        this.mouseInside = false;
         this.nextId = 1;
+        this.connectedPins = new Set();
+
+        this.onChange = null;    // fired when selection / tool changes
+        this.onEdit = null;      // fired when a component is double-clicked
+        this._notifyKey = "";
 
         this.resize();
 
-        window.addEventListener("resize", () => {
-            this.resize();
-        });
+        window.addEventListener("resize", () => this.resize());
 
-        canvas.addEventListener("pointerdown", e => {
-            this.pointerDown(e);
-        });
+        canvas.addEventListener("pointerdown", e => this.pointerDown(e));
+        canvas.addEventListener("pointermove", e => this.pointerMove(e));
+        canvas.addEventListener("pointerup", e => this.pointerUp(e));
+        canvas.addEventListener("pointercancel", e => this.pointerUp(e));
+        canvas.addEventListener("dblclick", e => this.doubleClick(e));
 
-        canvas.addEventListener("pointermove", e => {
-            this.pointerMove(e);
+        canvas.addEventListener("pointerleave", () => {
+            this.mouseInside = false;
+            if (!this.wiring && !this.isDragging()) this.hoverSnap = null;
+            this.draw();
         });
+        canvas.addEventListener("pointerenter", () => { this.mouseInside = true; });
 
-        canvas.addEventListener("pointerup", e => {
-            this.pointerUp(e);
-        });
-
-        canvas.addEventListener("pointerleave", e => {
-            this.pointerUp(e);
-        });
+        canvas.addEventListener("wheel", e => {
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            this.zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.0015));
+        }, { passive: false });
 
         canvas.addEventListener("contextmenu", e => {
             e.preventDefault();
@@ -73,20 +89,25 @@ class SchematicEditor {
                 this.cancelWire();
                 return;
             }
+            if (this.isPlacing() || this.tool === "wire" || this.tool === "vProbe" || this.tool === "iProbe") {
+                this.setTool("select");
+                return;
+            }
 
             const pos = this.getMousePosition(e);
             const comp = this.findComponent(pos.x, pos.y);
             if (comp) {
-                this.selected = comp;
+                if (!this.isSelected(comp)) this.selection = [comp];
                 this.selectedWire = null;
             } else {
                 const wireHit = this.findWire(pos.x, pos.y);
                 if (wireHit) {
-                    this.selectedWire = wireHit.wire;
-                    this.selected = null;
+                    this.selectedWire = wireHit;
+                    this.selection = [];
                 }
             }
             this.draw();
+            this.notify();
 
             if (typeof window.showContextMenu === "function") {
                 window.showContextMenu(e);
@@ -94,12 +115,9 @@ class SchematicEditor {
         });
 
         document.addEventListener("keydown", e => {
-            if (e.code === "Space" && !this.isSpacePressed) {
-                const active = document.activeElement;
-                if (!active || (active.tagName !== "INPUT" && active.tagName !== "SELECT" && active.tagName !== "TEXTAREA")) {
-                    this.isSpacePressed = true;
-                    this.canvas.style.cursor = "grab";
-                }
+            if (e.code === "Space" && !this.isSpacePressed && !this.isTyping()) {
+                this.isSpacePressed = true;
+                this.canvas.style.cursor = "grab";
             }
             this.keyDown(e);
         });
@@ -107,159 +125,201 @@ class SchematicEditor {
         document.addEventListener("keyup", e => {
             if (e.code === "Space") {
                 this.isSpacePressed = false;
-                this.canvas.style.cursor = this.tool === "select" ? "default" : "crosshair";
+                this.updateCursor();
             }
         });
+
+        window.addEventListener("blur", () => { this.isSpacePressed = false; });
 
         this.draw();
     }
 
+    isTyping() {
+        const active = document.activeElement;
+        return !!active && (active.tagName === "INPUT" || active.tagName === "SELECT" || active.tagName === "TEXTAREA");
+    }
+
+    isDragging() {
+        return !!(this.move || this.segDrag || this.box || this.isPanning);
+    }
+
 
     // ============================================================
-    // UNDO / REDO HISTORY SYSTEM
+    // SELECTION
     // ============================================================
 
-    saveState() {
-        const snapshot = JSON.stringify({
+    get selected() {
+        return this.selection.length === 1 ? this.selection[0] : null;
+    }
+
+    set selected(component) {
+        this.selection = component ? [component] : [];
+    }
+
+    isSelected(component) {
+        return this.selection.includes(component);
+    }
+
+    selectAll() {
+        this.selection = [...this.components];
+        this.selectedWire = null;
+        this.draw();
+        this.notify();
+    }
+
+    clearSelection() {
+        this.selection = [];
+        this.selectedWire = null;
+    }
+
+    notify() {
+        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.wiring}`;
+        if (key === this._notifyKey) return;
+        this._notifyKey = key;
+        if (typeof this.onChange === "function") this.onChange();
+    }
+
+
+    // ============================================================
+    // UNDO / REDO
+    // ============================================================
+
+    snapshot() {
+        return JSON.stringify({
             components: this.components,
             wires: this.wires,
             probes: this.probes,
-            nextId: this.nextId,
-            panX: this.panX,
-            panY: this.panY
+            nextId: this.nextId
         });
+    }
 
-        if (this.historyStack.length > 0 && this.historyStack[this.historyStack.length - 1] === snapshot) {
-            return;
-        }
+    // Call BEFORE a change: records the state to return to on undo.
+    saveState() {
+        const snap = this.snapshot();
+        if (this.historyStack.length > 0 && this.historyStack[this.historyStack.length - 1] === snap) return;
 
-        this.historyStack.push(snapshot);
-        if (this.historyStack.length > 50) this.historyStack.shift();
-
+        this.historyStack.push(snap);
+        if (this.historyStack.length > 100) this.historyStack.shift();
         this.futureStack = [];
+    }
+
+    restore(snapshot) {
+        const state = JSON.parse(snapshot);
+        this.components = state.components;
+        this.wires = state.wires;
+        this.probes = state.probes;
+        this.nextId = state.nextId;
+
+        this.clearSelection();
+        this.cancelWire();
+        this.refreshWires();
+        this.draw();
+        this.notify();
     }
 
     undo() {
         if (this.historyStack.length === 0) return;
-
-        const currentSnapshot = JSON.stringify({
-            components: this.components,
-            wires: this.wires,
-            probes: this.probes,
-            nextId: this.nextId,
-            panX: this.panX,
-            panY: this.panY
-        });
-        this.futureStack.push(currentSnapshot);
-
-        const previousSnapshot = this.historyStack.pop();
-        const state = JSON.parse(previousSnapshot);
-
-        this.components = state.components;
-        this.wires = state.wires;
-        this.probes = state.probes;
-        this.nextId = state.nextId;
-        this.panX = state.panX || 0;
-        this.panY = state.panY || 0;
-
-        this.selected = null;
-        this.selectedWire = null;
-        this.cancelWire();
-        this.rerouteAllWires();
-        this.draw();
+        this.futureStack.push(this.snapshot());
+        this.restore(this.historyStack.pop());
     }
 
     redo() {
         if (this.futureStack.length === 0) return;
-
-        const currentSnapshot = JSON.stringify({
-            components: this.components,
-            wires: this.wires,
-            probes: this.probes,
-            nextId: this.nextId,
-            panX: this.panX,
-            panY: this.panY
-        });
-        this.historyStack.push(currentSnapshot);
-
-        const nextSnapshot = this.futureStack.pop();
-        const state = JSON.parse(nextSnapshot);
-
-        this.components = state.components;
-        this.wires = state.wires;
-        this.probes = state.probes;
-        this.nextId = state.nextId;
-        this.panX = state.panX || 0;
-        this.panY = state.panY || 0;
-
-        this.selected = null;
-        this.selectedWire = null;
-        this.cancelWire();
-        this.rerouteAllWires();
-        this.draw();
+        this.historyStack.push(this.snapshot());
+        this.restore(this.futureStack.pop());
     }
 
 
     // ============================================================
-    // COPY & PASTE
+    // COPY & PASTE (multi-selection, keeps wires between copied parts)
     // ============================================================
 
     copySelected() {
-        if (!this.selected) return null;
+        if (!this.selection.length) return null;
 
+        const ids = new Set(this.selection.map(c => c.id));
+        const comps = this.selection.map(c => JSON.parse(JSON.stringify(c)));
+        const wires = this.wires
+            .filter(w => w.route && w.start.type === "terminal" && w.end.type === "terminal" &&
+                ids.has(w.start.component) && ids.has(w.end.component))
+            .map(w => JSON.parse(JSON.stringify({ start: w.start, end: w.end, route: w.route })));
+
+        const xs = comps.map(c => c.x), ys = comps.map(c => c.y);
         this.clipboard = {
-            type: this.selected.type,
-            value: this.selected.value,
-            rotation: this.selected.rotation,
-            sourceType: this.selected.sourceType,
-            dcVoltage: this.selected.dcVoltage,
-            dcOffset: this.selected.dcOffset,
-            acMagnitude: this.selected.acMagnitude,
-            acPhase: this.selected.acPhase,
-            frequency: this.selected.frequency
+            comps,
+            wires,
+            cx: (Math.min(...xs) + Math.max(...xs)) / 2,
+            cy: (Math.min(...ys) + Math.max(...ys)) / 2
         };
+        return this.selection;
+    }
 
-        return this.selected;
+    cutSelected() {
+        if (this.copySelected()) this.removeSelected();
     }
 
     paste() {
         if (!this.clipboard) return null;
 
+        const g = this.gridSize;
+        const cb = this.clipboard;
+        const targetX = this.mouseInside ? this.snap(this.mouse.x) : this.snap(cb.cx + 2 * g);
+        const targetY = this.mouseInside ? this.snap(this.mouse.y) : this.snap(cb.cy + 2 * g);
+        let dx = targetX - this.snap(cb.cx);
+        let dy = targetY - this.snap(cb.cy);
+
+        const fits = (ox, oy) => cb.comps.every(c => this.isPlacementFree(c, c.x + ox, c.y + oy, c.rotation));
+        search:
+        for (let r = 0; r <= 10; r++) {
+            for (let i = -r; i <= r; i++) {
+                for (let j = -r; j <= r; j++) {
+                    if (Math.max(Math.abs(i), Math.abs(j)) !== r) continue;
+                    if (fits(dx + i * g, dy + j * g)) {
+                        dx += i * g;
+                        dy += j * g;
+                        break search;
+                    }
+                }
+            }
+        }
+
         this.saveState();
 
-        let targetX = 200;
-        let targetY = 200;
-
-        if (this.mouse.x > 0 && this.mouse.y > 0) {
-            targetX = this.snap(this.mouse.x);
-            targetY = this.snap(this.mouse.y);
-        } else if (this.selected) {
-            targetX = this.selected.x + 40;
-            targetY = this.selected.y + 40;
+        const idMap = new Map();
+        const created = [];
+        for (const src of cb.comps) {
+            const count = this.components.filter(c => c.type === src.type).length + 1;
+            const comp = Object.assign({}, src, {
+                id: this.nextId++,
+                name: src.type === "GND" ? "GND" : `${src.type}${count}`,
+                x: src.x + dx,
+                y: src.y + dy
+            });
+            idMap.set(src.id, comp.id);
+            this.components.push(comp);
+            created.push(comp);
         }
 
-        const newComp = this.addComponent(this.clipboard.type, targetX, targetY);
-        newComp.value = this.clipboard.value;
-        newComp.rotation = this.clipboard.rotation;
-
-        if (this.clipboard.type === "V") {
-            newComp.sourceType = this.clipboard.sourceType;
-            newComp.dcVoltage = this.clipboard.dcVoltage;
-            newComp.dcOffset = this.clipboard.dcOffset;
-            newComp.acMagnitude = this.clipboard.acMagnitude;
-            newComp.acPhase = this.clipboard.acPhase;
-            newComp.frequency = this.clipboard.frequency;
+        for (const w of cb.wires) {
+            this.wires.push({
+                id: this.nextId++,
+                start: Object.assign({}, w.start, { component: idMap.get(w.start.component) }),
+                end: Object.assign({}, w.end, { component: idMap.get(w.end.component) }),
+                route: w.route.map(p => ({ x: p.x + dx, y: p.y + dy }))
+            });
         }
 
-        this.selected = newComp;
+        this.selection = created;
         this.selectedWire = null;
+        this.refreshWires();
         this.draw();
-        return newComp;
+        this.notify();
+        return created;
     }
 
 
     // ============================================================
-    // GEOMETRY & VIEWPORT PANNING
+    // VIEW: ZOOM & PAN
     // ============================================================
 
     snap(value) {
@@ -268,11 +328,13 @@ class SchematicEditor {
 
     getMousePosition(event) {
         const rect = this.canvas.getBoundingClientRect();
+        const sx = event.clientX - rect.left;
+        const sy = event.clientY - rect.top;
         return {
-            x: event.clientX - rect.left - this.panX,
-            y: event.clientY - rect.top - this.panY,
-            screenX: event.clientX - rect.left,
-            screenY: event.clientY - rect.top
+            x: (sx - this.panX) / this.zoom,
+            y: (sy - this.panY) / this.zoom,
+            screenX: sx,
+            screenY: sy
         };
     }
 
@@ -291,23 +353,78 @@ class SchematicEditor {
         this.draw();
     }
 
+    zoomAt(screenX, screenY, factor) {
+        const next = Math.min(3, Math.max(0.25, this.zoom * factor));
+        const k = next / this.zoom;
+        this.panX = screenX - (screenX - this.panX) * k;
+        this.panY = screenY - (screenY - this.panY) * k;
+        this.zoom = next;
+        this.draw();
+    }
+
+    resetView() {
+        this.zoom = 1;
+        this.panX = 0;
+        this.panY = 0;
+        this.draw();
+    }
+
+    fitView() {
+        if (!this.components.length) {
+            this.resetView();
+            return;
+        }
+        let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+        for (const c of this.components) {
+            const b = this.getComponentBox(c);
+            x1 = Math.min(x1, b.x1); y1 = Math.min(y1, b.y1);
+            x2 = Math.max(x2, b.x2); y2 = Math.max(y2, b.y2);
+        }
+        const pad = 60;
+        const zoom = Math.min(2, Math.max(0.25, Math.min(
+            this.width / (x2 - x1 + pad * 2),
+            this.height / (y2 - y1 + pad * 2)
+        )));
+        this.zoom = zoom;
+        this.panX = this.width / 2 - ((x1 + x2) / 2) * zoom;
+        this.panY = this.height / 2 - ((y1 + y2) / 2) * zoom;
+        this.draw();
+    }
+
+    updateCursor() {
+        let cursor = "default";
+        if (this.isPanning) cursor = "grabbing";
+        else if (this.isSpacePressed) cursor = "grab";
+        else if (this.tool !== "select" || this.wiring) cursor = "crosshair";
+        else if (this.hoverSnap && this.hoverSnap.type === "terminal") cursor = "crosshair";
+        else if (this.hoverTarget === "component") cursor = "move";
+        else if (this.hoverTarget === "wire") cursor = "pointer";
+        this.canvas.style.cursor = cursor;
+    }
+
 
     // ============================================================
     // TOOLS & PROBES
     // ============================================================
 
+    isPlacing() {
+        return !!SYMBOL_DEFS[this.tool];
+    }
+
     setTool(tool) {
         this.cancelWire();
         this.tool = tool;
-
-        this.canvas.style.cursor = tool === "select" ? "default" : "crosshair";
+        this.placeRotation = 0;
+        this.hoverSnap = null;
+        this.hoverTarget = null;
+        if (tool !== "select") this.selectedWire = null;
+        this.updateCursor();
         this.draw();
+        this.notify();
     }
 
     cancelWire() {
-        this.wiring = false;
-        this.wireStart = null;
-        this.wireWaypoints = [];
+        this.endWiring();
         this.draw();
     }
 
@@ -329,7 +446,6 @@ class SchematicEditor {
 
     addCurrentProbe(component) {
         this.saveState();
-        const count = this.probes.filter(p => p.type === 'I').length + 1;
         const probe = {
             id: this.nextId++,
             type: 'I',
@@ -346,10 +462,10 @@ class SchematicEditor {
 
 
     // ============================================================
-    // COMPONENTS & BOUNDING BOXES
+    // COMPONENTS
     // ============================================================
 
-    addComponent(type, x, y) {
+    addComponent(type, x, y, rotation = 0) {
         const count = this.components.filter(c => c.type === type).length + 1;
 
         let defaultValue = "";
@@ -362,9 +478,9 @@ class SchematicEditor {
             id: this.nextId++,
             type,
             name: type === "GND" ? "GND" : `${type}${count}`,
-            x: this.snap(x),
-            y: this.snap(y),
-            rotation: 0,
+            x: 0,
+            y: 0,
+            rotation,
             value: defaultValue,
             sourceType: type === "V" ? "DC" : undefined,
             dcVoltage: type === "V" ? 5 : undefined,
@@ -374,114 +490,217 @@ class SchematicEditor {
             frequency: type === "V" ? 1000 : undefined
         };
 
+        const spot = this.findFreeSpot(component, x, y);
+        component.x = spot.x;
+        component.y = spot.y;
+
         this.components.push(component);
-
-        this.selected = component;
-        this.selectedWire = null;
-
-        this.rerouteAllWires();
+        this.refreshWires();
         this.draw();
-
         return component;
     }
 
-    getComponentWidth(component) {
-        return component.type === "GND" ? 40 : 100;
+    placeAt(x, y) {
+        const gx = this.snap(x), gy = this.snap(y);
+        const probe = { type: this.tool, x: gx, y: gy, rotation: this.placeRotation };
+        if (!this.isPlacementFree(probe, gx, gy, this.placeRotation)) return null;
+
+        this.saveState();
+        const comp = this.addComponent(this.tool, gx, gy, this.placeRotation);
+        this.draw();
+        return comp;
     }
 
-    getComponentHeight(component) {
-        return component.type === "GND" ? 50 : 60;
+    rotateSelected() {
+        if (!this.selection.length) return;
+
+        const single = this.selection.length === 1;
+        let px = 0, py = 0;
+        if (!single) {
+            const xs = this.selection.map(c => c.x), ys = this.selection.map(c => c.y);
+            px = this.snap((Math.min(...xs) + Math.max(...xs)) / 2);
+            py = this.snap((Math.min(...ys) + Math.max(...ys)) / 2);
+        }
+
+        const poses = this.selection.map(c => {
+            const rot = (c.rotation + 90) % 360;
+            if (single) return { c, x: c.x, y: c.y, rotation: rot };
+            const o = this.rotateOffset(c.x - px, c.y - py, 90);
+            return { c, x: px + o.x, y: py + o.y, rotation: rot };
+        });
+
+        const sel = new Set(this.selection);
+        for (const p of poses) {
+            if (!this.isPlacementFree(p.c, p.x, p.y, p.rotation, sel)) return;
+        }
+
+        this.saveState();
+        for (const p of poses) {
+            p.c.x = p.x;
+            p.c.y = p.y;
+            p.c.rotation = p.rotation;
+        }
+        this.refreshWires();
+        this.draw();
+    }
+
+    removeSelected() {
+        if (this.selection.length) {
+            this.saveState();
+            const ids = new Set(this.selection.map(c => c.id));
+            this.components = this.components.filter(c => !ids.has(c.id));
+
+            this.wires = this.wires.filter(
+                w =>
+                    !(w.start.type === "terminal" && ids.has(w.start.component)) &&
+                    !(w.end.type === "terminal" && ids.has(w.end.component))
+            );
+            this.probes = this.probes.filter(p => !(p.type === 'I' && ids.has(p.target)));
+
+            this.selection = [];
+            this.refreshWires();
+            this.draw();
+            this.notify();
+            return;
+        }
+
+        if (this.selectedWire) {
+            this.saveState();
+            const gone = this.selectedWire;
+            this.wires = this.wires.filter(w => w !== gone);
+            this.selectedWire = null;
+            this.refreshWires();
+            this.draw();
+            this.notify();
+        }
+    }
+
+
+    // ============================================================
+    // SYMBOL GEOMETRY: PINS, BODIES & COLLISION
+    // ============================================================
+
+    getSymbolDef(component) {
+        return SYMBOL_DEFS[component.type] || SYMBOL_DEFS.R;
+    }
+
+    rotateOffset(x, y, rotation) {
+        switch (((rotation % 360) + 360) % 360) {
+            case 90: return { x: -y, y: x };
+            case 180: return { x: -x, y: -y };
+            case 270: return { x: y, y: -x };
+            default: return { x, y };
+        }
+    }
+
+    getTerminals(component) {
+        return this.getSymbolDef(component).pins.map(([name, x, y, dx, dy]) => ({
+            name, x, y, dir: { x: dx, y: dy }
+        }));
+    }
+
+    getTerminalPosition(component, terminal) {
+        const o = this.rotateOffset(terminal.x, terminal.y, component.rotation);
+        return { x: component.x + o.x, y: component.y + o.y };
+    }
+
+    getTerminalDirection(component, terminal) {
+        return this.rotateOffset(terminal.dir.x, terminal.dir.y, component.rotation);
+    }
+
+    // World-space body rectangle. Its interior is solid: wires may run along the
+    // edge and leave through pins, but never pass through it.
+    getComponentBox(component, pose = component) {
+        const [bx1, by1, bx2, by2] = this.getSymbolDef(component).box;
+        const corners = [[bx1, by1], [bx2, by1], [bx2, by2], [bx1, by2]]
+            .map(([x, y]) => this.rotateOffset(x, y, pose.rotation));
+        return {
+            x1: pose.x + Math.min(...corners.map(c => c.x)),
+            x2: pose.x + Math.max(...corners.map(c => c.x)),
+            y1: pose.y + Math.min(...corners.map(c => c.y)),
+            y2: pose.y + Math.max(...corners.map(c => c.y))
+        };
     }
 
     getComponentBoundingBox(component, clearance = 0) {
-        const width = this.getComponentWidth(component);
-        const height = this.getComponentHeight(component);
-        const rotated = component.rotation === 90 || component.rotation === 270;
-
-        const w = (rotated ? height : width) / 2 + clearance;
-        const h = (rotated ? width : height) / 2 + clearance;
-
-        return {
-            x1: component.x - w,
-            x2: component.x + w,
-            y1: component.y - h,
-            y2: component.y + h
-        };
+        const b = this.getComponentBox(component);
+        return { x1: b.x1 - clearance, x2: b.x2 + clearance, y1: b.y1 - clearance, y2: b.y2 + clearance };
     }
 
-    getComponentObstacleBox(component) {
-        const rotated = component.rotation === 90 || component.rotation === 270;
-        const hw = rotated ? 50 : 70;
-        const hh = rotated ? 70 : 50;
+    boxesOverlap(a, b) {
+        return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+    }
 
-        return {
-            x1: component.x - hw,
-            x2: component.x + hw,
-            y1: component.y - hh,
-            y2: component.y + hh
-        };
+    // A part may not overlap another body, and no pin (or the one-grid exit stub in
+    // front of it) may land on a foreign body. That keeps every pin escapable, so
+    // wires can always leave and the router never gets boxed in.
+    isPlacementFree(component, x, y, rotation, ignore = null) {
+        const pose = { type: component.type, x, y, rotation };
+        const box = this.getComponentBox(pose, pose);
+        const g = this.gridSize;
+        const inClosed = (px, py, b) => px >= b.x1 && px <= b.x2 && py >= b.y1 && py <= b.y2;
+
+        const pinNodes = (c, p) => this.getTerminals(c).flatMap(t => {
+            const o = this.rotateOffset(t.x, t.y, p.rotation);
+            const d = this.rotateOffset(t.dir.x, t.dir.y, p.rotation);
+            const px = p.x + o.x, py = p.y + o.y;
+            return [{ x: px, y: py }, { x: px + d.x * g, y: py + d.y * g }];
+        });
+        const mine = pinNodes(pose, pose);
+
+        for (const other of this.components) {
+            if (other === component || (ignore && ignore.has(other))) continue;
+            const ob = this.getComponentBox(other);
+            if (this.boxesOverlap(box, ob)) return false;
+            if (mine.some(n => inClosed(n.x, n.y, ob))) return false;
+            if (pinNodes(other, other).some(n => inClosed(n.x, n.y, box))) return false;
+        }
+        return true;
+    }
+
+    // Nearest free grid position to (x, y) so parts never land on top of each other.
+    findFreeSpot(component, x, y) {
+        const g = this.gridSize;
+        const px = this.snap(x);
+        const py = this.snap(y);
+        for (let r = 0; r <= 12; r++) {
+            for (let dx = -r; dx <= r; dx++) {
+                for (let dy = -r; dy <= r; dy++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+                    if (this.isPlacementFree(component, px + dx * g, py + dy * g, component.rotation)) {
+                        return { x: px + dx * g, y: py + dy * g };
+                    }
+                }
+            }
+        }
+        return { x: px, y: py };
     }
 
     findComponent(x, y) {
         for (let i = this.components.length - 1; i >= 0; i--) {
-            const component = this.components[i];
-            const box = this.getComponentBoundingBox(component, 0);
-
+            const box = this.getComponentBoundingBox(this.components[i], 4);
             if (x >= box.x1 && x <= box.x2 && y >= box.y1 && y <= box.y2) {
-                return component;
+                return this.components[i];
             }
         }
         return null;
     }
 
-    getTerminals(component) {
-        switch (component.type) {
-            case "R":
-            case "C":
-            case "L":
-            case "V":
-                return [
-                    { name: "1", x: -40, y: 0 },
-                    { name: "2", x: 40, y: 0 }
-                ];
-            case "GND":
-                return [
-                    { name: "1", x: 0, y: -15 }
-                ];
-            default:
-                return [];
-        }
-    }
+    findTerminal(x, y, tolerance = 16) {
+        let best = null;
+        let bestDist = tolerance / this.zoom;
 
-    getTerminalPosition(component, terminal) {
-        const angle = (component.rotation * Math.PI) / 180;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-
-        return {
-            x: component.x + terminal.x * cos - terminal.y * sin,
-            y: component.y + terminal.x * sin + terminal.y * cos
-        };
-    }
-
-    findTerminal(x, y) {
-        const tolerance = 16;
-
-        for (let i = this.components.length - 1; i >= 0; i--) {
-            const component = this.components[i];
+        for (const component of this.components) {
             for (const terminal of this.getTerminals(component)) {
                 const p = this.getTerminalPosition(component, terminal);
-                if (Math.hypot(x - p.x, y - p.y) <= tolerance) {
-                    return {
-                        component,
-                        terminal,
-                        x: p.x,
-                        y: p.y
-                    };
+                const d = Math.hypot(x - p.x, y - p.y);
+                if (d <= bestDist) {
+                    bestDist = d;
+                    best = { component, terminal, x: p.x, y: p.y };
                 }
             }
         }
-        return null;
+        return best;
     }
 
     getTerminalInfo(componentId, terminalName) {
@@ -494,425 +713,123 @@ class SchematicEditor {
         return {
             component,
             terminal,
-            position: this.getTerminalPosition(component, terminal)
+            position: this.getTerminalPosition(component, terminal),
+            dir: this.getTerminalDirection(component, terminal)
         };
     }
 
 
     // ============================================================
-    // CAD SNAP DETECTION
+    // SNAPPING & HIT TESTING
     // ============================================================
 
     findSnapTarget(x, y) {
-        const term = this.findTerminal(x, y);
+        const term = this.findTerminal(x, y, 16);
         if (term) {
-            return {
-                type: "terminal",
-                component: term.component,
-                terminal: term.terminal,
-                x: term.x,
-                y: term.y
-            };
+            return { type: "terminal", component: term.component, terminal: term.terminal, x: term.x, y: term.y };
         }
 
-        const wireHit = this.findWire(x, y);
+        const wireHit = this.findWireTarget(x, y);
         if (wireHit) {
-            const pointOnWire = this.projectPointToWire(x, y, wireHit.wire);
-            return {
-                type: "wire",
-                wire: wireHit.wire,
-                x: this.snap(pointOnWire.x),
-                y: this.snap(pointOnWire.y)
-            };
+            const p = this.projectPointToWire(x, y, wireHit.wire);
+            return { type: "wire", wire: wireHit.wire, x: this.snap(p.x), y: this.snap(p.y) };
         }
 
-        return {
-            type: "grid",
-            x: this.snap(x),
-            y: this.snap(y)
-        };
+        const gx = this.snap(x), gy = this.snap(y);
+        return { type: "grid", x: gx, y: gy, blocked: this.pointInsideAnyBody(gx, gy) };
     }
 
-    projectPointToWire(x, y, wire) {
-        if (!wire.route || wire.route.length < 2) return { x, y };
-        let minDist = Infinity;
-        let bestPoint = { x, y };
-
-        for (let j = 0; j < wire.route.length - 1; j++) {
-            const a = wire.route[j];
-            const b = wire.route[j + 1];
-            const dist = this.distanceToSegment(x, y, a.x, a.y, b.x, b.y);
-            if (dist < minDist) {
-                minDist = dist;
-                bestPoint = this.projectPointToSegment(x, y, a.x, a.y, b.x, b.y);
-            }
-        }
-        return bestPoint;
+    findWire(x, y) {
+        const hit = this.findWireTarget(x, y);
+        return hit ? hit.wire : null;
     }
 
-    projectPointToSegment(px, py, x1, y1, x2, y2) {
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        if (dx === 0 && dy === 0) return { x: x1, y: y1 };
+    findWireTarget(x, y) {
+        const tolerance = 7 / this.zoom;
 
-        const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
-        return { x: x1 + t * dx, y: y1 + t * dy };
-    }
+        for (let i = this.wires.length - 1; i >= 0; i--) {
+            const wire = this.wires[i];
+            if (!wire.route || wire.route.length < 2) continue;
 
-
-    // ============================================================
-    // OBSTACLE ROUTING & WIRE SEPARATION ENGINE
-    // ============================================================
-
-    lineIntersectsBox(p1, p2, box) {
-        const minX = Math.min(p1.x, p2.x);
-        const maxX = Math.max(p1.x, p2.x);
-        const minY = Math.min(p1.y, p2.y);
-        const maxY = Math.max(p1.y, p2.y);
-
-        if (maxX <= box.x1 || minX >= box.x2 || maxY <= box.y1 || minY >= box.y2) {
-            return false;
-        }
-
-        if (p1.x === p2.x) {
-            return p1.x > box.x1 && p1.x < box.x2 && maxY > box.y1 && minY < box.y2;
-        }
-        if (p1.y === p2.y) {
-            return p1.y > box.y1 && p1.y < box.y2 && maxX > box.x1 && minX < box.x2;
-        }
-
-        const pointInside = (x, y) => x > box.x1 && x < box.x2 && y > box.y1 && y < box.y2;
-        return pointInside(p1.x, p1.y) || pointInside(p2.x, p2.y);
-    }
-
-    getComponentBodyBox(component) {
-        const rotated = component.rotation === 90 || component.rotation === 270;
-        const hw = rotated ? 20 : 30;
-        const hh = rotated ? 30 : 20;
-
-        return {
-            x1: component.x - hw,
-            x2: component.x + hw,
-            y1: component.y - hh,
-            y2: component.y + hh
-        };
-    }
-
-    getTerminalPinStub(component, terminal, stubLength = 20) {
-        const angle = (component.rotation * Math.PI) / 180;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-
-        let dirX = Math.sign(terminal.x) || -1;
-        let dirY = Math.sign(terminal.y);
-
-        const rotatedDirX = dirX * cos - dirY * sin;
-        const rotatedDirY = dirX * sin + dirY * cos;
-
-        const pos = this.getTerminalPosition(component, terminal);
-
-        return {
-            x: pos.x + rotatedDirX * stubLength,
-            y: pos.y + rotatedDirY * stubLength
-        };
-    }
-
-    isSegmentBlocked(p1, p2, sourceComp, destComp, targetWire = null) {
-        for (const comp of this.components) {
-            const bodyBox = this.getComponentBodyBox(comp);
-
-            if (this.lineIntersectsBox(p1, p2, bodyBox)) {
-                return true;
-            }
-        }
-
-        for (const existingWire of this.wires) {
-            if (existingWire === targetWire || !existingWire.route || existingWire.route.length < 2) continue;
-
-            for (let i = 0; i < existingWire.route.length - 1; i++) {
-                const ep1 = existingWire.route[i];
-                const ep2 = existingWire.route[i + 1];
-
-                if (p1.y === p2.y && ep1.y === ep2.y && Math.abs(p1.y - ep1.y) < 1) {
-                    const min1 = Math.min(p1.x, p2.x);
-                    const max1 = Math.max(p1.x, p2.x);
-                    const min2 = Math.min(ep1.x, ep2.x);
-                    const max2 = Math.max(ep1.x, ep2.x);
-
-                    if (Math.max(min1, min2) < Math.min(max1, max2)) {
-                        return true;
-                    }
-                }
-
-                if (p1.x === p2.x && ep1.x === ep2.x && Math.abs(p1.x - ep1.x) < 1) {
-                    const min1 = Math.min(p1.y, p2.y);
-                    const max1 = Math.max(p1.y, p2.y);
-                    const min2 = Math.min(ep1.y, ep2.y);
-                    const max2 = Math.max(ep1.y, ep2.y);
-
-                    if (Math.max(min1, min2) < Math.min(max1, max2)) {
-                        return true;
-                    }
+            for (let j = 0; j < wire.route.length - 1; j++) {
+                const a = wire.route[j];
+                const b = wire.route[j + 1];
+                if (this.distanceToSegment(x, y, a.x, a.y, b.x, b.y) <= tolerance) {
+                    return { wire, type: "segment", index: j };
                 }
             }
         }
-
-        return false;
-    }
-
-    calculateWireRoute(wire) {
-        let startPos = null;
-        let endPos = null;
-        let startStub = null;
-        let endStub = null;
-        let sourceComp = null;
-        let destComp = null;
-
-        if (wire.start.type === "terminal" || wire.start.component) {
-            const info = this.getTerminalInfo(wire.start.component, wire.start.terminal);
-            if (info) {
-                startPos = info.position;
-                sourceComp = info.component;
-                startStub = this.getTerminalPinStub(info.component, info.terminal, 20);
-                wire.start.x = startPos.x;
-                wire.start.y = startPos.y;
-            }
-        } else {
-            startPos = { x: wire.start.x, y: wire.start.y };
-            startStub = startPos;
-        }
-
-        if (wire.end.type === "terminal" || wire.end.component) {
-            const info = this.getTerminalInfo(wire.end.component, wire.end.terminal);
-            if (info) {
-                endPos = info.position;
-                destComp = info.component;
-                endStub = this.getTerminalPinStub(info.component, info.terminal, 20);
-                wire.end.x = endPos.x;
-                wire.end.y = endPos.y;
-            }
-        } else {
-            endPos = { x: wire.end.x, y: wire.end.y };
-            endStub = endPos;
-        }
-
-        if (!startPos || !endPos) return null;
-
-        // PRESERVE USER-DRAWN INTERMEDIATE WAYPOINTS ACROSS LAYOUT/ROTATION/ALIGNMENT
-        if (wire.userWaypoints && wire.userWaypoints.length >= 3) {
-            const fullRoute = [startPos];
-            if (startStub && (startStub.x !== startPos.x || startStub.y !== startPos.y)) {
-                fullRoute.push(startStub);
-            }
-
-            const firstUserPoint = wire.userWaypoints[1];
-            const startLink = this.findObstacleFreePath(startStub || startPos, firstUserPoint, sourceComp, null, wire);
-            if (startLink && startLink.length >= 2) {
-                for (let k = 1; k < startLink.length; k++) {
-                    fullRoute.push(startLink[k]);
-                }
-            } else {
-                fullRoute.push(firstUserPoint);
-            }
-
-            for (let i = 1; i < wire.userWaypoints.length - 2; i++) {
-                const ptA = wire.userWaypoints[i];
-                const ptB = wire.userWaypoints[i + 1];
-                const midLink = this.findObstacleFreePath(ptA, ptB, null, null, wire);
-                if (midLink && midLink.length >= 2) {
-                    for (let k = 1; k < midLink.length; k++) {
-                        fullRoute.push(midLink[k]);
-                    }
-                } else {
-                    fullRoute.push(ptB);
-                }
-            }
-
-            const lastUserPoint = wire.userWaypoints[wire.userWaypoints.length - 2];
-            const endLink = this.findObstacleFreePath(lastUserPoint, endStub || endPos, null, destComp, wire);
-            if (endLink && endLink.length >= 2) {
-                for (let k = 1; k < endLink.length; k++) {
-                    fullRoute.push(endLink[k]);
-                }
-            } else {
-                fullRoute.push(endStub || endPos);
-            }
-
-            if (endStub && (endStub.x !== endPos.x || endStub.y !== endPos.y)) {
-                fullRoute.push(endPos);
-            }
-
-            return this.removeDuplicatePoints(fullRoute);
-        }
-
-        // Auto-route between stubs if no custom waypoints
-        const pathFromStubs = this.findObstacleFreePath(startStub, endStub, sourceComp, destComp, wire);
-        if (!pathFromStubs) return [startPos, endPos];
-
-        const fullRoute = [startPos];
-        for (const pt of pathFromStubs) {
-            fullRoute.push(pt);
-        }
-        fullRoute.push(endPos);
-
-        return this.removeDuplicatePoints(fullRoute);
-    }
-
-    findObstacleFreePath(start, end, sourceComp, destComp, targetWire = null) {
-        const midHV = { x: end.x, y: start.y };
-        if (!this.isSegmentBlocked(start, midHV, sourceComp, destComp, targetWire) &&
-            !this.isSegmentBlocked(midHV, end, sourceComp, destComp, targetWire)) {
-            return this.removeDuplicatePoints([start, midHV, end]);
-        }
-
-        const midVH = { x: start.x, y: end.y };
-        if (!this.isSegmentBlocked(start, midVH, sourceComp, destComp, targetWire) &&
-            !this.isSegmentBlocked(midVH, end, sourceComp, destComp, targetWire)) {
-            return this.removeDuplicatePoints([start, midVH, end]);
-        }
-
-        const xCandidates = new Set([this.snap(start.x), this.snap(end.x)]);
-        const yCandidates = new Set([this.snap(start.y), this.snap(end.y)]);
-
-        for (const comp of this.components) {
-            const box = this.getComponentObstacleBox(comp);
-            xCandidates.add(this.snap(box.x1 - 20));
-            xCandidates.add(this.snap(box.x2 + 20));
-            yCandidates.add(this.snap(box.y1 - 20));
-            yCandidates.add(this.snap(box.y2 + 20));
-        }
-
-        xCandidates.add(this.snap(start.x - 20));
-        xCandidates.add(this.snap(start.x + 20));
-        yCandidates.add(this.snap(start.y - 20));
-        yCandidates.add(this.snap(start.y + 20));
-
-        const xList = Array.from(xCandidates).sort((a, b) => a - b);
-        const yList = Array.from(yCandidates).sort((a, b) => a - b);
-
-        const path = this.searchCandidateGrid(start, end, xList, yList, sourceComp, destComp, targetWire);
-        if (path && path.length >= 2) {
-            return path;
-        }
-
-        const detourY = Math.min(...Array.from(yCandidates)) - 40;
-        return this.removeDuplicatePoints([
-            start,
-            { x: start.x, y: detourY },
-            { x: end.x, y: detourY },
-            end
-        ]);
-    }
-
-    searchCandidateGrid(start, end, xList, yList, sourceComp, destComp, targetWire = null) {
-        const keyOf = (p) => `${p.x},${p.y}`;
-        const startKey = keyOf(start);
-        const endKey = keyOf(end);
-
-        const open = new Map();
-        const closed = new Set();
-
-        open.set(startKey, { point: start, g: 0, f: Math.abs(start.x - end.x) + Math.abs(start.y - end.y), parent: null });
-
-        let iterations = 0;
-        while (open.size > 0 && iterations < 5000) {
-            iterations++;
-
-            let currentKey = null;
-            let current = null;
-            for (const [k, node] of open) {
-                if (!current || node.f < current.f) {
-                    current = node;
-                    currentKey = k;
-                }
-            }
-
-            if (currentKey === endKey) {
-                const path = [];
-                let curr = current;
-                while (curr) {
-                    path.push(curr.point);
-                    curr = curr.parent;
-                }
-                path.reverse();
-                return this.removeDuplicatePoints(path);
-            }
-
-            open.delete(currentKey);
-            closed.add(currentKey);
-
-            const neighbors = [];
-            const currP = current.point;
-
-            const xIdx = xList.indexOf(currP.x);
-            if (xIdx > 0) neighbors.push({ x: xList[xIdx - 1], y: currP.y });
-            if (xIdx >= 0 && xIdx < xList.length - 1) neighbors.push({ x: xList[xIdx + 1], y: currP.y });
-
-            const yIdx = yList.indexOf(currP.y);
-            if (yIdx > 0) neighbors.push({ x: currP.x, y: yList[yIdx - 1] });
-            if (yIdx >= 0 && yIdx < yList.length - 1) neighbors.push({ x: currP.x, y: yList[yIdx + 1] });
-
-            for (const n of neighbors) {
-                const nKey = keyOf(n);
-                if (closed.has(nKey)) continue;
-
-                if (this.isSegmentBlocked(currP, n, sourceComp, destComp, targetWire)) continue;
-
-                const dist = Math.abs(n.x - currP.x) + Math.abs(n.y - currP.y);
-                const g = current.g + dist;
-                const h = Math.abs(n.x - end.x) + Math.abs(n.y - end.y);
-                const existing = open.get(nKey);
-
-                if (!existing || g < existing.g) {
-                    open.set(nKey, { point: n, g, f: g + h, parent: current });
-                }
-            }
-        }
-
         return null;
     }
 
-    removeDuplicatePoints(points) {
-        const result = [];
-        for (const p of points) {
-            if (!result.length || result[result.length - 1].x !== p.x || result[result.length - 1].y !== p.y) {
-                result.push({ x: p.x, y: p.y });
-            }
-        }
-        return result;
-    }
-
-    rerouteAllWires() {
-        for (const wire of this.wires) {
-            wire.route = this.calculateWireRoute(wire);
-        }
-    }
-
 
     // ============================================================
-    // CLICK-TO-ANCHOR MULTI-SEGMENT WIRING
+    // CLICK-TO-ANCHOR WIRING
+    // Click a pin (or drag from it), move to preview the auto-route, click
+    // empty grid to pin a corner, click a pin or wire to finish.
+    // Double-click ends a wire in free space.
     // ============================================================
 
     startWire(snapTarget) {
         this.wiring = true;
         this.wireStart = snapTarget;
-        this.wireWaypoints = [{ x: snapTarget.x, y: snapTarget.y }];
-        this.selected = null;
-        this.selectedWire = null;
+        this.wireAnchors = [];
+        this.hoverSnap = snapTarget;
+        this.clearSelection();
+        this.updateWirePreview();
+        this.updateCursor();
         this.draw();
     }
 
     addWireWaypoint(snapTarget) {
-        const last = this.wireWaypoints[this.wireWaypoints.length - 1];
-        const nextPoint = { x: snapTarget.x, y: snapTarget.y };
+        if (snapTarget.blocked) return;
+        const last = this.wireAnchors.length
+            ? this.wireAnchors[this.wireAnchors.length - 1]
+            : this.wireStart;
+        if (last.x === snapTarget.x && last.y === snapTarget.y) return;
 
-        if (last.x !== nextPoint.x || last.y !== nextPoint.y) {
-            const subPath = this.findObstacleFreePath(last, nextPoint, null, null);
-            for (let i = 1; i < subPath.length; i++) {
-                this.wireWaypoints.push(subPath[i]);
-            }
-        }
+        this.wireAnchors.push({ x: snapTarget.x, y: snapTarget.y });
+        this.updateWirePreview();
         this.draw();
+    }
+
+    removeLastAnchor() {
+        if (!this.wiring) return false;
+        if (this.wireAnchors.length) {
+            this.wireAnchors.pop();
+            this.updateWirePreview();
+            this.draw();
+        } else {
+            this.cancelWire();
+        }
+        return true;
+    }
+
+    updateWirePreview() {
+        if (!this.wiring || !this.wireStart || !this.hoverSnap) {
+            this.previewRoute = null;
+            return;
+        }
+        const temp = {
+            start: this.formatWireEndpoint(this.wireStart),
+            end: this.formatWireEndpoint(this.hoverSnap),
+            anchors: this.wireAnchors.map(p => ({ x: p.x, y: p.y }))
+        };
+        this.previewRoute = this.calculateWireRoute(temp, this.buildRouteContext(null));
+    }
+
+    endWiring() {
+        this.wiring = false;
+        this.wireStart = null;
+        this.wireAnchors = [];
+        this.previewRoute = null;
+        this.wireDragFrom = null;
+
+        if (this.autoWire) {
+            this.autoWire = false;
+            if (this.tool === "wire") this.tool = "select";
+        }
+        this.updateCursor();
     }
 
     finishWire(snapTarget) {
@@ -921,433 +838,473 @@ class SchematicEditor {
         const start = this.wireStart;
         const end = snapTarget;
 
-        if (start.type === "terminal" && end.type === "terminal") {
-            if (start.component.id === end.component.id && start.terminal.name === end.terminal.name) {
-                this.cancelWire();
-                return;
-            }
+        if (start.type === "terminal" && end.type === "terminal" &&
+            start.component.id === end.component.id && start.terminal.name === end.terminal.name) {
+            this.cancelWire();
+            return;
         }
 
-        if (start.x === end.x && start.y === end.y && this.wireWaypoints.length <= 1) {
+        if (!this.wireAnchors.length && start.x === end.x && start.y === end.y) {
             this.cancelWire();
             return;
         }
 
         this.saveState();
 
-        const sourceComp = start.type === "terminal" ? start.component : null;
-        const destComp = end.type === "terminal" ? end.component : null;
-
-        const finalWaypoints = [];
-        for (let i = 0; i < this.wireWaypoints.length; i++) {
-            if (i === 0) {
-                finalWaypoints.push(this.wireWaypoints[0]);
-            } else {
-                const p1 = finalWaypoints[finalWaypoints.length - 1];
-                const p2 = this.wireWaypoints[i];
-                const subPath = this.findObstacleFreePath(p1, p2, sourceComp, destComp);
-                for (let k = 1; k < subPath.length; k++) {
-                    finalWaypoints.push(subPath[k]);
-                }
-            }
-        }
-
-        const lastWp = finalWaypoints[finalWaypoints.length - 1];
-        if (lastWp.x !== end.x || lastWp.y !== end.y) {
-            const endSubPath = this.findObstacleFreePath(lastWp, { x: end.x, y: end.y }, sourceComp, destComp);
-            for (let k = 1; k < endSubPath.length; k++) {
-                finalWaypoints.push(endSubPath[k]);
-            }
-        }
-
-        const cleanRoute = this.removeDuplicatePoints(finalWaypoints);
-
-        const newWire = {
+        const wire = {
             id: this.nextId++,
             start: this.formatWireEndpoint(start),
             end: this.formatWireEndpoint(end),
-            route: cleanRoute,
-            userWaypoints: cleanRoute.map(p => ({ x: p.x, y: p.y }))
+            anchors: this.wireAnchors.map(p => ({ x: p.x, y: p.y })),
+            route: null
         };
+        this.wires.push(wire);
+        this.endWiring();
 
-        this.wires.push(newWire);
-        this.rerouteAllWires();
-
-        this.wiring = false;
-        this.wireStart = null;
-        this.wireWaypoints = [];
+        wire.route = this.calculateWireRoute(wire, this.buildRouteContext(wire));
+        delete wire.anchors;
+        this.refreshWires();
         this.draw();
+        this.notify();
     }
 
-    isPointOnSegment(px, py, x1, y1, x2, y2) {
-        if (Math.abs(x1 - x2) < 2 && Math.abs(px - x1) < 2) {
-            return py >= Math.min(y1, y2) - 2 && py <= Math.max(y1, y2) + 2;
+    doubleClick(event) {
+        const pos = this.getMousePosition(event);
+
+        if (this.wiring) {
+            const last = this.wireAnchors.pop();
+            if (!last) {
+                this.cancelWire();
+                return;
+            }
+            this.finishWire({ type: "grid", x: last.x, y: last.y });
+            return;
         }
-        if (Math.abs(y1 - y2) < 2 && Math.abs(py - y1) < 2) {
-            return px >= Math.min(x1, x2) - 2 && px <= Math.max(x1, x2) + 2;
+
+        if (this.tool === "select" && !this.findTerminal(pos.x, pos.y, 10)) {
+            const comp = this.findComponent(pos.x, pos.y);
+            if (comp && typeof this.onEdit === "function") this.onEdit(comp);
         }
-        return false;
     }
 
     formatWireEndpoint(snap) {
         if (snap.type === "terminal") {
-            return {
-                type: "terminal",
-                component: snap.component.id,
-                terminal: snap.terminal.name,
-                x: snap.x,
-                y: snap.y
-            };
-        } else if (snap.type === "wire") {
-            return {
-                type: "wire",
-                wireId: snap.wire.id,
-                x: snap.x,
-                y: snap.y
-            };
-        } else {
-            return {
-                type: "point",
-                x: snap.x,
-                y: snap.y
-            };
+            return { type: "terminal", component: snap.component.id, terminal: snap.terminal.name, x: snap.x, y: snap.y };
         }
-    }
-
-
-    // ============================================================
-    // WIRE SEGMENT & WAYPOINT HIT TESTING
-    // ============================================================
-
-    findWire(x, y) {
-        const hit = this.findWireTarget(x, y);
-        return hit ? hit.wire : null;
-    }
-
-    findWireTarget(x, y) {
-        const waypointTolerance = 10;
-        const segmentTolerance = 8;
-
-        for (let i = this.wires.length - 1; i >= 0; i--) {
-            const wire = this.wires[i];
-            if (!wire.route || wire.route.length < 2) continue;
-
-            // 1. Waypoint Corner Handle Check
-            for (let j = 0; j < wire.route.length; j++) {
-                const pt = wire.route[j];
-                if (Math.hypot(x - pt.x, y - pt.y) <= waypointTolerance) {
-                    return { wire, type: "waypoint", index: j };
-                }
-            }
-
-            // 2. Individual Edge Segment Check
-            for (let j = 0; j < wire.route.length - 1; j++) {
-                const a = wire.route[j];
-                const b = wire.route[j + 1];
-
-                if (this.distanceToSegment(x, y, a.x, a.y, b.x, b.y) <= segmentTolerance) {
-                    return { wire, type: "segment", index: j };
-                }
-            }
+        if (snap.type === "wire") {
+            return { type: "wire", wireId: snap.wire.id, x: snap.x, y: snap.y };
         }
-        return null;
-    }
-
-    distanceToSegment(px, py, x1, y1, x2, y2) {
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
-
-        const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
-        const cx = x1 + t * dx;
-        const cy = y1 + t * dy;
-
-        return Math.hypot(px - cx, py - cy);
+        return { type: "point", x: snap.x, y: snap.y };
     }
 
 
     // ============================================================
-    // POINTER & KEYBOARD EVENTS (EDGE & WAYPOINT BEAUTIFYING)
+    // POINTER EVENTS
     // ============================================================
 
     pointerDown(event) {
         const pos = this.getMousePosition(event);
         this.mouse = pos;
+        this.mouseInside = true;
+
+        try { this.canvas.setPointerCapture(event.pointerId); } catch (e) { /* synthetic events */ }
+        if (this.canvas !== document.activeElement) this.canvas.focus({ preventScroll: true });
 
         if (event.button === 1 || (event.button === 0 && this.isSpacePressed)) {
             this.isPanning = true;
             this.panStart = { x: event.clientX, y: event.clientY };
-            this.canvas.style.cursor = "grabbing";
+            this.updateCursor();
             return;
         }
 
         if (event.button !== 0) return;
+        this.pointerDownAt = { x: pos.screenX, y: pos.screenY };
 
         if (this.tool === "vProbe") {
             this.addVoltageProbe(pos.x, pos.y);
-            this.tool = "select";
-            this.canvas.style.cursor = "default";
+            this.setTool("select");
             return;
         }
 
         if (this.tool === "iProbe") {
             const component = this.findComponent(pos.x, pos.y);
-            if (component && component.type !== "GND") {
-                this.addCurrentProbe(component);
-            }
-            this.tool = "select";
-            this.canvas.style.cursor = "default";
+            if (component && component.type !== "GND") this.addCurrentProbe(component);
+            this.setTool("select");
             return;
         }
 
-        if (this.tool === "wire") {
+        if (this.tool === "wire" || this.wiring) {
             const snap = this.findSnapTarget(pos.x, pos.y);
 
             if (!this.wiring) {
-                this.startWire(snap);
+                if (snap.type !== "grid" || !snap.blocked) this.startWire(snap);
+            } else if (snap.type === "terminal" || snap.type === "wire") {
+                this.finishWire(snap);
             } else {
-                if (snap.type === "terminal" || snap.type === "wire") {
-                    this.finishWire(snap);
-                } else {
-                    this.addWireWaypoint(snap);
-                }
+                this.addWireWaypoint(snap);
             }
+            this.notify();
             return;
         }
 
-        if (this.tool !== "select") {
-            this.addComponent(this.tool, pos.x, pos.y);
-            this.tool = "select";
-            this.canvas.style.cursor = "default";
+        if (this.isPlacing()) {
+            this.placeAt(pos.x, pos.y);
+            return;
+        }
+
+        // ----- select mode -----
+
+        // Proteus-style: grabbing a pin starts a wire
+        const pin = this.findTerminal(pos.x, pos.y, 10);
+        if (pin) {
+            this.tool = "wire";
+            this.autoWire = true;
+            this.wireDragFrom = { x: pos.screenX, y: pos.screenY };
+            this.startWire({ type: "terminal", component: pin.component, terminal: pin.terminal, x: pin.x, y: pin.y });
+            this.notify();
             return;
         }
 
         const component = this.findComponent(pos.x, pos.y);
         if (component) {
-            this.selected = component;
+            if (event.shiftKey) {
+                this.selection = this.isSelected(component)
+                    ? this.selection.filter(c => c !== component)
+                    : [...this.selection, component];
+                this.selectedWire = null;
+                this.draw();
+                this.notify();
+                return;
+            }
+
+            if (!this.isSelected(component)) this.selection = [component];
             this.selectedWire = null;
-            this.dragging = true;
-            this.dragOffsetX = pos.x - component.x;
-            this.dragOffsetY = pos.y - component.y;
+
+            this.move = {
+                clicked: component,
+                orig: new Map(this.selection.map(c => [c, { x: c.x, y: c.y }])),
+                offX: pos.x - component.x,
+                offY: pos.y - component.y,
+                last: { dx: 0, dy: 0 },
+                moved: false
+            };
             this.draw();
+            this.notify();
             return;
         }
 
         const wireTarget = this.findWireTarget(pos.x, pos.y);
         if (wireTarget) {
             this.selectedWire = wireTarget.wire;
-            this.selected = null;
-            this.draggingWire = true;
-            this.draggingWireTarget = wireTarget;
-            this.dragOffsetX = pos.x;
-            this.dragOffsetY = pos.y;
+            this.selection = [];
+            this.segDrag = { wire: wireTarget.wire, idx: wireTarget.index, moved: false, begun: false };
             this.draw();
+            this.notify();
             return;
         }
 
-        this.selected = null;
-        this.selectedWire = null;
+        // empty space: rubber-band selection
+        if (!event.shiftKey) this.clearSelection();
+        this.box = { x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y, additive: event.shiftKey, base: [...this.selection] };
         this.draw();
+        this.notify();
     }
 
     pointerMove(event) {
         if (this.isPanning) {
-            const dx = event.clientX - this.panStart.x;
-            const dy = event.clientY - this.panStart.y;
+            this.panX += event.clientX - this.panStart.x;
+            this.panY += event.clientY - this.panStart.y;
             this.panStart = { x: event.clientX, y: event.clientY };
-
-            this.panX += dx;
-            this.panY += dy;
             this.draw();
             return;
         }
 
         const pos = this.getMousePosition(event);
         this.mouse = pos;
+        this.mouseInside = true;
 
-        if (this.tool === "wire" || this.wiring) {
-            this.hoverSnap = this.findSnapTarget(pos.x, pos.y);
+        if (this.box) {
+            this.box.x2 = pos.x;
+            this.box.y2 = pos.y;
+            this.updateBoxSelection();
             this.draw();
             return;
         }
 
-        if (this.dragging && this.selected) {
-            const newX = this.snap(pos.x - this.dragOffsetX);
-            const newY = this.snap(pos.y - this.dragOffsetY);
-
-            if (newX !== this.selected.x || newY !== this.selected.y) {
-                this.selected.x = newX;
-                this.selected.y = newY;
-                this.rerouteAllWires();
-
-                for (const prb of this.probes) {
-                    if (prb.type === 'I' && prb.target === this.selected.id) {
-                        prb.x = newX;
-                        prb.y = newY - 35;
-                    }
-                }
-                this.draw();
-            }
+        if (this.move) {
+            this.doMove(pos);
             return;
         }
 
-        // DRAG INDIVIDUAL EDGE SEGMENT OR WAYPOINT HANDLE
-        if (this.draggingWire && this.selectedWire && this.draggingWireTarget) {
-            const wire = this.selectedWire;
-            const route = wire.route;
-            if (!route || route.length < 2) return;
+        if (this.segDrag) {
+            this.doSegmentDrag(pos);
+            return;
+        }
 
-            const target = this.draggingWireTarget;
+        if (this.tool === "wire" || this.wiring) {
+            const snap = this.findSnapTarget(pos.x, pos.y);
+            const h = this.hoverSnap;
+            const changed = !h || snap.x !== h.x || snap.y !== h.y || snap.type !== h.type;
+            this.hoverSnap = snap;
+            if (changed) this.updateWirePreview();
+            this.draw();
+            return;
+        }
 
-            if (target.type === "waypoint") {
-                // Move single waypoint corner handle
-                const idx = target.index;
-                const newX = this.snap(pos.x);
-                const newY = this.snap(pos.y);
+        if (this.isPlacing()) {
+            this.draw();
+            return;
+        }
 
-                if (route[idx].x !== newX || route[idx].y !== newY) {
-                    route[idx].x = newX;
-                    route[idx].y = newY;
-                    this.draw();
-                }
-            } else if (target.type === "segment") {
-                // Move single edge segment parallel to its orientation
-                const idx = target.index;
-                const p1 = route[idx];
-                const p2 = route[idx + 1];
-
-                const isHorizontal = p1.y === p2.y;
-
-                if (isHorizontal) {
-                    const newY = this.snap(pos.y);
-                    if (p1.y !== newY) {
-                        p1.y = newY;
-                        p2.y = newY;
-                        this.draw();
-                    }
-                } else {
-                    const newX = this.snap(pos.x);
-                    if (p1.x !== newX) {
-                        p1.x = newX;
-                        p2.x = newX;
-                        this.draw();
-                    }
-                }
-            }
+        // hover feedback in select mode
+        const pin = this.findTerminal(pos.x, pos.y, 10);
+        let target = null;
+        if (!pin) {
+            if (this.findComponent(pos.x, pos.y)) target = "component";
+            else if (this.findWireTarget(pos.x, pos.y)) target = "wire";
+        }
+        const hover = pin ? { type: "terminal", x: pin.x, y: pin.y } : null;
+        const hoverChanged = hover
+            ? !this.hoverSnap || this.hoverSnap.x !== hover.x || this.hoverSnap.y !== hover.y
+            : !!this.hoverSnap;
+        if (hoverChanged || target !== this.hoverTarget) {
+            this.hoverSnap = hover;
+            this.hoverTarget = target;
+            this.updateCursor();
+            this.draw();
         }
     }
 
-    pointerUp() {
-        if (this.dragging || this.draggingWire) {
-            this.saveState();
-        }
-        this.dragging = false;
-        this.draggingWire = false;
-        this.draggingWireTarget = null;
-
+    pointerUp(event) {
         if (this.isPanning) {
             this.isPanning = false;
-            this.canvas.style.cursor = this.isSpacePressed ? "grab" : (this.tool === "select" ? "default" : "crosshair");
+            this.updateCursor();
+            return;
         }
+
+        // drag from a pin and release on a target finishes the wire
+        if (this.wiring && this.autoWire && this.wireDragFrom && event && event.type === "pointerup") {
+            const pos = this.getMousePosition(event);
+            const moved = Math.hypot(pos.screenX - this.wireDragFrom.x, pos.screenY - this.wireDragFrom.y);
+            this.wireDragFrom = null;
+            if (moved > 8) {
+                const snap = this.findSnapTarget(pos.x, pos.y);
+                if (snap.type === "terminal" || snap.type === "wire") this.finishWire(snap);
+            }
+        }
+
+        this.box = null;
+
+        if (this.move) {
+            if (this.move.moved) this.refreshWires();
+            this.move = null;
+        }
+
+        if (this.segDrag) {
+            const { wire, moved } = this.segDrag;
+            this.segDrag = null;
+            if (moved) {
+                wire.route = this.simplifyRoute(wire.route);
+                this.refreshWires();
+            }
+        }
+
+        this.draw();
+        this.notify();
     }
 
-    keyDown(event) {
-        const active = document.activeElement;
-        if (active && (active.tagName === "INPUT" || active.tagName === "SELECT" || active.tagName === "TEXTAREA")) {
+    updateBoxSelection() {
+        const b = this.box;
+        const rect = {
+            x1: Math.min(b.x1, b.x2), x2: Math.max(b.x1, b.x2),
+            y1: Math.min(b.y1, b.y2), y2: Math.max(b.y1, b.y2)
+        };
+        const hit = this.components.filter(c => this.boxesOverlap(rect, this.getComponentBox(c)));
+        this.selection = b.additive ? [...new Set([...b.base, ...hit])] : hit;
+    }
+
+    doMove(pos) {
+        const m = this.move;
+        const base = m.orig.get(m.clicked);
+        const dx = this.snap(pos.x - m.offX) - base.x;
+        const dy = this.snap(pos.y - m.offY) - base.y;
+
+        if (dx === m.last.dx && dy === m.last.dy) return;
+
+        const moving = new Set(m.orig.keys());
+        for (const [c, o] of m.orig) {
+            if (!this.isPlacementFree(c, o.x + dx, o.y + dy, c.rotation, moving)) return;
+        }
+
+        if (!m.moved) {
+            m.moved = true;
+            // record the pre-move state (positions are still the originals)
+            this.saveState();
+        }
+
+        const stepX = dx - m.last.dx;
+        const stepY = dy - m.last.dy;
+        m.last = { dx, dy };
+
+        for (const [c, o] of m.orig) {
+            c.x = o.x + dx;
+            c.y = o.y + dy;
+        }
+
+        // wires with both ends on moving parts translate rigidly; the rest rubber-band
+        const ids = new Set([...moving].map(c => c.id));
+        const rigid = new Set();
+        for (let pass = 0; pass < 3; pass++) {
+            for (const w of this.wires) {
+                const endIn = (e) => (e.type === "terminal" && ids.has(e.component)) ||
+                    (e.type === "wire" && [...rigid].some(r => r.id === e.wireId));
+                if (endIn(w.start) && endIn(w.end)) rigid.add(w);
+            }
+        }
+        for (const w of rigid) this.translateWire(w, stepX, stepY);
+
+        this.refreshWires(new Set(this.wires.filter(w => !rigid.has(w))));
+
+        for (const prb of this.probes) {
+            if (prb.type === 'I' && ids.has(prb.target)) {
+                const c = this.components.find(k => k.id === prb.target);
+                prb.x = c.x;
+                prb.y = c.y - 35;
+            }
+        }
+        this.draw();
+    }
+
+    doSegmentDrag(pos) {
+        const d = this.segDrag;
+        const wire = d.wire;
+        if (!wire.route || wire.route.length < 2) return;
+
+        if (!d.begun) {
+            // only start once the pointer has actually travelled
+            if (Math.hypot(pos.screenX - this.pointerDownAt.x, pos.screenY - this.pointerDownAt.y) < 4) return;
+            const idx = this.beginSegmentDragSafe(wire, d.idx);
+            if (idx < 0) { this.segDrag = null; return; }
+            d.idx = idx;
+            d.begun = true;
+        }
+
+        const route = wire.route;
+        const p1 = route[d.idx];
+        const p2 = route[d.idx + 1];
+        const horizontal = p1.y === p2.y;
+
+        const value = this.clampSegmentDrag(wire, d.idx, horizontal, this.snap(horizontal ? pos.y : pos.x));
+        if ((horizontal ? p1.y : p1.x) === value) return;
+
+        const prev = { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y };
+        if (horizontal) { p1.y = value; p2.y = value; } else { p1.x = value; p2.x = value; }
+
+        // reject moves that would push the wire through a component
+        const ctx = this.buildRouteContext(wire);
+        const allow = new Set([`${route[0].x},${route[0].y}`, `${route[route.length - 1].x},${route[route.length - 1].y}`]);
+        let ok = true;
+        for (let i = Math.max(0, d.idx - 1); i <= Math.min(route.length - 2, d.idx + 1); i++) {
+            if (!this.segmentFree(route[i], route[i + 1], ctx, allow)) { ok = false; break; }
+        }
+        if (!ok) {
+            p1.x = prev.x1; p1.y = prev.y1; p2.x = prev.x2; p2.y = prev.y2;
             return;
         }
+        d.moved = true;
+        this.draw();
+    }
+
+    // Snapshot first so the drag is undoable, then normalise the route.
+    beginSegmentDragSafe(wire, idx) {
+        const before = this.snapshot();
+        const newIdx = this.beginSegmentDrag(wire, idx);
+        if (newIdx >= 0 && this.historyStack[this.historyStack.length - 1] !== before) {
+            this.historyStack.push(before);
+            this.futureStack = [];
+        }
+        return newIdx;
+    }
+
+
+    // ============================================================
+    // KEYBOARD
+    // ============================================================
+
+    keyDown(event) {
+        if (this.isTyping()) return;
 
         const key = (event.key || "").toLowerCase();
-        const code = event.code || "";
         const isCtrl = event.ctrlKey || event.metaKey;
 
-        if (isCtrl && (key === "c" || code === "KeyC")) {
+        if (isCtrl) {
+            if (key === "c") { event.preventDefault(); this.copySelected(); }
+            else if (key === "x") { event.preventDefault(); this.cutSelected(); }
+            else if (key === "v") { event.preventDefault(); this.paste(); }
+            else if (key === "a") { event.preventDefault(); this.selectAll(); }
+            else if (key === "z") { event.preventDefault(); event.shiftKey ? this.redo() : this.undo(); }
+            else if (key === "y") { event.preventDefault(); this.redo(); }
+            else if (key === "0") { event.preventDefault(); this.resetView(); }
+            return;
+        }
+
+        if (key === "escape") {
+            if (this.wiring) this.cancelWire();
+            else if (this.tool !== "select") this.setTool("select");
+            else { this.clearSelection(); this.draw(); }
+            this.notify();
+            return;
+        }
+
+        if (key === "backspace" && this.wiring) {
             event.preventDefault();
-            this.copySelected();
+            this.removeLastAnchor();
             return;
         }
 
-        if (isCtrl && (key === "v" || code === "KeyV")) {
-            event.preventDefault();
-            this.paste();
-            return;
-        }
-
-        if (isCtrl && (key === "z" || code === "KeyZ")) {
-            event.preventDefault();
-            if (event.shiftKey) {
-                this.redo();
-            } else {
-                this.undo();
-            }
-            return;
-        }
-
-        if (isCtrl && (key === "y" || code === "KeyY")) {
-            event.preventDefault();
-            this.redo();
-            return;
-        }
-
-        if (key === "r" || code === "KeyR") {
-            event.preventDefault();
-            this.rotateSelected();
-            return;
-        }
-
-        if (key === "escape" || code === "Escape") {
-            this.cancelWire();
-            this.setTool("select");
-            return;
-        }
-
-        if (key === "delete" || key === "backspace" || code === "Delete" || code === "Backspace") {
+        if (key === "delete" || key === "backspace") {
             this.removeSelected();
             return;
         }
-    }
 
-    rotateSelected() {
-        if (this.selected) {
-            this.saveState();
-            this.selected.rotation = (this.selected.rotation + 90) % 360;
-            this.rerouteAllWires();
-            this.draw();
+        if (key === "r") {
+            event.preventDefault();
+            if (this.isPlacing()) {
+                this.placeRotation = (this.placeRotation + 90) % 360;
+                this.draw();
+            } else if (this.selection.length) {
+                this.rotateSelected();
+            } else {
+                this.setTool("R");
+            }
+            return;
         }
-    }
 
-    removeSelected() {
-        if (this.selected) {
+        if (key === "f" || key === "home") {
+            this.fitView();
+            return;
+        }
+
+        if (key === "t") {
+            if (!this.wires.length) return;
             this.saveState();
-            const id = this.selected.id;
-            this.components = this.components.filter(c => c.id !== id);
-
-            this.wires = this.wires.filter(
-                w =>
-                    !(w.start.type === "terminal" && w.start.component === id) &&
-                    !(w.end.type === "terminal" && w.end.component === id)
-            );
-
-            this.probes = this.probes.filter(p => !(p.type === 'I' && p.target === id));
-
-            this.selected = null;
-            this.rerouteAllWires();
+            if (this.selectedWire) this.tidyWire(this.selectedWire);
+            else this.tidyAllWires();
             this.draw();
             return;
         }
 
-        if (this.selectedWire) {
-            this.saveState();
-            this.wires = this.wires.filter(w => w !== this.selectedWire);
-            this.selectedWire = null;
-            this.rerouteAllWires();
-            this.draw();
+        if (key === "+" || key === "=") { this.zoomAt(this.width / 2, this.height / 2, 1.2); return; }
+        if (key === "-") { this.zoomAt(this.width / 2, this.height / 2, 1 / 1.2); return; }
+
+        if (HOTKEYS[key]) {
+            this.setTool(HOTKEYS[key]);
         }
     }
 
 
     // ============================================================
-    // RENDERING STAGE: WIRES, HANDLES & CROSSING HOPS
+    // RENDERING
     // ============================================================
 
     draw() {
@@ -1355,32 +1312,50 @@ class SchematicEditor {
 
         ctx.clearRect(0, 0, this.width, this.height);
 
+        this.connectedPins = new Set();
+        for (const w of this.wires) {
+            if (!w.route || w.route.length < 2) continue;
+            for (const pt of [w.route[0], w.route[w.route.length - 1]]) this.connectedPins.add(`${pt.x},${pt.y}`);
+        }
+
         ctx.save();
         ctx.translate(this.panX, this.panY);
+        ctx.scale(this.zoom, this.zoom);
 
         this.drawGrid();
         this.drawWires();
         this.drawWirePreview();
         this.drawComponents();
+        this.drawGhost();
         this.drawProbes();
         this.drawSnapHighlight();
+        this.drawSelectionBox();
 
         ctx.restore();
+
+        ctx.fillStyle = "#6b7588";
+        ctx.font = "11px system-ui";
+        ctx.textAlign = "right";
+        ctx.textBaseline = "alphabetic";
+        ctx.fillText(`${Math.round(this.zoom * 100)}%`, this.width - 10, this.height - 8);
     }
 
     drawGrid() {
         const ctx = this.ctx;
+        const g = this.gridSize;
+        let step = g;
+        while (step * this.zoom < 9) step *= 2;
+
         ctx.fillStyle = "#202633";
+        const x0 = Math.floor((-this.panX / this.zoom) / step) * step;
+        const y0 = Math.floor((-this.panY / this.zoom) / step) * step;
+        const x1 = (this.width - this.panX) / this.zoom;
+        const y1 = (this.height - this.panY) / this.zoom;
+        const r = 1 / this.zoom;
 
-        const startX = Math.floor(-this.panX / this.gridSize) * this.gridSize - this.gridSize;
-        const endX = startX + this.width + 2 * this.gridSize;
-
-        const startY = Math.floor(-this.panY / this.gridSize) * this.gridSize - this.gridSize;
-        const endY = startY + this.height + 2 * this.gridSize;
-
-        for (let x = startX; x < endX; x += this.gridSize) {
-            for (let y = startY; y < endY; y += this.gridSize) {
-                ctx.fillRect(x - 1, y - 1, 2, 2);
+        for (let x = x0; x <= x1; x += step) {
+            for (let y = y0; y <= y1; y += step) {
+                ctx.fillRect(x - r, y - r, 2 * r, 2 * r);
             }
         }
     }
@@ -1388,224 +1363,115 @@ class SchematicEditor {
     drawWires() {
         const ctx = this.ctx;
 
-        const pointCounts = new Map();
-        const recordPoint = (p) => {
-            const key = `${Math.round(p.x)},${Math.round(p.y)}`;
-            pointCounts.set(key, (pointCounts.get(key) || 0) + 1);
-        };
-
-        const horizontalSegments = [];
-        const verticalSegments = [];
-        const junctionPoints = new Set();
-
-        for (const wireA of this.wires) {
-            if (!wireA.route || wireA.route.length < 2) continue;
-
-            const endPoints = [wireA.route[0], wireA.route[wireA.route.length - 1]];
-            for (const pt of endPoints) {
-                for (const wireB of this.wires) {
-                    if (wireA === wireB || !wireB.route || wireB.route.length < 2) continue;
-
-                    for (let j = 0; j < wireB.route.length - 1; j++) {
-                        const a = wireB.route[j];
-                        const b = wireB.route[j + 1];
-
-                        if (this.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) {
-                            junctionPoints.add(`${Math.round(pt.x)},${Math.round(pt.y)}`);
-                        }
-                    }
-                }
-            }
-        }
-
         for (const wire of this.wires) {
             if (!wire.route || wire.route.length < 2) continue;
 
             const isSelected = wire === this.selectedWire;
-
-            for (let i = 0; i < wire.route.length - 1; i++) {
-                const p1 = wire.route[i];
-                const p2 = wire.route[i + 1];
-
-                recordPoint(p1);
-                if (i === wire.route.length - 2) recordPoint(p2);
-
-                if (p1.y === p2.y) {
-                    horizontalSegments.push({ wire, p1, p2, minX: Math.min(p1.x, p2.x), maxX: Math.max(p1.x, p2.x), y: p1.y, isSelected });
-                } else if (p1.x === p2.x) {
-                    verticalSegments.push({ wire, p1, p2, minY: Math.min(p1.y, p2.y), maxY: Math.max(p1.y, p2.y), x: p1.x, isSelected });
-                }
-            }
-        }
-
-        const crossingHops = new Map();
-
-        for (const hSeg of horizontalSegments) {
-            for (const vSeg of verticalSegments) {
-                if (hSeg.wire === vSeg.wire) continue;
-
-                const crossKey = `${Math.round(vSeg.x)},${Math.round(hSeg.y)}`;
-                if (junctionPoints.has(crossKey)) continue;
-
-                if (vSeg.x > hSeg.minX && vSeg.x < hSeg.maxX && hSeg.y > vSeg.minY && hSeg.y < vSeg.maxY) {
-                    const count = pointCounts.get(crossKey) || 0;
-
-                    if (count < 3) {
-                        crossingHops.set(crossKey, { x: vSeg.x, y: hSeg.y });
-                    }
-                }
-            }
-        }
-
-        for (const wire of this.wires) {
-            if (!wire.route || wire.route.length < 2) continue;
-
-            const isSelected = wire === this.selectedWire;
-            ctx.strokeStyle = isSelected ? "#50fa7b" : "#6ea8fe";
+            ctx.strokeStyle = wire.blocked ? "#ff5555" : (isSelected ? "#50fa7b" : "#6ea8fe");
             ctx.lineWidth = isSelected ? 3 : 2;
+            ctx.lineJoin = "round";
+            ctx.lineCap = "round";
+            ctx.setLineDash(wire.blocked ? [6, 4] : []);
 
-            for (let i = 0; i < wire.route.length - 1; i++) {
-                const p1 = wire.route[i];
-                const p2 = wire.route[i + 1];
+            ctx.beginPath();
+            ctx.moveTo(wire.route[0].x, wire.route[0].y);
+            for (let i = 1; i < wire.route.length; i++) ctx.lineTo(wire.route[i].x, wire.route[i].y);
+            ctx.stroke();
+            ctx.setLineDash([]);
 
-                if (p1.x === p2.x) {
-                    const x = p1.x;
-                    const yStart = p1.y;
-                    const yEnd = p2.y;
-
-                    const segmentHops = [];
-                    for (const [key, hop] of crossingHops) {
-                        if (hop.x === x && hop.y > Math.min(yStart, yEnd) && hop.y < Math.max(yStart, yEnd)) {
-                            segmentHops.push(hop.y);
-                        }
-                    }
-
-                    segmentHops.sort((a, b) => yStart < yEnd ? a - b : b - a);
-
-                    ctx.beginPath();
-                    ctx.moveTo(x, yStart);
-
-                    const direction = yEnd > yStart ? 1 : -1;
-
-                    for (const hopY of segmentHops) {
-                        const arcStart = hopY - direction * 8;
-                        const arcEnd = hopY + direction * 8;
-
-                        ctx.lineTo(x, arcStart);
-                        ctx.arc(x, hopY, 8, direction > 0 ? -Math.PI / 2 : Math.PI / 2, direction > 0 ? Math.PI / 2 : -Math.PI / 2, false);
-                    }
-
-                    ctx.lineTo(x, yEnd);
-                    ctx.stroke();
-                } else {
-                    ctx.beginPath();
-                    ctx.moveTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y);
-                    ctx.lineTo(p2.x, p2.y);
-                    ctx.stroke();
-                }
-            }
-
-            // Draw Corner Waypoint Drag Handles on Selected Wire
             if (isSelected) {
-                for (let i = 0; i < wire.route.length; i++) {
-                    const pt = wire.route[i];
+                for (let i = 0; i < wire.route.length - 1; i++) {
+                    const p1 = wire.route[i];
+                    const p2 = wire.route[i + 1];
+                    if (Math.abs(p2.x - p1.x) + Math.abs(p2.y - p1.y) < this.gridSize) continue;
                     ctx.fillStyle = "#8be9fd";
                     ctx.strokeStyle = "#ffffff";
                     ctx.lineWidth = 1.5;
-
                     ctx.beginPath();
-                    ctx.arc(pt.x, pt.y, 5, 0, Math.PI * 2);
+                    ctx.rect((p1.x + p2.x) / 2 - 4, (p1.y + p2.y) / 2 - 4, 8, 8);
                     ctx.fill();
                     ctx.stroke();
                 }
             }
         }
 
+        // junction dots only where 3+ conductors really meet
         ctx.fillStyle = "#6ea8fe";
-        for (const [key, count] of pointCounts) {
-            if (count >= 3 || junctionPoints.has(key)) {
-                const [x, y] = key.split(",").map(Number);
-                ctx.beginPath();
-                ctx.arc(x, y, 5, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        }
-
-        for (const key of junctionPoints) {
+        for (const key of this.computeJunctions()) {
             const [x, y] = key.split(",").map(Number);
             ctx.beginPath();
-            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            ctx.arc(x, y, 4.5, 0, Math.PI * 2);
             ctx.fill();
+        }
+
+        // dangling wire ends
+        ctx.strokeStyle = "#ffb86c";
+        ctx.lineWidth = 1.5;
+        for (const wire of this.wires) {
+            if (!wire.route || wire.route.length < 2) continue;
+            for (const [end, pt] of [[wire.start, wire.route[0]], [wire.end, wire.route[wire.route.length - 1]]]) {
+                if (end.type !== "point") continue;
+                const touched = this.wires.some(o => o !== wire && o.route && o.route.some((q, j) =>
+                    (q.x === pt.x && q.y === pt.y) ||
+                    (j < o.route.length - 1 && this.isPointOnSegment(pt.x, pt.y, q.x, q.y, o.route[j + 1].x, o.route[j + 1].y))));
+                if (touched) continue;
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
         }
     }
 
     drawWirePreview() {
-        if (!this.wiring || !this.wireWaypoints || this.wireWaypoints.length === 0 || !this.hoverSnap) return;
+        if (!this.wiring || !this.previewRoute || this.previewRoute.length < 2) return;
 
         const ctx = this.ctx;
-        const lastWp = this.wireWaypoints[this.wireWaypoints.length - 1];
-        const target = { x: this.hoverSnap.x, y: this.hoverSnap.y };
-
-        const activeSegment = this.findObstacleFreePath(lastWp, target, null, null);
-
         ctx.strokeStyle = "#50fa7b";
         ctx.lineWidth = 2;
+        ctx.lineJoin = "round";
         ctx.setLineDash([6, 4]);
 
         ctx.beginPath();
-        ctx.moveTo(this.wireWaypoints[0].x, this.wireWaypoints[0].y);
-        for (let i = 1; i < this.wireWaypoints.length; i++) {
-            ctx.lineTo(this.wireWaypoints[i].x, this.wireWaypoints[i].y);
-        }
-
-        for (let i = 1; i < activeSegment.length; i++) {
-            ctx.lineTo(activeSegment[i].x, activeSegment[i].y);
+        ctx.moveTo(this.previewRoute[0].x, this.previewRoute[0].y);
+        for (let i = 1; i < this.previewRoute.length; i++) {
+            ctx.lineTo(this.previewRoute[i].x, this.previewRoute[i].y);
         }
         ctx.stroke();
         ctx.setLineDash([]);
+
+        ctx.fillStyle = "#50fa7b";
+        for (const a of this.wireAnchors) {
+            ctx.beginPath();
+            ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
     }
 
     drawProbes() {
         const ctx = this.ctx;
         for (const prb of this.probes) {
-            if (prb.type === 'V') {
-                ctx.fillStyle = "#ff79c6";
-                ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = 2;
+            const color = prb.type === 'V' ? "#ff79c6" : "#bd93f9";
+            ctx.fillStyle = color;
+            ctx.strokeStyle = "#ffffff";
+            ctx.lineWidth = 2;
 
-                ctx.beginPath();
-                ctx.arc(prb.x, prb.y, 8, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
+            ctx.beginPath();
+            ctx.arc(prb.x, prb.y, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
 
-                ctx.font = "11px system-ui";
-                ctx.fillStyle = "#ff79c6";
-                ctx.textAlign = "center";
-                ctx.fillText(prb.label, prb.x, prb.y - 12);
-            } else if (prb.type === 'I') {
-                ctx.fillStyle = "#bd93f9";
-                ctx.strokeStyle = "#ffffff";
-                ctx.lineWidth = 2;
-
-                ctx.beginPath();
-                ctx.arc(prb.x, prb.y, 8, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.stroke();
-
-                ctx.font = "11px system-ui";
-                ctx.fillStyle = "#bd93f9";
-                ctx.textAlign = "center";
-                ctx.fillText(prb.label, prb.x, prb.y - 12);
-            }
+            ctx.font = "11px system-ui";
+            ctx.fillStyle = color;
+            ctx.textAlign = "center";
+            ctx.fillText(prb.label, prb.x, prb.y - 12);
         }
     }
 
     drawSnapHighlight() {
-        if ((this.tool !== "wire" && !this.wiring) || !this.hoverSnap) return;
+        if (!this.hoverSnap) return;
 
         const ctx = this.ctx;
-        const { x, y, type } = this.hoverSnap;
+        const { x, y, type, blocked } = this.hoverSnap;
 
         ctx.lineWidth = 2;
         if (type === "terminal") {
@@ -1618,12 +1484,25 @@ class SchematicEditor {
             ctx.beginPath();
             ctx.arc(x, y, 6, 0, Math.PI * 2);
             ctx.stroke();
-        } else {
-            ctx.fillStyle = "#6ea8fe";
+        } else if (this.tool === "wire" || this.wiring) {
+            ctx.fillStyle = blocked ? "#ff5555" : "#6ea8fe";
             ctx.beginPath();
             ctx.arc(x, y, 3, 0, Math.PI * 2);
             ctx.fill();
         }
+    }
+
+    drawSelectionBox() {
+        if (!this.box) return;
+        const b = this.box;
+        const ctx = this.ctx;
+        ctx.fillStyle = "rgba(110, 168, 254, 0.12)";
+        ctx.strokeStyle = "#6ea8fe";
+        ctx.lineWidth = 1 / this.zoom;
+        ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
+        ctx.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+        ctx.strokeRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);
+        ctx.setLineDash([]);
     }
 
     drawComponents() {
@@ -1632,519 +1511,13 @@ class SchematicEditor {
         }
     }
 
-    drawComponent(component) {
-        const ctx = this.ctx;
-
-        ctx.save();
-        ctx.translate(component.x, component.y);
-        ctx.rotate((component.rotation * Math.PI) / 180);
-
-        if (component === this.selected) {
-            ctx.strokeStyle = "#6ea8fe";
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 4]);
-            ctx.strokeRect(-50, -30, 100, 60);
-            ctx.setLineDash([]);
-        }
-
-        switch (component.type) {
-            case "R":
-                this.drawResistor(component);
-                break;
-            case "C":
-                this.drawCapacitor(component);
-                break;
-            case "L":
-                this.drawInductor(component);
-                break;
-            case "V":
-                this.drawVoltageSource(component);
-                break;
-            case "D":
-                this.drawDiode(component);
-                break;
-            case "DZ":
-                this.drawZener(component);
-                break;
-            case "LED":
-                this.drawLED(component);
-                break;
-            case "BJT_NPN":
-                this.drawTransistorNPN(component);
-                break;
-            case "BJT_PNP":
-                this.drawTransistorPNP(component);
-                break;
-            case "NMOS":
-                this.drawMOSFETN(component);
-                break;
-            case "PMOS":
-                this.drawMOSFETP(component);
-                break;
-            case "OPAMP":
-                this.drawOpAmp(component);
-                break;
-            case "IC555":
-                this.drawIC555(component);
-                break;
-            case "AND":
-            case "OR":
-            case "NOT":
-            case "NAND":
-            case "NOR":
-            case "XOR":
-                this.drawLogicGate(component);
-                break;
-            case "GND":
-                this.drawGround(component);
-                break;
-        }
-
-        ctx.restore();
-    }
-
-    drawResistor(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#ffb86c";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-28, 0);
-        ctx.lineTo(-20, -10);
-        ctx.lineTo(-8, 10);
-        ctx.lineTo(4, -10);
-        ctx.lineTo(16, 10);
-        ctx.lineTo(28, -10);
-        ctx.lineTo(36, 0);
-        ctx.lineTo(40, 0);
-        ctx.stroke();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawCapacitor(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#8be9fd";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-8, 0);
-        ctx.moveTo(8, 0);
-        ctx.lineTo(40, 0);
-        ctx.moveTo(-8, -20);
-        ctx.lineTo(-8, 20);
-        ctx.moveTo(8, -20);
-        ctx.lineTo(8, 20);
-        ctx.stroke();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawInductor(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#bd93f9";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-25, 0);
-        ctx.arc(-15, 0, 10, Math.PI, 0);
-        ctx.arc(5, 0, 10, Math.PI, 0);
-        ctx.arc(25, 0, 10, Math.PI, 0);
-        ctx.lineTo(40, 0);
-        ctx.stroke();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawVoltageSource(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-24, 0);
-        ctx.moveTo(24, 0);
-        ctx.lineTo(40, 0);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(0, 0, 24, 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.font = "18px system-ui";
-        ctx.fillStyle = "#50fa7b";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("+", 0, -8);
-        ctx.fillText("−", 0, 10);
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawDiode(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#ff79c6";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-14, 0);
-        ctx.moveTo(14, 0);
-        ctx.lineTo(40, 0);
-        ctx.stroke();
-
-        ctx.fillStyle = "#ff79c6";
-        ctx.beginPath();
-        ctx.moveTo(-14, -12);
-        ctx.lineTo(14, 0);
-        ctx.lineTo(-14, 12);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(14, -12);
-        ctx.lineTo(14, 12);
-        ctx.stroke();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawZener(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#ff79c6";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-14, 0);
-        ctx.moveTo(14, 0);
-        ctx.lineTo(40, 0);
-        ctx.stroke();
-
-        ctx.fillStyle = "#ff79c6";
-        ctx.beginPath();
-        ctx.moveTo(-14, -12);
-        ctx.lineTo(14, 0);
-        ctx.lineTo(-14, 12);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(8, -16);
-        ctx.lineTo(14, -12);
-        ctx.lineTo(14, 12);
-        ctx.lineTo(20, 16);
-        ctx.stroke();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawLED(component) {
-        this.drawDiode(component);
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 2;
-
-        ctx.beginPath();
-        ctx.moveTo(2, -14);
-        ctx.lineTo(10, -24);
-        ctx.moveTo(10, -14);
-        ctx.lineTo(18, -24);
-        ctx.stroke();
-    }
-
-    drawTransistorNPN(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#bd93f9";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-10, 0);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(-10, -20);
-        ctx.lineTo(-10, 20);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(-10, -10);
-        ctx.lineTo(20, -40);
-        ctx.moveTo(-10, 10);
-        ctx.lineTo(20, 40);
-        ctx.stroke();
-
-        ctx.fillStyle = "#bd93f9";
-        ctx.beginPath();
-        ctx.moveTo(20, 40);
-        ctx.lineTo(10, 32);
-        ctx.lineTo(14, 22);
-        ctx.closePath();
-        ctx.fill();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(20, -40);
-        this.drawTerminal(20, 40);
-        this.drawLabel(component);
-    }
-
-    drawTransistorPNP(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#bd93f9";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-10, 0);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(-10, -20);
-        ctx.lineTo(-10, 20);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(-10, -10);
-        ctx.lineTo(20, -40);
-        ctx.moveTo(-10, 10);
-        ctx.lineTo(20, 40);
-        ctx.stroke();
-
-        ctx.fillStyle = "#bd93f9";
-        ctx.beginPath();
-        ctx.moveTo(-10, 10);
-        ctx.lineTo(0, 18);
-        ctx.lineTo(-4, 28);
-        ctx.closePath();
-        ctx.fill();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(20, -40);
-        this.drawTerminal(20, 40);
-        this.drawLabel(component);
-    }
-
-    drawMOSFETN(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(-40, 0);
-        ctx.lineTo(-12, 0);
-        ctx.moveTo(-12, -18);
-        ctx.lineTo(-12, 18);
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.moveTo(-4, -18);
-        ctx.lineTo(-4, 18);
-        ctx.moveTo(-4, -15);
-        ctx.lineTo(20, -40);
-        ctx.moveTo(-4, 15);
-        ctx.lineTo(20, 40);
-        ctx.stroke();
-
-        this.drawTerminal(-40, 0);
-        this.drawTerminal(20, -40);
-        this.drawTerminal(20, 40);
-        this.drawLabel(component);
-    }
-
-    drawMOSFETP(component) {
-        this.drawMOSFETN(component);
-    }
-
-    drawOpAmp(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#ffb86c";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(25, 0);
-        ctx.lineTo(40, 0);
-        ctx.moveTo(-40, -20);
-        ctx.lineTo(-25, -20);
-        ctx.moveTo(-40, 20);
-        ctx.lineTo(-25, 20);
-        ctx.stroke();
-
-        ctx.fillStyle = "rgba(255, 184, 108, 0.1)";
-        ctx.beginPath();
-        ctx.moveTo(-25, -35);
-        ctx.lineTo(25, 0);
-        ctx.lineTo(-25, 35);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.font = "bold 14px system-ui";
-        ctx.fillStyle = "#ffb86c";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("−", -15, -20);
-        ctx.fillText("+", -15, 20);
-
-        this.drawTerminal(-40, -20);
-        this.drawTerminal(-40, 20);
-        this.drawTerminal(40, 0);
-        this.drawLabel(component);
-    }
-
-    drawIC555(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#8be9fd";
-        ctx.lineWidth = 3;
-
-        ctx.fillStyle = "#171b23";
-        ctx.beginPath();
-        ctx.rect(-35, -45, 70, 90);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.font = "bold 13px system-ui";
-        ctx.fillStyle = "#8be9fd";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("NE555", 0, 0);
-
-        const pins = [
-            { name: "GND", y: -30 }, { name: "TRIG", y: -10 },
-            { name: "OUT", y: 10 }, { name: "RESET", y: 30 },
-            { name: "CTRL", y: 30, right: true }, { name: "THRES", y: 10, right: true },
-            { name: "DISCH", y: -10, right: true }, { name: "VCC", y: -30, right: true }
-        ];
-
-        for (const p of pins) {
-            const x1 = p.right ? 35 : -35;
-            const x2 = p.right ? 50 : -50;
-            ctx.beginPath();
-            ctx.moveTo(x1, p.y);
-            ctx.lineTo(x2, p.y);
-            ctx.stroke();
-            this.drawTerminal(x2, p.y);
-        }
-
-        this.drawLabel(component);
-    }
-
-    drawLogicGate(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#f1fa8c";
-        ctx.lineWidth = 3;
-
-        const isNot = component.type === "NOT";
-        if (isNot) {
-            ctx.beginPath();
-            ctx.moveTo(-40, 0);
-            ctx.lineTo(-20, 0);
-            ctx.moveTo(20, 0);
-            ctx.lineTo(40, 0);
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.moveTo(-20, -20);
-            ctx.lineTo(15, 0);
-            ctx.lineTo(-20, 20);
-            ctx.closePath();
-            ctx.stroke();
-
-            ctx.beginPath();
-            ctx.arc(18, 0, 4, 0, Math.PI * 2);
-            ctx.stroke();
-
-            this.drawTerminal(-40, 0);
-            this.drawTerminal(40, 0);
-        } else {
-            ctx.beginPath();
-            ctx.moveTo(-40, -15);
-            ctx.lineTo(-20, -15);
-            ctx.moveTo(-40, 15);
-            ctx.lineTo(-20, 15);
-            ctx.moveTo(20, 0);
-            ctx.lineTo(40, 0);
-            ctx.stroke();
-
-            ctx.font = "bold 13px system-ui";
-            ctx.fillStyle = "#f1fa8c";
-            ctx.textAlign = "center";
-            ctx.textBaseline = "middle";
-            ctx.fillText(component.type, 0, 0);
-
-            ctx.beginPath();
-            ctx.rect(-20, -25, 40, 50);
-            ctx.stroke();
-
-            this.drawTerminal(-40, -15);
-            this.drawTerminal(-40, 15);
-            this.drawTerminal(40, 0);
-        }
-
-        this.drawLabel(component);
-    }
-
-    drawGround(component) {
-        const ctx = this.ctx;
-        ctx.strokeStyle = "#e8edf5";
-        ctx.lineWidth = 3;
-
-        ctx.beginPath();
-        ctx.moveTo(0, -15);
-        ctx.lineTo(0, 5);
-        ctx.moveTo(-20, 5);
-        ctx.lineTo(20, 5);
-        ctx.moveTo(-13, 12);
-        ctx.lineTo(13, 12);
-        ctx.moveTo(-6, 19);
-        ctx.lineTo(6, 19);
-        ctx.stroke();
-
-        this.drawTerminal(0, -15);
-
-        ctx.font = "12px system-ui";
-        ctx.fillStyle = "#e8edf5";
-        ctx.textAlign = "center";
-        ctx.fillText("GND", 0, 35);
-    }
-
-    drawTerminal(x, y) {
-        const ctx = this.ctx;
-        ctx.fillStyle = "#e8edf5";
-        ctx.beginPath();
-        ctx.arc(x, y, 4, 0, Math.PI * 2);
-        ctx.fill();
-    }
-
-    drawLabel(component) {
-        const ctx = this.ctx;
-
-        ctx.font = "12px system-ui";
-        ctx.fillStyle = "#e8edf5";
-        ctx.textAlign = "center";
-        ctx.fillText(component.name, 0, -25);
-
-        ctx.font = "10px system-ui";
-        ctx.fillStyle = "#9aa4b5";
-        ctx.fillText(component.value, 0, 38);
+    // Translucent preview of the part being placed, red where it can't go
+    drawGhost() {
+        if (!this.isPlacing() || !this.mouseInside) return;
+        const x = this.snap(this.mouse.x);
+        const y = this.snap(this.mouse.y);
+        const ghost = { id: -1, type: this.tool, x, y, rotation: this.placeRotation, name: "", value: "" };
+        this.drawComponent(ghost, { free: this.isPlacementFree(ghost, x, y, this.placeRotation) });
     }
 
     loadExample() {
@@ -2152,9 +1525,9 @@ class SchematicEditor {
         this.components = [];
         this.wires = [];
         this.probes = [];
-        this.panX = 0;
-        this.panY = 0;
+        this.clearSelection();
         this.nextId = 1;
+        this.resetView();
 
         const y = 200;
 
@@ -2166,22 +1539,30 @@ class SchematicEditor {
         const gnd = this.addComponent("GND", 800, y + 80);
 
         v.value = "10 V";
+        v.dcVoltage = 10;
         r1.value = "1 kΩ";
         r2.value = "2.2 kΩ";
         c1.value = "10 µF";
         c2.value = "4.7 µF";
 
-        this.wires.push(
-            { id: this.nextId++, start: { type: "terminal", component: v.id, terminal: "2" }, end: { type: "terminal", component: r1.id, terminal: "1" }, route: null },
-            { id: this.nextId++, start: { type: "terminal", component: r1.id, terminal: "2" }, end: { type: "terminal", component: r2.id, terminal: "1" }, route: null },
-            { id: this.nextId++, start: { type: "terminal", component: r2.id, terminal: "2" }, end: { type: "terminal", component: c1.id, terminal: "1" }, route: null },
-            { id: this.nextId++, start: { type: "terminal", component: c1.id, terminal: "2" }, end: { type: "terminal", component: c2.id, terminal: "1" }, route: null },
-            { id: this.nextId++, start: { type: "terminal", component: c2.id, terminal: "2" }, end: { type: "terminal", component: gnd.id, terminal: "1" }, route: null }
-        );
+        const link = (a, ta, b, tb) => this.wires.push({
+            id: this.nextId++,
+            start: { type: "terminal", component: a.id, terminal: ta },
+            end: { type: "terminal", component: b.id, terminal: tb },
+            route: null
+        });
+        link(v, "2", r1, "1");
+        link(r1, "2", r2, "1");
+        link(r2, "2", c1, "1");
+        link(c1, "2", c2, "1");
+        link(c2, "2", gnd, "1");
+        link(v, "1", gnd, "1");
 
-        this.rerouteAllWires();
-        this.selected = null;
-        this.selectedWire = null;
+        this.refreshWires();
         this.draw();
+        this.notify();
     }
 }
+
+applyMixin(SchematicEditor, SchematicRouter);
+applyMixin(SchematicEditor, SymbolRenderer);
