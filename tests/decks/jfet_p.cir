@@ -1,0 +1,7 @@
+P-JFET current source with load
+VSS vss 0 DC -12
+RL vss d 2.2k
+J1 d 0 0 JP
+.model JP PJF(VTO=-1.5 BETA=0.8m LAMBDA=0.01)
+.op
+.end

@@ -8,18 +8,19 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const files = [
     "js/utils/complex.js", "js/utils/units.js",
-    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/models.js", "js/sim/engine.js",
+    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js",
     "js/sim/spice-parser.js", "js/sim/model-library.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const S = new Function(src + `
 return { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
          Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard, Complex,
-         SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
+         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, Switch, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
 if (process.env.SPARSE) S.SPARSE_THRESHOLD.n = 0; // force the sparse solver for every circuit
 
 const { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
-    Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard } = S;
+    Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard,
+    JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop } = S;
 
 let passed = 0, failed = 0;
 const failures = [];
@@ -748,11 +749,11 @@ test("a vendor .lib file adds selectable models that simulate", () => {
 .model VND4148 D(IS=5n N=1.9 RS=0.9 CJO=3p)
 .model VNPN NPN(IS=3e-15 BF=300 VAF=90)
 .model VZ5V6 D(IS=1e-14 BV=5.6 IBV=20m RS=6)
-.model WEIRD JFET(VTO=-2)
+.model WEIRD LTRA(R=1)
 .end`);
     if (!SIM_MODELS.D.VND4148 || !SIM_MODELS.BJT_NPN.VNPN) throw new Error("models not registered: " + r.added);
     if (!SIM_MODELS.DZ.VZ5V6) throw new Error("zener-like diode should also be offered as a zener");
-    if (r.skipped.length !== 1) throw new Error("unsupported JFET should be reported, got " + r.skipped);
+    if (r.skipped.length !== 1) throw new Error("unsupported model type should be reported, got " + r.skipped);
     const e = build(c => {
         c.add(new VoltageSource("V1", ["in", "0"], vdc(5)));
         c.add(new Resistor("R1", ["in", "d"], { r: 1000 }));
@@ -761,6 +762,177 @@ test("a vendor .lib file adds selectable models that simulate", () => {
     const vd = e.operatingPoint().nodeVoltages.d;
     if (vd < 0.5 || vd > 1.0) throw new Error("Vd = " + vd);
     if (!/^\.model VND4148 D\(IS=5e-9/.test(simModelCard("D", "VND4148"))) throw new Error(simModelCard("D", "VND4148"));
+});
+
+
+console.log("added parts");
+
+test("JFET: Idss and pinch-off", () => {
+    const run = (vg) => build(c => {
+        c.add(new VoltageSource("V1", ["vdd", "0"], vdc(12)));
+        c.add(new VoltageSource("VG", ["g", "0"], vdc(vg)));
+        c.add(new Resistor("RD", ["vdd", "d"], { r: 1000 }));
+        c.add(new JFET("J1", ["g", "d", "0"], 1, { vto: -2, beta: 1.25e-3, lambda: 0 }));
+    }).operatingPoint().nodeVoltages.d;
+    near(run(0), 12 - 5, 0.02, "Id = Idss = 5 mA");
+    near(run(-1), 12 - 1.25, 0.02, "Id = beta (Vgs - Vp)^2 at Vgs = -1");
+    near(run(-2.5), 12, 0.01, "pinched off");
+});
+
+test("P-channel JFET mirrors the N-channel one", () => {
+    const d = build(c => {
+        c.add(new VoltageSource("V1", ["vss", "0"], vdc(-12)));
+        c.add(new Resistor("RD", ["vss", "d"], { r: 1000 }));
+        c.add(new JFET("J1", ["0", "d", "0"], -1, { vto: -2, beta: 1.25e-3, lambda: 0 }));
+    }).operatingPoint().nodeVoltages.d;
+    near(d, -7, 0.02);
+});
+
+test("transformer: 1:2 step-up passes 2x in AC and transient, and blocks DC", () => {
+    const mk = () => build(c => {
+        c.add(new VoltageSource("V1", ["p", "0"], { wave: Waveform.sin({ amp: 1, freq: 1000 }), acMag: 1 }));
+        c.add(new Transformer("T1", ["p", "0", "s", "0"], { l1: 1, ratio: 2, k: 0.9999, rp: 1 }));
+        c.add(new Resistor("RL", ["s", "0"], { r: 20000 }));
+    });
+    const ac = mk().ac({ fStart: 1000, fStop: 1000, pointsPerDecade: 1 })[0];
+    near(ac.nodeVoltages.s.magnitude(), 2, 0.05, "AC gain");
+    const tr = mk().transient({ tStop: 4e-3, tStep: 2e-6 });
+    const v = tr.nodeHistories.s;
+    near(Math.max(...v.slice(v.length >> 1)), 2, 0.06, "transient peak");
+    const dc = build(c => {
+        c.add(new VoltageSource("V1", ["p", "0"], vdc(5)));
+        c.add(new Resistor("R1", ["p", "a"], { r: 100 }));
+        c.add(new Transformer("T1", ["a", "0", "s", "0"], { l1: 1, ratio: 1 }));
+        c.add(new Resistor("RL", ["s", "0"], { r: 1000 }));
+    }).operatingPoint();
+    near(dc.nodeVoltages.s, 0, 1e-6, "no DC on the secondary");
+    near(dc.nodeVoltages.a, 0, 1e-6, "primary is a DC short");
+});
+
+test("relay closes above the pull-in current and opens below drop-out", () => {
+    const sim = (v) => {
+        const c = new SimCircuit();
+        c.add(new VoltageSource("VC", ["cp", "0"], { wave: Waveform.pwl([[0, 0], [1e-3, 0], [1.001e-3, v], [20e-3, v]]) }));
+        c.add(new VoltageSource("VL", ["l", "0"], vdc(5)));
+        c.add(new Relay("K1", ["cp", "0", "l", "out"], { rcoil: 400, lcoil: 0.05, pull: 22e-3, drop: 3e-3 }));
+        c.add(new Resistor("RL", ["out", "0"], { r: 100 }));
+        const r = new SimEngine(c).transient({ tStop: 20e-3, tStep: 20e-6 });
+        return r.nodeHistories.out[r.nodeHistories.out.length - 1];
+    };
+    near(sim(12), 5 * 100 / 100.05, 0.01, "energised: contact conducts");
+    near(sim(5), 0, 0.001, "5 V is below pull-in (12.5 mA)");
+});
+
+test("fuse blows once I2t is exceeded", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], vdc(10)));
+    c.add(new Fuse("F1", ["in", "out"], { rating: 1, r: 0.01, tm: 0.02 }));
+    c.add(new Resistor("RL", ["out", "0"], { r: 5 }));
+    const r = new SimEngine(c).transient({ tStop: 30e-3, tStep: 50e-6 });
+    const v = r.nodeHistories.out;
+    near(v[10], 10, 0.1, "conducts first");
+    near(v[v.length - 1], 0, 0.01, "open after the I2t limit");
+});
+
+test("SCR latches on a gate pulse and releases when the current drops", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], { wave: Waveform.pwl([[0, 10], [5e-3, 10], [5.001e-3, 0], [8e-3, 0]]) }));
+    c.add(new Resistor("RL", ["in", "a"], { r: 100 }));
+    c.add(new Thyristor("Q1", ["a", "0", "g"], { igt: 5e-3, ih: 10e-3, vf: 1, ron: 0.05, rg: 100 }));
+    c.add(new VoltageSource("VG", ["gs", "0"], { wave: Waveform.pulse({ v1: 0, v2: 3, delay: 1e-3, rise: 1e-6, fall: 1e-6, width: 0.5e-3, period: 0 }) }));
+    c.add(new Resistor("RG", ["gs", "g"], { r: 100 }));
+    const r = new SimEngine(c).transient({ tStop: 8e-3, tStep: 10e-6 });
+    const at = (t) => r.nodeHistories.a[r.timePoints.findIndex(x => x >= t)];
+    near(at(0.5e-3), 10, 0.1, "off before the gate pulse");
+    near(at(3e-3), 1.0, 0.2, "latched on after the pulse ended");
+    near(at(7e-3), 0, 0.05, "released after the supply dropped");
+});
+
+test("regulator holds its output and drops out below vout + dropout", () => {
+    const out = (vin) => build(c => {
+        c.add(new VoltageSource("V1", ["in", "0"], vdc(vin)));
+        c.add(new Regulator("U1", ["in", "out", "0"], simModel("REG", "7805").params));
+        c.add(new Resistor("RL", ["out", "0"], { r: 100 }));
+    }).operatingPoint().nodeVoltages.out;
+    near(out(12), 5, 0.02, "regulating");
+    near(out(20), 5, 0.02, "line regulation");
+    near(out(6), 4, 0.1, "dropout");
+    const neg = build(c => {
+        c.add(new VoltageSource("V1", ["in", "0"], vdc(-12)));
+        c.add(new Regulator("U1", ["in", "out", "0"], simModel("REG", "7905").params));
+        c.add(new Resistor("RL", ["out", "0"], { r: 100 }));
+    }).operatingPoint().nodeVoltages.out;
+    near(neg, -5, 0.02, "negative regulator");
+});
+
+test("D flip-flop wired as a toggle divides the clock by two", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("VCK", ["ck", "0"], { wave: Waveform.pulse({ v1: 0, v2: 5, delay: 0.5e-3, rise: 1e-6, fall: 1e-6, width: 0.4e-3, period: 1e-3 }) }));
+    c.add(new FlipFlop("U1", ["qn", "0", "ck", "q", "qn", "0", "0"], "D", { vcc: 5 }));
+    const r = new SimEngine(c).transient({ tStop: 3.2e-3, tStep: 20e-6 });
+    const at = (t) => r.nodeHistories.q[r.timePoints.findIndex(x => x >= t)];
+    near(at(1.0e-3), 5, 0.3); near(at(2.0e-3), 0, 0.3); near(at(3.0e-3), 5, 0.3);
+});
+
+test("JK and T flip-flops, set and reset", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("VCK", ["ck", "0"], { wave: Waveform.pulse({ v1: 0, v2: 5, delay: 0.5e-3, rise: 1e-6, fall: 1e-6, width: 0.4e-3, period: 1e-3 }) }));
+    c.add(new VoltageSource("VH", ["hi", "0"], vdc(5)));
+    c.add(new FlipFlop("T1", ["hi", "0", "ck", "q", "qn", "0", "rst"], "T", { vcc: 5 }));
+    c.add(new VoltageSource("VR", ["rst", "0"], { wave: Waveform.pwl([[0, 0], [2.2e-3, 0], [2.201e-3, 5], [4e-3, 5]]) }));
+    const r = new SimEngine(c).transient({ tStop: 3.5e-3, tStep: 20e-6 });
+    const at = (t) => r.nodeHistories.q[r.timePoints.findIndex(x => x >= t)];
+    near(at(1.0e-3), 5, 0.3, "toggled high");
+    near(at(2.0e-3), 0, 0.3, "toggled low");
+    near(at(2.4e-3), 0, 0.3, "reset");
+    near(at(3.0e-3), 0, 0.3, "stays reset against the edge at 2.5 ms");
+});
+
+test("SPICE import: J cards, K coupling, EXP and SFFM sources", () => {
+    const { SpiceParser } = S;
+    const deck = SpiceParser.parse(`jfet amp
+VDD vdd 0 12
+RD vdd d 1k
+J1 d 0 0 NJ
+.model NJ NJF(VTO=-2 BETA=1.25m LAMBDA=0)
+.op
+.end`);
+    const { circuit } = SpiceParser.build(deck);
+    near(new SimEngine(circuit).operatingPoint().nodeVoltages.d, 7, 0.02, "JFET deck");
+    const k = SpiceParser.parse(`coupled
+V1 p 0 SIN(0 1 1k)
+R1 p a 1
+L1 a 0 1
+L2 s 0 4
+K1 L1 L2 0.9999
+RL s 0 20k
+.end`);
+    const kb = SpiceParser.build(k);
+    if (!kb.circuit.elements.some(e => e instanceof Transformer)) throw new Error("K card was not turned into a transformer");
+    const tr = new SimEngine(kb.circuit).transient({ tStop: 4e-3, tStep: 2e-6 });
+    const v = tr.nodeHistories.s;
+    near(Math.max(...v.slice(v.length >> 1)), 2, 0.1, "turns ratio from L2/L1");
+    const w = SpiceParser.parse("src\nV1 a 0 EXP(0 5 1m 1m 5m 2m)\nV2 b 0 SFFM(0 1 1k 2 100)\nR1 a 0 1k\nR2 b 0 1k\n.end");
+    const wb = SpiceParser.build(w);
+    const r = new SimEngine(wb.circuit).transient({ tStop: 3e-3, tStep: 5e-6 });
+    const i = r.timePoints.findIndex(x => x >= 2e-3);
+    near(r.nodeHistories.a[i], 5 * (1 - Math.exp(-1)), 0.02, "EXP");
+});
+
+test("vendor JFET models import as JFET parts", () => {
+    const { SimModelLibrary, SIM_MODELS } = S;
+    const r = SimModelLibrary.importText("m\n.model VJ NJF(VTO=-1.5 BETA=2m)\n.model VP PJF(VTO=-2 BETA=1m)\n.end");
+    if (!SIM_MODELS.JFET_N.VJ || !SIM_MODELS.JFET_P.VP) throw new Error(JSON.stringify(r));
+    if (!/^\.model VJ NJF\(VTO=-1\.5/.test(S.simModelCard("JFET_N", "VJ"))) throw new Error(S.simModelCard("JFET_N", "VJ"));
+});
+
+test("EXP and SFFM waveforms", () => {
+    const e = Waveform.exp({ v1: 0, v2: 5, td1: 1e-3, tau1: 1e-3, td2: 5e-3, tau2: 2e-3 });
+    near(e.at(0.5e-3), 0, 1e-12); rel(e.at(2e-3), 5 * (1 - Math.exp(-1)), 1e-9);
+    rel(e.at(5e-3), 5 * (1 - Math.exp(-4)), 1e-9);
+    near(e.at(7e-3), 5 * (1 - Math.exp(-6)) - 5 * (1 - Math.exp(-1)), 1e-9, "decay");
+    const f = Waveform.sffm({ vo: 1, va: 2, fc: 1000, mdi: 3, fs: 100 });
+    near(f.at(0.25e-3), 1 + 2 * Math.sin(2 * Math.PI * 1000 * 0.25e-3 + 3 * Math.sin(2 * Math.PI * 100 * 0.25e-3)), 1e-12);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

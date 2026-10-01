@@ -13,7 +13,7 @@ const { spawnSync } = require("child_process");
 const root = path.join(__dirname, "..");
 const files = [
     "js/utils/complex.js", "js/utils/units.js",
-    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/models.js", "js/sim/engine.js", "js/sim/spice-parser.js"
+    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js", "js/sim/spice-parser.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const { SimEngine, SpiceParser, SPARSE_THRESHOLD } = new Function(src + "\nreturn { SimEngine, SpiceParser, SPARSE_THRESHOLD };")();
@@ -28,7 +28,9 @@ if (spawnSync("ngspice", ["-v"]).error) {
 const TOL = {
     default: { op: 0.005, tran: 0.02, ac: 0.01 },
     cmos_inv: { op: 0.005, tran: 0.04, ac: 0.01 },
-    npn_switch: { op: 0.005, tran: 0.04, ac: 0.01 }
+    npn_switch: { op: 0.005, tran: 0.04, ac: 0.01 },
+    // the inductive kick when the diode turns off is a narrow spike; its timing sets the error
+    transformer_rect: { op: 0.005, tran: 0.03, ac: 0.01 }
 };
 
 const dir = path.join(root, "tests", "decks");

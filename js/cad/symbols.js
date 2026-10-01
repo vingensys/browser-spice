@@ -39,8 +39,9 @@ const SYMBOL_DEFS = {
         ],
         box: [-60, -60, 60, 60]
     },
-    AND: GATE2, OR: GATE2, NAND: GATE2, NOR: GATE2, XOR: GATE2,
+    AND: GATE2, OR: GATE2, NAND: GATE2, NOR: GATE2, XOR: GATE2, XNOR: GATE2,
     NOT: { pins: [["A", -40, 0, -1, 0], ["Y", 40, 0, 1, 0]], box: [-40, -30, 40, 30] },
+    BUF: { pins: [["A", -40, 0, -1, 0], ["Y", 40, 0, 1, 0]], box: [-40, -30, 40, 30] },
     GND: { pins: [["1", 0, -20, 0, -1]], box: [-20, -20, 20, 40] },
     VM: { pins: [["+", -40, 0, -1, 0], ["-", 40, 0, 1, 0]], box: [-40, -30, 40, 30] },
     AM: { pins: [["+", -40, 0, -1, 0], ["-", 40, 0, 1, 0]], box: [-40, -30, 40, 30] },

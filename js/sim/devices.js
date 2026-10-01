@@ -146,6 +146,31 @@ const Waveform = {
         };
     },
 
+    // SPICE EXP(v1 v2 td1 tau1 td2 tau2): exponential rise toward v2, then fall back toward v1
+    exp({ v1 = 0, v2 = 5, td1 = 0, tau1 = 1e-3, td2 = 5e-3, tau2 = 1e-3 }) {
+        tau1 = Math.max(tau1, 1e-12);
+        tau2 = Math.max(tau2, 1e-12);
+        return {
+            dc: v1,
+            at: (t) => {
+                if (t < td1) return v1;
+                let v = v1 + (v2 - v1) * (1 - Math.exp(-(t - td1) / tau1));
+                if (t >= td2) v += (v1 - v2) * (1 - Math.exp(-(t - td2) / tau2));
+                return v;
+            },
+            breakpoints: () => [td1, td2]
+        };
+    },
+
+    // SPICE SFFM(vo va fc mdi fs): single-frequency FM
+    sffm({ vo = 0, va = 1, fc = 10e3, mdi = 5, fs = 1e3 }) {
+        return {
+            dc: vo,
+            at: (t) => vo + va * Math.sin(2 * Math.PI * fc * t + mdi * Math.sin(2 * Math.PI * fs * t)),
+            breakpoints: () => []
+        };
+    },
+
     pwl(points) {
         const pts = points.slice().sort((a, b) => a[0] - b[0]);
         return {
@@ -929,7 +954,12 @@ class MOSFET extends NonlinearElement {
         this.keepForAC([g, d, s], J);
     }
 
-    stampAC(ac) { this.stampACJacobian(ac); }
+    stampAC(ac) {
+        // series drain / source resistance is part of the small-signal circuit too
+        if (this.p.rd > 0) ac.addY(this.n[1], this.di, 1 / this.p.rd, 0);
+        if (this.p.rs > 0) ac.addY(this.n[2], this.si, 1 / this.p.rs, 0);
+        this.stampACJacobian(ac);
+    }
 
     current(x) {
         const v = (i) => (i < 0 ? 0 : x[i]);
@@ -1049,7 +1079,7 @@ class OpAmp extends BehavioralDriver {
 }
 
 class LogicGate extends BehavioralDriver {
-    // nodes: [A, (B), Y]; kind AND OR NOT NAND NOR XOR; p: vcc, vlow, ro, tpd
+    // nodes: [A, (B), Y]; kind AND OR NOT NAND NOR XOR XNOR BUF; p: vcc, vlow, ro, tpd
     constructor(name, nodes, kind, p = {}) {
         const q = Object.assign({ vcc: 5, vlow: 0, ro: 50, tpd: 10e-9 }, p);
         super(name, nodes, q.ro, q.tpd);
@@ -1075,6 +1105,8 @@ class LogicGate extends BehavioralDriver {
             case "OR": f = 1 - (1 - a) * (1 - b); df = [1 - b, 1 - a]; break;
             case "NOR": f = (1 - a) * (1 - b); df = [-(1 - b), -(1 - a)]; break;
             case "XOR": f = a + b - 2 * a * b; df = [1 - 2 * b, 1 - 2 * a]; break;
+            case "XNOR": f = 1 - (a + b - 2 * a * b); df = [-(1 - 2 * b), -(1 - 2 * a)]; break;
+            case "BUF": f = a; df = [1]; break;
             default: f = 1 - a; df = [-1]; break; // NOT
         }
         const span = vcc - vlow;

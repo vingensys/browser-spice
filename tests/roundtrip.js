@@ -3,7 +3,7 @@
 //   (0, eval)(await (await fetch('tests/roundtrip.js')).text()); await roundtripTests();
 
 window.roundtripTests = async function () {
-    const decks = ["ce_amp", "cs_amp", "diode_clipper", "bridge_rect", "cmos_inv", "darlington", "zener_reg", "npn_switch", "rlc_ring", "diff_pair", "ic_rlc", "controlled", "pwl_current", "mixed_sources"];
+    const decks = ["ce_amp", "cs_amp", "diode_clipper", "bridge_rect", "cmos_inv", "darlington", "zener_reg", "npn_switch", "rlc_ring", "diff_pair", "ic_rlc", "controlled", "pwl_current", "mixed_sources", "jfet_amp", "jfet_p", "transformer", "transformer_rect", "exp_sffm"];
     const results = [];
 
     for (const id of decks) {

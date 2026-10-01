@@ -1,0 +1,14 @@
+N-JFET self-biased common-source amplifier
+VDD vdd 0 DC 15
+VIN in 0 SIN(0 0.1 5k) AC 0.1
+CIN in g 1u
+RG g 0 1Meg
+RD vdd d 3.3k
+RS s 0 1k
+CS s 0 100u
+J1 d g s JN
+.model JN NJF(VTO=-2 BETA=1.0m LAMBDA=0.005 RD=10 RS=10)
+.op
+.ac dec 10 10 1Meg
+.tran 2u 1m
+.end

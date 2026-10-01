@@ -6,7 +6,7 @@
 const SIM_MODELS = {
     D: {
         "1N4148": { desc: "Small-signal switching diode", params: { is: 2.52e-9, n: 1.752, rs: 0.568, bv: 100, ibv: 100e-6, cjo: 4e-12, vj: 0.5, m: 0.4, tt: 20e-9 } },
-        "1N4007": { desc: "1 A rectifier, 1000 V", params: { is: 76.9e-9, n: 1.45, rs: 0.0342, bv: 1000, ibv: 5e-6, cjo: 39.8e-12, vj: 0.7, m: 0.333, tt: 4.32e-6 } },
+        "1N4007": { desc: "1 A rectifier, 1000 V", params: { is: 76.9e-12, n: 1.45, rs: 0.0342, bv: 1000, ibv: 5e-6, cjo: 39.8e-12, vj: 0.7, m: 0.333, tt: 4.32e-6 } },
         "1N5819": { desc: "1 A Schottky, 40 V", params: { is: 31.7e-6, n: 1.373, rs: 0.0432, bv: 40, ibv: 1e-3, cjo: 110e-12, vj: 0.34, m: 0.38, tt: 0 } },
         "IDEAL": { desc: "Ideal diode (tiny drop)", params: { is: 1e-12, n: 0.1, rs: 0 } }
     },
@@ -89,6 +89,13 @@ function simModelCardFromParams(kind, name, p) {
         // Level 1: KP * W/L = beta, so use W=L=1u and KP=beta
         const extra = `${p.rd ? ` RD=${f(p.rd)}` : ""}${p.rs ? ` RS=${f(p.rs)}` : ""}`;
         return `.model ${name} ${t}(LEVEL=1 VTO=${f(kind === "NMOS" ? p.vto : -p.vto)} KP=${f(p.beta)} LAMBDA=${f(p.lambda)}${extra})`;
+    }
+    if (kind === "JFET_N" || kind === "JFET_P") {
+        const parts = [`VTO=${f(p.vto)}`, `BETA=${f(p.beta)}`, `LAMBDA=${f(p.lambda || 0)}`];
+        if (p.rd) parts.push(`RD=${f(p.rd)}`);
+        if (p.rs) parts.push(`RS=${f(p.rs)}`);
+        if (p.is) parts.push(`IS=${f(p.is)}`);
+        return `.model ${name} ${kind === "JFET_N" ? "NJF" : "PJF"}(${parts.join(" ")})`;
     }
     return null;
 }

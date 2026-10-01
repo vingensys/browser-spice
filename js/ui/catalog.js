@@ -5,7 +5,8 @@
 const DeviceCatalog = {
     categories: [
         "Resistors", "Capacitors", "Inductors", "Diodes", "Optoelectronics", "Transistors",
-        "Operational Amplifiers", "Analog ICs", "Switches & Relays", "Simulator Primitives", "Logic Gates"
+        "Operational Amplifiers", "Analog ICs", "Voltage Regulators", "Thyristors", "Switches & Relays", "Electromechanical",
+        "Simulator Primitives", "Logic Gates", "Digital ICs", "Miscellaneous"
     ],
 
     generics() {
@@ -20,7 +21,8 @@ const DeviceCatalog = {
             { name: "ISOURCE", category: "Simulator Primitives", type: "I", desc: "DC current source", props: { sourceType: "DC", dcVoltage: 0.001, value: "1 mA" } },
             { name: "VCVS", category: "Simulator Primitives", type: "E", desc: "Voltage-controlled voltage source", props: { value: "10" } },
             { name: "VCCS", category: "Simulator Primitives", type: "G", desc: "Voltage-controlled current source", props: { value: "10 mS" } },
-            ...["AND", "OR", "NOT", "NAND", "NOR", "XOR"].map(g => ({
+            ...(typeof PartLib !== "undefined" ? PartLib.catalog() : []),
+            ...["AND", "OR", "NOT", "NAND", "NOR", "XOR", "XNOR", "BUF"].map(g => ({
                 name: g, category: "Logic Gates", type: g, desc: `${g} gate (5 V logic, 10 ns delay)`, props: { vcc: "5" }
             }))
         ];
@@ -73,6 +75,11 @@ const DeviceCatalog = {
             { name: "DC", type: "V", desc: "DC voltage source", props: { sourceType: "DC", dcVoltage: 5, value: "5 V" } },
             { name: "SINE", type: "V", desc: "Sine wave source", props: { sourceType: "AC", acMagnitude: 5, frequency: 1000, dcOffset: 0, acPhase: 0, value: "5 V @ 1 kHz" } },
             { name: "PULSE", type: "V", desc: "Pulse / square wave source", props: { sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 0, rise: 1e-6, fall: 1e-6, width: 5e-4, period: 1e-3 }, value: "0 V/5 V @ 1 kHz" } },
+            { name: "SQUARE", type: "V", desc: "Square wave / clock with adjustable duty cycle", props: { sourceType: "SQUARE", gen: { low: 0, high: 5, freq: 1000, duty: 50 }, value: "SQ 1 kHz" } },
+            { name: "TRIANGLE", type: "V", desc: "Triangle wave generator", props: { sourceType: "TRIANGLE", gen: { low: -1, high: 1, freq: 1000 }, value: "TRI 1 kHz" } },
+            { name: "SAWTOOTH", type: "V", desc: "Sawtooth (ramp) generator", props: { sourceType: "SAWTOOTH", gen: { low: 0, high: 5, freq: 1000 }, value: "SAW 1 kHz" } },
+            { name: "EXP", type: "V", desc: "Exponential pulse source (SPICE EXP)", props: { sourceType: "EXP", exp: { v1: 0, v2: 5, td1: 0, tau1: 1e-3, td2: 5e-3, tau2: 1e-3 }, value: "EXP" } },
+            { name: "SFFM", type: "V", desc: "Single-frequency FM source (SPICE SFFM)", props: { sourceType: "SFFM", sffm: { vo: 0, va: 1, fc: 10e3, mdi: 5, fs: 1e3 }, value: "FM" } },
             { name: "PWLIN", type: "V", desc: "Piecewise-linear source", props: { sourceType: "PWL", pwl: "0 0 1m 5 2m 5 3m 0", value: "PWL" } },
             { name: "DCURRENT", type: "I", desc: "DC current source", props: { sourceType: "DC", dcVoltage: 0.001, value: "1 mA" } },
             { name: "SCURRENT", type: "I", desc: "Sine current source", props: { sourceType: "AC", acMagnitude: 0.001, frequency: 1000, dcOffset: 0, acPhase: 0, value: "1 mA @ 1 kHz" } }

@@ -55,10 +55,14 @@ window.engineTests = async function () {
         "ce-amp": { opts: { uic: false } },                              // bias circuit: start from the operating point
         "inverting-opamp": { opts: { uic: false } },
         "555-astable": { tol: { op: 0.05, tran: 0.6 }, opts: { skipOp: true } }, // bistable: no unique DC state; periods differ ~1-2 %
+        "psu": { tol: { op: 0.05, tran: 0.2 }, opts: { skipOp: true } }, // floating rectifier nodes: leakage sets the DC state; kick spikes are timing sensitive
+        "jfet-amp": { opts: { uic: false } },                            // bias circuit: start from the operating point
         "boost": { tol: { op: 0.01, tran: 0.2 } }                        // switching ripple is phase sensitive
     };
     for (const ex of EXAMPLES) {
         if (ex.id === "diode-iv") continue; // swept, not transient
+        loadExampleById(editor, ex.id);
+        if (NgspiceBackend.unsupported(NetlistExtractor.extract(editor)).length) { results.push({ id: ex.id, pass: true, skipped: "has parts with no SPICE model" }); continue; }
         const tStop = Units.parseSI(ex.settings.tStop || "0"), tStep = Units.parseSI(ex.settings.tStep || "0");
         const sp = SPECIAL[ex.id] || {};
         await compare(ex.id, () => loadExampleById(editor, ex.id), tStop ? { tStop, tStep } : null, sp.tol, sp.opts);

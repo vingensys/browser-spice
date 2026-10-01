@@ -17,6 +17,8 @@ class SimModelLibrary {
             case "pnp": return ["BJT_PNP"];
             case "nmos": return ["NMOS"];
             case "pmos": return ["PMOS"];
+            case "njf": return ["JFET_N"];
+            case "pjf": return ["JFET_P"];
             default: return [];
         }
     }
@@ -26,6 +28,7 @@ class SimModelLibrary {
             case "d": return SpiceParser.diodeParams(model);
             case "npn": case "pnp": return SpiceParser.bjtParams(model);
             case "nmos": case "pmos": return SpiceParser.mosParams(model, 1e-6, 1e-6);
+            case "njf": case "pjf": return SpiceParser.jfetParams(model);
             default: return null;
         }
     }

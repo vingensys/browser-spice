@@ -78,6 +78,9 @@ class PropertiesPanel {
         else if (type === "C") html += this.text("Capacitance", "value", c.value, "e.g. 10u") + this.text("Initial voltage (UIC)", "ic", c.ic || "", "0");
         else if (type === "L") html += this.text("Inductance", "value", c.value, "e.g. 10m") + this.text("Initial current (UIC)", "ic", c.ic || "", "0");
 
+        const part = typeof PartLib !== "undefined" && PartLib.defs[type];
+        if (part && part.rows) html += part.rows(this, c);
+
         if (SIM_MODELS[type]) {
             const names = Object.keys(SIM_MODELS[type]);
             if (c.customParams) {
@@ -95,7 +98,7 @@ class PropertiesPanel {
             html += this.text("Positive supply (V)", "vcc", c.vcc === undefined ? "15" : c.vcc, "15");
             html += this.text("Negative supply (V)", "vee", c.vee === undefined ? "-15" : c.vee, "-15 (0 for single supply)");
         }
-        if (["AND", "OR", "NOT", "NAND", "NOR", "XOR"].includes(type)) {
+        if (["AND", "OR", "NOT", "NAND", "NOR", "XOR", "XNOR", "BUF"].includes(type)) {
             html += this.text("Supply (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5");
         }
         if (type === "IC555") {
@@ -109,7 +112,8 @@ class PropertiesPanel {
         const t = c.sourceType || "DC";
         const what = unit === "A" ? "Current" : "Voltage";
         let html = this.select("Source type", "sourceType",
-            [["DC", `DC ${what.toLowerCase()}`], ["AC", "Sine wave"], ["PULSE", "Pulse / square"], ["PWL", "Piecewise linear"]], t);
+            [["DC", `DC ${what.toLowerCase()}`], ["AC", "Sine wave"], ["PULSE", "Pulse (full control)"], ["SQUARE", "Square / clock"], ["TRIANGLE", "Triangle"],
+             ["SAWTOOTH", "Sawtooth"], ["EXP", "Exponential"], ["SFFM", "Frequency modulated"], ["PWL", "Piecewise linear"]], t);
 
         if (t === "DC") {
             html += this.text(what, "dcVoltage", c.dcVoltage !== undefined ? this.fmt(c.dcVoltage, unit) : c.value, unit === "A" ? "1 mA" : "5 V");
@@ -119,6 +123,27 @@ class PropertiesPanel {
             html += this.text("DC offset", "dcOffset", this.fmt(c.dcOffset, unit, `0 ${unit}`), `0 ${unit}`);
             html += this.text("Frequency", "frequency", this.fmt(c.frequency, "Hz", "1 kHz"), "1 kHz");
             html += this.text("Phase (deg)", "acPhase", c.acPhase === undefined ? "0" : c.acPhase, "0");
+        } else if (t === "SQUARE" || t === "TRIANGLE" || t === "SAWTOOTH") {
+            const g = c.gen || {};
+            html += this.text("Low level", "gen.low", this.fmt(g.low, unit, `0 ${unit}`), `0 ${unit}`);
+            html += this.text("High level", "gen.high", this.fmt(g.high, unit, `5 ${unit}`), `5 ${unit}`);
+            html += this.text("Frequency", "gen.freq", this.fmt(g.freq, "Hz", "1 kHz"), "1 kHz");
+            if (t === "SQUARE") html += this.text("Duty cycle (%)", "gen.duty", g.duty === undefined ? "50" : g.duty, "50");
+        } else if (t === "EXP") {
+            const x = c.exp || {};
+            html += this.text("Initial level", "exp.v1", this.fmt(x.v1, unit, `0 ${unit}`), `0 ${unit}`);
+            html += this.text("Pulsed level", "exp.v2", this.fmt(x.v2, unit, `5 ${unit}`), `5 ${unit}`);
+            html += this.text("Rise delay", "exp.td1", this.fmt(x.td1, "s", "0 s"), "0 s");
+            html += this.text("Rise time constant", "exp.tau1", this.fmt(x.tau1, "s", "1 ms"), "1 ms");
+            html += this.text("Fall delay", "exp.td2", this.fmt(x.td2, "s", "5 ms"), "5 ms");
+            html += this.text("Fall time constant", "exp.tau2", this.fmt(x.tau2, "s", "1 ms"), "1 ms");
+        } else if (t === "SFFM") {
+            const x = c.sffm || {};
+            html += this.text("Offset", "sffm.vo", this.fmt(x.vo, unit, `0 ${unit}`), `0 ${unit}`);
+            html += this.text("Amplitude", "sffm.va", this.fmt(x.va, unit, `1 ${unit}`), `1 ${unit}`);
+            html += this.text("Carrier frequency", "sffm.fc", this.fmt(x.fc, "Hz", "10 kHz"), "10 kHz");
+            html += this.text("Modulation index", "sffm.mdi", x.mdi === undefined ? "5" : x.mdi, "5");
+            html += this.text("Signal frequency", "sffm.fs", this.fmt(x.fs, "Hz", "1 kHz"), "1 kHz");
         } else if (t === "PWL") {
             html += this.text("Points (time value ...)", "pwl", c.pwl || "0 0 1m 5 2m 0", "0 0 1m 5 2m 0");
             html += this.text("AC sweep magnitude", "acStim", c.acStim || "", "0");
@@ -148,6 +173,12 @@ class PropertiesPanel {
         const f = (v, unit) => (typeof v === "string" ? v : Units.formatSI(v, unit === "V" ? u : unit));
         const t = c.sourceType || "DC";
         if (t === "PWL") return "PWL";
+        if (t === "EXP") return "EXP";
+        if (t === "SFFM") return "FM";
+        if (t === "SQUARE" || t === "TRIANGLE" || t === "SAWTOOTH") {
+            const g = c.gen || {};
+            return `${{ SQUARE: "SQ", TRIANGLE: "TRI", SAWTOOTH: "SAW" }[t]} ${f(g.freq === undefined ? 1000 : g.freq, "Hz")}`;
+        }
         if (t === "AC") return `${f(c.acMagnitude, "V")} @ ${f(c.frequency, "Hz")}`;
         if (t === "PULSE") {
             const p = c.pulse || {};
@@ -166,9 +197,11 @@ class PropertiesPanel {
     }
 
     assign(comp, prop, value) {
-        if (prop.startsWith("pulse.")) {
-            comp.pulse = comp.pulse || {};
-            comp.pulse[prop.slice(6)] = value;
+        const dot = prop.indexOf(".");
+        if (dot > 0) {
+            const group = prop.slice(0, dot);
+            comp[group] = comp[group] || {};
+            comp[group][prop.slice(dot + 1)] = value;
         } else {
             comp[prop] = value;
         }
@@ -208,6 +241,9 @@ class PropertiesPanel {
                 if (v === "PWL" && !comp.pwl) comp.pwl = "0 0 1m 5 2m 0";
                 if (v === "PULSE" && !comp.pulse) comp.pulse = { v1: 0, v2: 5, delay: 0, rise: 1e-6, fall: 1e-6, width: 5e-4, period: 1e-3 };
                 if (v === "AC" && comp.acMagnitude === undefined) comp.acMagnitude = 5;
+                if (["SQUARE", "TRIANGLE", "SAWTOOTH"].includes(v) && !comp.gen) comp.gen = { low: 0, high: 5, freq: 1000, duty: 50 };
+                if (v === "EXP" && !comp.exp) comp.exp = { v1: 0, v2: 5, td1: 0, tau1: 1e-3, td2: 5e-3, tau2: 1e-3 };
+                if (v === "SFFM" && !comp.sffm) comp.sffm = { vo: 0, va: 1, fc: 10e3, mdi: 5, fs: 1e3 };
             }
             this.refreshLabel(comp);
             this.commit();
@@ -222,6 +258,8 @@ class PropertiesPanel {
     refreshLabel(comp) {
         if (comp.type === "V" || comp.type === "I") comp.value = PropertiesPanel.sourceLabel(comp);
         if (comp.type === "SW") comp.value = comp.closed ? "closed" : "open";
+        const part = typeof PartLib !== "undefined" && PartLib.defs[comp.type];
+        if (part && part.label) comp.value = part.label(comp);
     }
 
     // one undo step per edit session

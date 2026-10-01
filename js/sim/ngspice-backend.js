@@ -38,12 +38,16 @@ class NgspiceBackend {
 
     // Parts the exported deck cannot express (they would silently vanish from the run)
     static unsupported(info) {
-        return [];
+        return (info.elements || []).filter(e => ["SCR", "TRIAC", "FF"].includes(e.kind)).map(e => e.name);
     }
 
     // ngspice writes its progress and convergence chatter to the console; capture it so it
     // can be shown (or ignored) deliberately instead of flooding the developer console.
     static async run(deck) {
+        // ngspice (WebAssembly) cannot be interrupted: a malformed value such as "undefined" in a model
+        // card makes it spin forever and freezes the page, so refuse such decks up front
+        const bad = deck.match(/^.*\b(undefined|NaN|Infinity)\b.*$/m);
+        if (bad) throw new Error(`The exported netlist has an invalid value, not sent to ngspice: ${bad[0].trim()}`);
         const sim = await NgspiceBackend.load();
         const log = [];
         const saved = { error: console.error, warn: console.warn, log: console.log };

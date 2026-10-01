@@ -182,6 +182,7 @@ class WaveformPlotter {
      * Plots AC Frequency Sweep Bode plot for probes ALONE. No probes = No signal.
      */
     plotAC(acSweepResults, probes = [], netlistInfo = null) {
+        this.lastAC = [acSweepResults, probes, netlistInfo];
         if (!acSweepResults || acSweepResults.length === 0 || !probes || probes.length === 0) {
             this.data = null;
             this.draw();
@@ -189,51 +190,58 @@ class WaveformPlotter {
         }
 
         const freqPoints = acSweepResults.map(r => r.frequency);
-        const series = [];
-        let colorIdx = 0;
-        const probeSeriesMap = this.buildProbeSeriesMap(probes, netlistInfo);
-
-        for (const item of probeSeriesMap) {
-            if (item.type === 'V') {
-                const magValues = acSweepResults.map(r => {
-                    const z = r.nodeVoltages[item.node];
-                    return z ? z.magnitude() : 0;
-                });
-                series.push({
-                    name: item.label,
-                    color: this.colors[colorIdx % this.colors.length],
-                    values: magValues
-                });
-                colorIdx++;
-            } else if (item.type === 'I') {
-                const magValues = acSweepResults.map(r => {
-                    const z = r.sourceCurrents[item.targetName];
-                    return z ? z.magnitude() : 0;
-                });
-                series.push({
-                    name: item.label,
-                    color: this.colors[colorIdx % this.colors.length],
-                    values: magValues
-                });
-                colorIdx++;
-            }
+        const phasors = [];   // { label, z: Complex[] }
+        for (const item of this.buildProbeSeriesMap(probes, netlistInfo)) {
+            const pick = item.type === 'V' ? (r => r.nodeVoltages[item.node]) : (r => r.sourceCurrents[item.targetName]);
+            phasors.push({ label: item.label, z: acSweepResults.map(r => pick(r) || new Complex(0, 0)) });
         }
-
-        if (series.length === 0) {
+        if (phasors.length === 0) {
             this.data = null;
             this.draw();
             return;
         }
 
+        const color = (i) => this.colors[i % this.colors.length];
+        const mag = (z) => z.magnitude();
+        const db = (z) => 20 * Math.log10(Math.max(z.magnitude(), 1e-20));
+        // phase in degrees, unwrapped so a 180 degree crossing does not jump by 360
+        const phase = (zs) => {
+            const out = [];
+            let offset = 0, prev = null;
+            for (const z of zs) {
+                let p = z.phaseDegrees();
+                if (prev !== null) {
+                    while (p + offset - prev > 180) offset -= 360;
+                    while (p + offset - prev < -180) offset += 360;
+                }
+                p += offset;
+                out.push(p);
+                prev = p;
+            }
+            return out;
+        };
+
+        const linear = this.acScale === "linear";
+        const magSeries = phasors.map((p, i) => ({ name: p.label, color: color(i), values: p.z.map(linear ? mag : db) }));
         this.data = {
             mode: "ac",
             xLabel: "Frequency (Hz)",
-            yLabel: "Magnitude",
+            yLabel: linear ? "Magnitude" : "Gain (dB)",
             xValues: freqPoints,
-            series
+            series: magSeries,
+            panels: linear ? null : [
+                { yUnit: "Gain (dB)", valueUnit: "dB", tickDigits: 1, series: magSeries },
+                { yUnit: "Phase (°)", valueUnit: "°", tickDigits: 0, series: phasors.map((p, i) => ({ name: p.label, color: color(i), values: phase(p.z) })) }
+            ]
         };
+        if (linear) this.data.yUnit = "Magnitude";
 
         this.draw();
+    }
+
+    setACScale(scale) {
+        this.acScale = scale;
+        if (this.data && this.data.mode === "ac" && this.lastAC) this.plotAC(...this.lastAC);
     }
 
     /**
@@ -339,10 +347,21 @@ class WaveformPlotter {
             return;
         }
 
+        // a Bode plot is two stacked panels sharing the frequency axis
+        const panels = this.data.panels || [this.data];
+        const h = this.height / panels.length;
+        panels.forEach((panel, i) => {
+            const data = panel === this.data ? panel : Object.assign({}, panel, { mode: this.data.mode, xValues: this.data.xValues, xUnit: this.data.xUnit });
+            this.drawPlot(data, i * h, h, i, panels.length);
+        });
+    }
+
+    drawPlot(data, top, height, index, count) {
+        const ctx = this.ctx;
         const paddingLeft = 60;
         const paddingRight = 20;
-        const paddingTop = 30;
-        const paddingBottom = 40;
+        const paddingTop = top + (index === 0 ? 30 : 14);
+        const paddingBottom = this.height - (top + height) + (index === count - 1 ? 40 : 10);
 
         const graphWidth = this.width - paddingLeft - paddingRight;
         const graphHeight = this.height - paddingTop - paddingBottom;
@@ -350,7 +369,7 @@ class WaveformPlotter {
         let yMin = Infinity;
         let yMax = -Infinity;
 
-        for (const s of this.data.series) {
+        for (const s of data.series) {
             for (const v of s.values) {
                 if (v < yMin) yMin = v;
                 if (v > yMax) yMax = v;
@@ -371,7 +390,7 @@ class WaveformPlotter {
         const finalYMin = yCenter - yHalfSpan;
         const finalYMax = yCenter + yHalfSpan;
 
-        const totalPoints = this.data.xValues.length;
+        const totalPoints = data.xValues.length;
         const xSpan = (totalPoints - 1) / this.zoomX;
         const xCenter = (totalPoints - 1) / 2 + (this.panX * totalPoints);
         const xMinIdx = Math.max(0, Math.floor(xCenter - xSpan / 2));
@@ -396,14 +415,14 @@ class WaveformPlotter {
 
             ctx.textAlign = "right";
             ctx.textBaseline = "middle";
-            ctx.fillText(Units.formatSI(yVal, ""), paddingLeft - 8, yPos);
+            ctx.fillText(data.tickDigits !== undefined ? yVal.toFixed(data.tickDigits) : Units.formatSI(yVal, ""), paddingLeft - 8, yPos);
         }
 
         // X Grid Lines & Labels
         const xTicks = 6;
-        const isLog = this.data.mode === "ac";
-        const xMinVal = this.data.xValues[xMinIdx];
-        const xMaxVal = this.data.xValues[xMaxIdx];
+        const isLog = data.mode === "ac";
+        const xMinVal = data.xValues[xMinIdx];
+        const xMaxVal = data.xValues[xMaxIdx];
 
         for (let i = 0; i <= xTicks; i++) {
             const fraction = i / xTicks;
@@ -425,8 +444,16 @@ class WaveformPlotter {
 
             ctx.textAlign = "center";
             ctx.textBaseline = "top";
-            const unitStr = this.data.xUnit !== undefined ? this.data.xUnit : (this.data.mode === "ac" ? "Hz" : "s");
+            if (index < count - 1) continue;
+            const unitStr = data.xUnit !== undefined ? data.xUnit : (data.mode === "ac" ? "Hz" : "s");
             ctx.fillText(Units.formatSI(xVal, unitStr), xPos, paddingTop + graphHeight + 6);
+        }
+
+        if (data.yUnit) {
+            ctx.fillStyle = "#9aa4b5";
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+            ctx.fillText(data.yUnit, paddingLeft + 6, paddingTop + 4);
         }
 
         // Draw Axes Border
@@ -449,7 +476,7 @@ class WaveformPlotter {
         ctx.rect(paddingLeft, paddingTop, graphWidth, graphHeight);
         ctx.clip();
 
-        for (const s of this.data.series) {
+        for (const s of data.series) {
             ctx.strokeStyle = s.color;
             ctx.lineWidth = 2;
             ctx.beginPath();
@@ -467,7 +494,7 @@ class WaveformPlotter {
 
         // Draw Legend
         let legendX = paddingLeft + 10;
-        for (const s of this.data.series) {
+        for (const s of index === 0 ? data.series : []) {
             ctx.fillStyle = s.color;
             ctx.fillRect(legendX, 10, 10, 10);
 
@@ -502,7 +529,7 @@ class WaveformPlotter {
             ctx.setLineDash([]);
 
             let tooltipY = paddingTop + 15;
-            for (const s of this.data.series) {
+            for (const s of data.series) {
                 const val = s.values[this.hoverIndex];
                 const hY = mapY(val);
 
@@ -513,7 +540,7 @@ class WaveformPlotter {
 
                 ctx.textAlign = "right";
                 ctx.fillStyle = s.color;
-                ctx.fillText(`${s.name}: ${Units.formatSI(val, "")}`, paddingLeft + graphWidth - 10, tooltipY);
+                ctx.fillText(`${s.name}: ${Units.formatSI(val, data.valueUnit || "")}`, paddingLeft + graphWidth - 10, tooltipY);
                 tooltipY += 15;
             }
         }

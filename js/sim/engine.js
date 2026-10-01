@@ -382,6 +382,7 @@ class TransientRun {
         this.hMin = tStep * 1e-8;
         this.t = 0;
         this.afterBreak = true;
+        this.dampSteps = 0;
         this.hNext = tStep;
         this.xPrev = null;
         this.hPrev = 0;
@@ -433,7 +434,7 @@ class TransientRun {
 
         let r = null, shrink = 0, lteTries = 0, ratio = 0;
         for (;;) {
-            r = this.solve(h, (this.afterBreak || shrink > 0) ? "be" : this.method);
+            r = this.solve(h, (this.afterBreak || shrink > 0 || lteTries > 0 || this.dampSteps > 0) ? "be" : this.method);
             if (!r.ok) {
                 result.rejected++;
                 h /= 4;
@@ -473,6 +474,11 @@ class TransientRun {
             hitsBreak = false;
             result.events++;
         }
+
+        // repeated error rejections mean the trapezoidal rule is ringing around a kink (a diode
+        // switching off against an inductor); backward Euler damps that, so use it for a while
+        if (lteTries >= 2) this.dampSteps = 12;
+        else if (this.dampSteps > 0) this.dampSteps--;
 
         this.xPrev = this.x;
         this.hPrev = h;

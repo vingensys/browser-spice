@@ -1,0 +1,14 @@
+Transformer feeding a rectifier and filter capacitor
+VIN in 0 SIN(0 10 1k)
+RP in p 2
+L1 p 0 0.1
+L2 s 0 0.4
+K1 L1 L2 0.998
+RS1 s a 1
+D1 a out DM
+C1 out 0 10u
+RL out 0 2k
+.model DM D(IS=1e-14 N=1.1 RS=1)
+.op
+.tran 5u 5m
+.end

@@ -5,8 +5,8 @@
 //   const { circuit, warnings } = SpiceParser.build(deck);
 //   new SimEngine(circuit).operatingPoint();
 //
-// Supported: R C L V I D Q M E G X(.subckt), .model (D NPN PNP NMOS PMOS level 1),
-// DC / SIN / PULSE / PWL sources, .op .tran .ac .dc. Anything else is reported in
+// Supported: R C L K V I D Q J M E G X(.subckt), .model (D NPN PNP NJF PJF NMOS PMOS level 1),
+// DC / SIN / PULSE / EXP / SFFM / PWL sources, .op .tran .ac .dc. Anything else is reported in
 // `warnings` rather than silently ignored.
 
 class SpiceParser {
@@ -175,7 +175,7 @@ class SpiceParser {
             else if (t === "ac") {
                 spec.acMag = N(tok[++i]);
                 if (i + 1 < tok.length && !isNaN(N(tok[i + 1])) && /^[-+.\d]/.test(tok[i + 1])) spec.acPhase = N(tok[++i]);
-            } else if (t === "sin" || t === "pulse" || t === "pwl") {
+            } else if (t === "sin" || t === "pulse" || t === "pwl" || t === "exp" || t === "sffm") {
                 const args = [];
                 while (i + 1 < tok.length && /^[-+.\d]/.test(tok[i + 1]) && !["dc", "ac"].includes(tok[i + 1])) args.push(N(tok[++i]));
                 spec.wave = { kind: t, args };
@@ -208,6 +208,8 @@ class SpiceParser {
                 const p = SpiceParser.params(tok.slice(6));
                 return { kind: "M", name, nodes: [tok[2], tok[1], tok[3]], model: tok[5], w: p.w, l: p.l };
             }
+            case "j": return { kind: "J", name, nodes: [tok[2], tok[1], tok[3]], model: tok[4] }; // parser order: gate, drain, source
+            case "k": return { kind: "K", name, inductors: [tok[1], tok[2]], k: N(tok[3]) };
             case "e": return { kind: "E", name, nodes: [tok[1], tok[2], tok[3], tok[4]], gain: N(tok[5]) };
             case "g": return { kind: "G", name, nodes: [tok[1], tok[2], tok[3], tok[4]], gm: N(tok[5]) };
             case "x": return { kind: "X", name, nodes: tok.slice(1, -1).filter(t => !t.includes("=")), sub: tok.filter(t => !t.includes("=")).pop() };
@@ -231,6 +233,12 @@ class SpiceParser {
                 v1: a[0] || 0, v2: a[1] || 0, delay: a[2] || 0, rise: a[3] || 1e-9, fall: a[4] || 1e-9,
                 width: a[5] === undefined ? 1e-3 : a[5], period: a[6] || 0
             });
+        }
+        if (w.kind === "exp") {
+            return Waveform.exp({ v1: a[0] || 0, v2: a[1] || 0, td1: a[2] || 0, tau1: a[3] || 1e-3, td2: a[4] === undefined ? 1e-3 : a[4], tau2: a[5] || 1e-3 });
+        }
+        if (w.kind === "sffm") {
+            return Waveform.sffm({ vo: a[0] || 0, va: a[1] || 0, fc: a[2] || 1e3, mdi: a[3] || 0, fs: a[4] || 1e3 });
         }
         const pts = [];
         for (let i = 0; i + 1 < a.length; i += 2) pts.push([a[i], a[i + 1]]);
@@ -265,6 +273,14 @@ class SpiceParser {
         return { vto: Math.abs(p.vto === undefined ? 0 : p.vto), beta: (p.kp || 2e-5) * ratio, lambda: p.lambda || 0, rd: p.rd || 0, rs: p.rs || 0 };
     }
 
+    static jfetParams(m) {
+        const p = m ? m.params : {};
+        return {
+            vto: p.vto === undefined ? -2 : p.vto, beta: p.beta || 1e-4, lambda: p.lambda || 0,
+            rd: p.rd || 0, rs: p.rs || 0, is: p.is || 1e-14, cgs: p.cgs || 0, cgd: p.cgd || 0
+        };
+    }
+
     // flatten subcircuits into a plain element list with prefixed names / nodes
     static flatten(deck, elements, prefix, portMap, warnings, depth = 0) {
         const out = [];
@@ -275,7 +291,7 @@ class SpiceParser {
         };
         for (const el of elements) {
             if (el.kind !== "X") {
-                out.push({ ...el, name: prefix ? `${prefix}.${el.name}` : el.name, nodes: el.nodes.map(mapNode) });
+                out.push({ ...el, name: prefix ? `${prefix}.${el.name}` : el.name, nodes: (el.nodes || []).map(mapNode) });
                 continue;
             }
             const sub = deck.subckts[el.sub];
@@ -297,9 +313,24 @@ class SpiceParser {
             return m;
         };
 
-        for (const e of els) {
+        // K cards couple two inductors: that pair becomes one transformer element
+        const coupled = new Set();
+        const transformers = [];
+        for (const k of els.filter(e => e.kind === "K")) {
+            const [a, b] = k.inductors.map(n => els.find(e => e.kind === "L" && e.name.toLowerCase().endsWith(n.toLowerCase())));
+            if (!a || !b || coupled.has(a) || coupled.has(b)) { warnings.push(`${k.name}: coupling needs two inductors that are not already coupled; ignored`); continue; }
+            coupled.add(a); coupled.add(b);
+            transformers.push({ kind: "XFMR", name: k.name, nodes: [...a.nodes, ...b.nodes], l1: a.value, l2: b.value, k: k.k });
+        }
+        for (const e of [...els.filter(e => !coupled.has(e) && e.kind !== "K"), ...transformers]) {
             const nm = e.name.toUpperCase();
             switch (e.kind) {
+                case "XFMR": circuit.add(new Transformer(nm, e.nodes, { l1: e.l1, ratio: Math.sqrt(e.l2 / e.l1), k: Math.min(e.k, 0.99999) })); break;
+                case "J": {
+                    const m = model(e.model, e.name);
+                    circuit.add(new JFET(nm, e.nodes, m && m.type === "pjf" ? -1 : 1, SpiceParser.jfetParams(m)));
+                    break;
+                }
                 case "R": circuit.add(new Resistor(nm, e.nodes, { r: e.value })); break;
                 case "C": circuit.add(new Capacitor(nm, e.nodes, { c: e.value, ic: e.ic })); break;
                 case "L": circuit.add(new Inductor(nm, e.nodes, { l: e.value, ic: e.ic })); break;

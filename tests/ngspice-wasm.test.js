@@ -10,7 +10,7 @@ if (!fs.existsSync(path.join(root, "node_modules", "eecircuit-engine"))) {
     process.exit(0);
 }
 
-const files = ["js/utils/complex.js", "js/utils/units.js", "js/circuit/netlist.js", "js/sim/ngspice-backend.js"];
+const files = ["js/utils/complex.js", "js/utils/units.js", "js/sim/models.js", "js/circuit/netlist.js", "js/sim/ngspice-backend.js"];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const { NgspiceBackend, NetlistExtractor, Complex } = new Function(src + "\nreturn { NgspiceBackend, NetlistExtractor, Complex };")();
 
@@ -51,6 +51,42 @@ const check = (name, cond, extra = "") => {
     const corner = ac.reduce((b, r) => (Math.abs(Math.log(r.frequency / 159.155)) < Math.abs(Math.log(b.frequency / 159.155)) ? r : b));
     check("AC magnitude is -3 dB at the corner", Math.abs(corner.nodeVoltages["2"].magnitude() - Math.SQRT1_2) < 0.05, `${corner.nodeVoltages["2"].magnitude()}`);
     check("AC gives complex node voltages", corner.nodeVoltages["2"] instanceof Complex);
+
+    // exported cards for the newer parts run in ngspice and give the expected numbers
+    const jinfo = {
+        elements: [
+            { kind: "V", name: "V1", nodes: ["vdd", "0"], params: { sourceType: "DC", dc: 12 } },
+            { kind: "R", name: "RD", nodes: ["vdd", "d"], params: { r: 1000 } },
+            { kind: "J", name: "J1", nodes: ["0", "d", "0"], pol: 1, model: "NJ", modelKind: "JFET_N", params: { vto: -2, beta: 1.25e-3, lambda: 0 } }
+        ]
+    };
+    const jop = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(jinfo.elements, { analysis: ".op" })), jinfo);
+    check("JFET card: Idss = 5 mA", Math.abs(jop.nodeVoltages.d - 7) < 0.02, `${jop.nodeVoltages.d}`);
+
+    const tinfo = {
+        elements: [
+            { kind: "V", name: "V1", nodes: ["p", "0"], params: { sourceType: "AC", sin: { offset: 0, amp: 1, freq: 1000, phase: 0 }, acMag: 1, acPhase: 0 } },
+            { kind: "T", name: "TR1", nodes: ["p", "0", "s", "0"], params: { l1: 1, ratio: 2, k: 0.9999, rp: 1, rs: 0 } },
+            { kind: "R", name: "RL", nodes: ["s", "0"], params: { r: 20000 } }
+        ]
+    };
+    const tt = NgspiceBackend.toTransient(await NgspiceBackend.run(NetlistExtractor.toSpice(tinfo.elements, { analysis: ".tran 2u 4m uic" })), tinfo);
+    const sv = tt.nodeHistories.s;
+    check("transformer card: 1:2 step-up", Math.abs(Math.max(...sv.slice(sv.length >> 1)) - 2) < 0.06, `${Math.max(...sv)}`);
+
+    const rinfo = {
+        elements: [
+            { kind: "V", name: "V1", nodes: ["in", "0"], params: { sourceType: "DC", dc: 12 } },
+            { kind: "REG", name: "U1", nodes: ["in", "out", "0"], model: "7805", params: { vout: 5, dropout: 2, ro: 0.05, iq: 5e-3 } },
+            { kind: "R", name: "RL", nodes: ["out", "0"], params: { r: 100 } }
+        ]
+    };
+    const rop = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(rinfo.elements, { analysis: ".op" })), rinfo);
+    check("regulator card holds 5 V", Math.abs(rop.nodeVoltages.out - 5) < 0.02, `${rop.nodeVoltages.out}`);
+
+    let refused = false;
+    try { await NgspiceBackend.run("bad\nR1 a 0 undefined\n.op\n.end"); } catch (e) { refused = /invalid value/.test(e.message); }
+    check("a deck with an undefined value is refused instead of hanging ngspice", refused);
 
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);

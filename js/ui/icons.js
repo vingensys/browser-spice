@@ -15,6 +15,8 @@ const Icons = {
         delete: '<path d="M5 7h14M9 7V4h6v3M7 7l1 14h8l1-14"/>',
         rotate: '<path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 4v5h-5"/>',
         rotateccw: '<path d="M4 12a8 8 0 1 0 3-6.2"/><path d="M4 4v5h5"/>',
+        mirrorx: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 7 3 17h6zM15 7l6 10h-6z"/>',
+        mirrory: '<path d="M3 12h18" stroke-dasharray="2 2"/><path d="M7 9 17 9 12 3zM7 15h10l-5 6z"/>',
         zoomin: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M10 7v6M7 10h6"/>',
         zoomout: '<circle cx="10" cy="10" r="6"/><path d="m15 15 6 6M7 10h6"/>',
         fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',

@@ -136,6 +136,52 @@ window.exampleTests = function () {
         near(avg, 9.7, 0.6, "Vout");
     });
 
+    check("psu: bridge + reservoir + 7805 give a steady 5 V", () => {
+        const { info, sim } = load("psu");
+        const r = sim.transient({ tStop: 0.08, tStep: 1e-4, uic: true });
+        const out = tail(r.nodeHistories[nodeOf(info, "U1", "OUT")], 0.4);
+        near(Math.min(...out), 5, 0.05, "Vout min"); near(Math.max(...out), 5, 0.05, "Vout max");
+        const un = tail(r.nodeHistories[nodeOf(info, "C1", "1")], 0.4);
+        if (Math.min(...un) < 9) throw new Error("reservoir dips to " + Math.min(...un) + " V; the regulator would drop out");
+    });
+
+    check("jfet-amp: biased in saturation, inverts and amplifies", () => {
+        const { info, sim } = load("jfet-amp");
+        const op = sim.operatingPoint();
+        const vd = op.nodeVoltages[nodeOf(info, "Q1", "D")];
+        if (vd < 4 || vd > 14) throw new Error("drain at " + vd);
+        const ac = sim.ac({ fStart: 1000, fStop: 1000, pointsPerDecade: 1 })[0];
+        const gain = ac.nodeVoltages[nodeOf(info, "Q1", "D")].magnitude() / ac.nodeVoltages[nodeOf(info, "Q1", "G")].magnitude();
+        if (gain < 5) throw new Error("gain " + gain);
+        near(Math.abs(ac.nodeVoltages[nodeOf(info, "Q1", "D")].phaseDegrees()), 180, 5, "phase");
+    });
+
+    check("relay-driver: the lamp lights only while the input is high", () => {
+        const { info, sim } = load("relay-driver");
+        const r = sim.transient({ tStop: 0.08, tStep: 5e-5, uic: true });
+        const lamp = r.nodeHistories[nodeOf(info, "LP1", "1")];
+        const at = (t) => lamp[r.timePoints.findIndex(x => x >= t)];
+        near(at(2e-3), 0, 0.1, "off before the pulse"); near(at(25e-3), 12, 0.3, "on during the pulse");
+        near(at(50e-3), 0, 0.1, "off after the pulse");
+    });
+
+    check("scr-lamp: fires after the gate pulse and latches for the rest of the half-cycle", () => {
+        const { info, sim } = load("scr-lamp");
+        const r = sim.transient({ tStop: 0.06, tStep: 5e-5, uic: true });
+        const v = r.nodeHistories[nodeOf(info, "LP1", "2")];
+        const at = (t) => v[r.timePoints.findIndex(x => x >= t)];
+        if (at(2e-3) < 10) throw new Error("should be blocking before the gate pulse: " + at(2e-3));
+        near(at(5e-3), 1.1, 0.4, "latched on"); near(at(8e-3), 1.1, 0.4, "still on");
+        if (at(16e-3) > -10) throw new Error("should follow the negative half-cycle: " + at(16e-3));
+    });
+
+    check("ripple-counter: each stage halves the frequency", () => {
+        const { info, sim } = load("ripple-counter");
+        const r = sim.transient({ tStop: 0.02, tStep: 1e-5, uic: true });
+        const edges = [1, 2, 3].map(i => risingEdges(r.timePoints, r.nodeHistories[nodeOf(info, "U" + i, "Q")], 2.5).length);
+        near(edges[0], 10, 1, "Q0 edges in 20 ms (500 Hz)"); near(edges[1], 5, 1, "Q1"); near(edges[2], 2.5, 1, "Q2");
+    });
+
     // ngspice (WASM) backend vs the built-in engine on the 555 oscillator
     const pending = (async () => {
         try {

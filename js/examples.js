@@ -232,6 +232,113 @@ const EXAMPLES = [
         }
     },
     {
+        id: "psu",
+        name: "Power supply (transformer, bridge, 7805)",
+        note: "36 V / 50 Hz mains-style source, 2:1 transformer, bridge rectifier, 1000 µF reservoir and a 7805. Press Play: the probes show the ripple and the regulated 5 V.",
+        settings: { tStop: "80m", tStep: "100u" },
+        build(b) {
+            const v = b.part("V", 100, 360, { rot: 270, sourceType: "AC", acMagnitude: 36, frequency: 50, dcOffset: 0, acPhase: 0 });
+            const tr = b.part("XFMR", 300, 360, { l1: "5", ratio: "0.5", k: "0.999", rp: "0.5", rs: "0.5", value: "2:1" });
+            const br = b.part("BRIDGE", 500, 360, {});
+            const c1 = b.part("ECAP", 640, 440, { rot: 90, value: "1000 µF" });
+            const reg = b.part("REG", 800, 320, {});
+            const rl = b.part("R", 960, 440, { rot: 90, value: "100 Ω" });
+            const g = b.part("GND", 640, 580);
+            b.wire(v, "2", tr, "P1"); b.wire(v, "1", g, "1"); b.wire(tr, "P2", g, "1");
+            b.wire(tr, "S1", br, "AC1"); b.wire(tr, "S2", br, "AC2");
+            b.wire(br, "-", g, "1"); b.wire(br, "+", c1, "1"); b.wire(br, "+", reg, "IN");
+            b.wire(c1, "2", g, "1"); b.wire(reg, "GND", g, "1");
+            b.wire(reg, "OUT", rl, "1"); b.wire(rl, "2", g, "1");
+            b.vprobe(c1, "1", "V(unreg)"); b.vprobe(reg, "OUT", "V(out)");
+        }
+    },
+    {
+        id: "jfet-amp",
+        name: "JFET common-source amplifier",
+        note: "Self-biased N-channel JFET (J201). Run AC for the frequency response (gain in dB and phase) or Play for the live waveforms.",
+        settings: { tStop: "2m", tStep: "2u" },
+        build(b) {
+            const vdd = b.part("V", 100, 280, { rot: 270, dcVoltage: 15, value: "15 V" });
+            const rd = b.part("R", 420, 200, { rot: 90, value: "10 kΩ" });
+            const j = b.part("JFET_N", 420, 360, {});
+            const rs = b.part("R", 440, 500, { rot: 90, value: "1 kΩ" });
+            const cs = b.part("C", 580, 500, { rot: 90, value: "100 µF" });
+            const vin = b.part("V", 100, 480, { rot: 270, sourceType: "AC", acMagnitude: 0.05, frequency: 1000, dcOffset: 0, acPhase: 0 });
+            const cin = b.part("C", 260, 360, { value: "1 µF" });
+            const rg = b.part("R", 320, 500, { rot: 90, value: "1 MΩ" });
+            const g = b.part("GND", 440, 620);
+            b.wire(vdd, "2", rd, "1"); b.wire(rd, "2", j, "D"); b.wire(j, "S", rs, "1"); b.wire(j, "S", cs, "1");
+            b.wire(vin, "2", cin, "1"); b.wire(cin, "2", j, "G"); b.wire(rg, "1", j, "G");
+            b.wire(rs, "2", g, "1"); b.wire(cs, "2", g, "1"); b.wire(rg, "2", g, "1");
+            b.wire(vin, "1", g, "1"); b.wire(vdd, "1", g, "1");
+            b.vprobe(cin, "1", "V(in)"); b.vprobe(j, "D", "V(out)");
+        }
+    },
+    {
+        id: "relay-driver",
+        name: "Relay driver with lamp",
+        note: "A 5 V logic pulse switches a 2N2222 that drives a 12 V relay; its contact lights a 12 V lamp. The 1N4007 absorbs the coil's kick. Press Play.",
+        settings: { tStop: "80m", tStep: "50u" },
+        build(b) {
+            const vcc = b.part("V", 100, 300, { rot: 270, dcVoltage: 12, value: "12 V" });
+            const k = b.part("RELAY", 420, 220, { model: "12V", value: "12V" });
+            const d = b.part("D", 300, 220, { rot: 90, model: "1N4007", value: "1N4007" });
+            const q = b.part("BJT_NPN", 420, 400, {});
+            const rb = b.part("R", 280, 400, { value: "4.7 kΩ" });
+            const vin = b.part("V", 100, 500, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 5e-3, rise: 1e-6, fall: 1e-6, width: 30e-3, period: 60e-3 } });
+            const lamp = b.part("LAMP", 700, 260, { rot: 90, vrated: "12", prated: "5", value: "12 V 5 W" });
+            const g = b.part("GND", 440, 600);
+            b.wire(vcc, "2", k, "COIL+"); b.wire(k, "COIL+", d, "2"); b.wire(d, "1", k, "COIL-");
+            b.wire(k, "COIL-", q, "C"); b.wire(q, "E", g, "1");
+            b.wire(vin, "2", rb, "1"); b.wire(rb, "2", q, "B");
+            b.wire(vcc, "2", k, "C1"); b.wire(k, "C2", lamp, "1"); b.wire(lamp, "2", g, "1");
+            b.wire(vin, "1", g, "1"); b.wire(vcc, "1", g, "1");
+            b.vprobe(k, "COIL-", "V(coil)"); b.vprobe(lamp, "1", "V(lamp)");
+        }
+    },
+    {
+        id: "scr-lamp",
+        name: "SCR phase control (lamp)",
+        note: "An SCR fires part-way through each positive half-cycle and latches until the current falls. Press Play to see the lamp glow.",
+        settings: { tStop: "60m", tStep: "50u" },
+        build(b) {
+            const v = b.part("V", 100, 340, { rot: 270, sourceType: "AC", acMagnitude: 24, frequency: 50, dcOffset: 0, acPhase: 0 });
+            const lamp = b.part("LAMP", 320, 240, { vrated: "12", prated: "10", value: "12 V 10 W" });
+            const scr = b.part("SCR", 520, 340, { rot: 90, model: "C106D", value: "C106D" });
+            const vg = b.part("V", 300, 520, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 4, delay: 3e-3, rise: 1e-6, fall: 1e-6, width: 0.5e-3, period: 20e-3 } });
+            const rg = b.part("R", 440, 460, { value: "100 Ω" });
+            const g = b.part("GND", 520, 600);
+            b.wire(v, "2", lamp, "1"); b.wire(lamp, "2", scr, "A"); b.wire(scr, "K", g, "1");
+            b.wire(vg, "2", rg, "1"); b.wire(rg, "2", scr, "G");
+            b.wire(vg, "1", g, "1"); b.wire(v, "1", g, "1");
+            b.vprobe(lamp, "2", "V(scr)"); b.vprobe(v, "2", "V(in)");
+        }
+    },
+    {
+        id: "ripple-counter",
+        name: "3-bit ripple counter (flip-flops)",
+        note: "Three D flip-flops, each wired D = QN and clocked by the previous QN, divide a 1 kHz clock by 2, 4 and 8. Press Play.",
+        settings: { tStop: "10m", tStep: "10u" },
+        build(b) {
+            const ck = b.part("V", 100, 360, { rot: 270, sourceType: "SQUARE", gen: { low: 0, high: 5, freq: 1000, duty: 50 } });
+            const ff = [0, 1, 2].map(i => b.part("DFF", 340 + i * 280, 360, {}));
+            const g = b.part("GND", 100, 560);
+            b.wire(ck, "2", ff[0], "CLK"); b.wire(ck, "1", g, "1");
+            ff.forEach((f, i) => {
+                b.wire(f, "QN", f, "D");
+                if (i < 2) b.wire(f, "QN", ff[i + 1], "CLK");
+                const gs = b.part("GND", f.x - 20, 560); const gr = b.part("GND", f.x + 20, 620);
+                b.wire(f, "S", gs, "1"); b.wire(f, "R", gr, "1");
+            });
+            ff.forEach((f, i) => {
+                const r = b.part("R", f.x + 140, 460, { rot: 90, value: "10 kΩ" });
+                const gq = b.part("GND", f.x + 140, 580);
+                b.wire(f, "Q", r, "1"); b.wire(r, "2", gq, "1");
+                b.vprobe(f, "Q", `Q${i}`);
+            });
+        }
+    },
+    {
         id: "boost",
         name: "Boost converter (switching)",
         note: "5 V to about 9.7 V with an IRF540 switched at 50 kHz. Run Transient for 5 ms.",

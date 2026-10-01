@@ -17,6 +17,9 @@ class GraphWindow {
             <div class="graph-head">
                 <span id="graph-tabs" style="display:flex;gap:2px"></span>
                 <span class="grow"></span>
+                <select id="acScale" class="hidden" title="Frequency response display">
+                    <option value="db">Gain dB + phase</option><option value="linear">Linear magnitude</option>
+                </select>
                 <span id="plotTitle">No simulation run yet</span>
                 <button class="tb-btn" id="graph-sim" title="Simulate (analysis for this tab)">${Icons.svg("play")}</button>
                 <button class="tb-btn" id="zoomInBtn" title="Zoom in">${Icons.svg("zoomin")}</button>
@@ -41,6 +44,7 @@ class GraphWindow {
             this.tabsEl.appendChild(t);
         });
 
+        root.querySelector("#acScale").onchange = (e) => plotter.setACScale(e.target.value);
         root.querySelector("#graph-sim").onclick = () => this.simulate();
         root.querySelector("#graph-close").onclick = () => this.hide();
         root.querySelector("#zoomInBtn").onclick = () => { plotter.zoomX *= 1.2; plotter.zoomY *= 1.2; plotter.draw(); };
@@ -72,6 +76,7 @@ class GraphWindow {
         this.root.classList.remove("hidden");
         this.tabsEl.querySelectorAll(".graph-tab").forEach(t => t.classList.toggle("active", t.dataset.id === kind));
         this.root.querySelector("#dcResults").classList.toggle("hidden", kind !== "dc");
+        this.root.querySelector("#acScale").classList.toggle("hidden", kind !== "ac");
         this.root.querySelector("#graph-sim").style.visibility = kind === "live" ? "hidden" : "visible";
         this.editor.resize();
         this.plotter.resize();

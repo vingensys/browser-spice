@@ -146,7 +146,7 @@ const ShortcutsDialog = {
             ["Wire", "Click or drag from a pin; click a pin or wire to finish; Esc cancels"],
             ["Select / move", "Click, Shift-click, drag a box; drag parts to move them"],
             ["Edit a part", "Double-click it, or Ctrl+E"],
-            ["Rotate", "R"], ["Delete", "Del"], ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
+            ["Rotate / mirror", "R / X (left-right) / Y (top-bottom)"], ["Delete", "Del"], ["Undo / Redo", "Ctrl+Z / Ctrl+Y"],
             ["Copy / Cut / Paste", "Ctrl+C / Ctrl+X / Ctrl+V"], ["Select all", "Ctrl+A"],
             ["Zoom", "Mouse wheel, or + / −"], ["Fit to sheet contents", "F"], ["Pan", "Space-drag or middle-drag"],
             ["Tidy wires", "T"], ["Pick devices", "P"],

@@ -14,7 +14,20 @@ class SymbolRenderer {
         ctx.save();
         ctx.translate(component.x, component.y);
         ctx.rotate((component.rotation * Math.PI) / 180);
+        if (component.mirror) ctx.scale(-1, 1);
         if (ghost) ctx.globalAlpha = 0.55;
+
+        // text inside a mirrored symbol must stay readable: un-mirror each fillText in place
+        const plainFill = ctx.fillText;
+        if (component.mirror) {
+            ctx.fillText = function (t, x, y, w) {
+                const m = this.getTransform();
+                if (m.a * m.d - m.b * m.c >= 0) return plainFill.call(this, t, x, y, w);
+                this.save(); this.translate(x, y); this.scale(-1, 1);
+                plainFill.call(this, t, 0, 0, w);
+                this.restore();
+            };
+        }
 
         if (!ghost && this.isSelected(component)) {
             ctx.strokeStyle = this.col("#6ea8fe");
@@ -50,6 +63,8 @@ class SymbolRenderer {
             case "NAND":
             case "NOR":
             case "XOR":
+            case "XNOR":
+            case "BUF":
                 this.drawLogicGate(component);
                 break;
             case "GND": this.drawGround(component); break;
@@ -57,6 +72,7 @@ class SymbolRenderer {
             case "VM": this.drawMeter(component, "V"); break;
             case "AM": this.drawMeter(component, "A"); break;
             case "SCOPE": this.drawScope(component); break;
+            default: this.drawPart(component);
         }
 
         // Unconnected pins show as red rings (Proteus-style); wired pins are hidden
@@ -77,7 +93,14 @@ class SymbolRenderer {
             ctx.fillRect(bx1, by1, bx2 - bx1, by2 - by1);
         }
 
+        if (component.mirror) delete ctx.fillText;
         ctx.restore();
+    }
+
+    // undo the part's rotation (and mirror) so text drawn next reads normally
+    upright(component) {
+        if (component.mirror) this.ctx.scale(-1, 1);
+        this.ctx.rotate((-component.rotation * Math.PI) / 180);
     }
 
     drawResistor(component) {
@@ -331,7 +354,7 @@ class SymbolRenderer {
         ctx.fillText("+", -12, -14);
 
         ctx.save();
-        ctx.rotate((-component.rotation * Math.PI) / 180);
+        this.upright(component);
         ctx.font = "bold 12px Consolas, monospace";
         ctx.fillStyle = component.live !== undefined ? this.tok("probeV") : this.tok("value");
         ctx.textAlign = "center";
@@ -644,7 +667,7 @@ class SymbolRenderer {
         ctx.strokeStyle = this.col("#f1fa8c");
         ctx.lineWidth = this.lw(3);
 
-        const isNot = component.type === "NOT";
+        const isNot = component.type === "NOT" || component.type === "BUF";
         if (isNot) {
             ctx.beginPath();
             ctx.moveTo(-40, 0);
@@ -660,9 +683,15 @@ class SymbolRenderer {
             ctx.closePath();
             ctx.stroke();
 
-            ctx.beginPath();
-            ctx.arc(18, 0, 4, 0, Math.PI * 2);
-            ctx.stroke();
+            if (component.type === "NOT") {
+                ctx.beginPath();
+                ctx.arc(18, 0, 4, 0, Math.PI * 2);
+                ctx.stroke();
+            } else {
+                ctx.beginPath();
+                ctx.moveTo(15, 0); ctx.lineTo(20, 0);
+                ctx.stroke();
+            }
 
             this.drawTerminal(-40, 0);
             this.drawTerminal(40, 0);
@@ -711,7 +740,7 @@ class SymbolRenderer {
         this.drawTerminal(0, -15);
 
         ctx.save();
-        ctx.rotate((-component.rotation * Math.PI) / 180);
+        this.upright(component);
         ctx.font = "12px system-ui";
         ctx.fillStyle = this.col("#e8edf5");
         ctx.textAlign = "center";
@@ -733,7 +762,7 @@ class SymbolRenderer {
         const top = b.y1 - component.y, bottom = b.y2 - component.y;
 
         ctx.save();
-        ctx.rotate((-component.rotation * Math.PI) / 180);
+        this.upright(component);
         ctx.textBaseline = "alphabetic";
 
         // after un-rotating, local axes are world axes, so the world-space box applies directly

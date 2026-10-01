@@ -1,0 +1,11 @@
+Transformer, resistive load
+VIN in 0 SIN(0 10 1k) AC 1
+RP in p 2
+L1 p 0 0.1
+L2 s 0 0.4
+K1 L1 L2 0.998
+RL s 0 2k
+.op
+.ac dec 10 100 100k
+.tran 5u 5m
+.end

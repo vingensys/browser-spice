@@ -260,10 +260,15 @@ class NetlistExtractor {
                     });
                     break;
                 }
-                case "AND": case "OR": case "NOT": case "NAND": case "NOR": case "XOR": {
+                case "AND": case "OR": case "NOT": case "NAND": case "NOR": case "XOR": case "XNOR": case "BUF": {
                     const vcc = comp.vcc !== undefined && comp.vcc !== "" ? Units.parseSI(comp.vcc) : 5;
-                    const inputs = comp.type === "NOT" ? [pin("A")] : [pin("A"), pin("B")];
+                    const inputs = comp.type === "NOT" || comp.type === "BUF" ? [pin("A")] : [pin("A"), pin("B")];
                     els.push({ ...base, kind: "GATE", gate: comp.type, nodes: [...inputs, pin("Y")], params: { vcc } });
+                    break;
+                }
+                default: {
+                    const part = typeof PartLib !== "undefined" && PartLib.defs[comp.type];
+                    if (part && part.netlist) els.push(...part.netlist(comp, PartLib.kit(comp, nets, P)));
                     break;
                 }
                 case "IC555":
@@ -301,6 +306,34 @@ class NetlistExtractor {
             for (let i = 0; i + 1 < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
             params.pwl = pts;
             params.acMag = stim;
+        } else if (sourceType === "EXP") {
+            const x = comp.exp || {};
+            params.exp = {
+                v1: Units.parseSI(x.v1) || 0, v2: x.v2 === undefined ? 5 : Units.parseSI(x.v2),
+                td1: Units.parseSI(x.td1) || 0, tau1: x.tau1 === undefined ? 1e-3 : Units.parseSI(x.tau1),
+                td2: x.td2 === undefined ? 5e-3 : Units.parseSI(x.td2), tau2: x.tau2 === undefined ? 1e-3 : Units.parseSI(x.tau2)
+            };
+            params.acMag = stim;
+        } else if (sourceType === "SFFM") {
+            const x = comp.sffm || {};
+            params.sffm = {
+                vo: Units.parseSI(x.vo) || 0, va: x.va === undefined ? 1 : Units.parseSI(x.va),
+                fc: x.fc === undefined ? 10e3 : Units.parseSI(x.fc), mdi: x.mdi === undefined ? 5 : Units.parseSI(x.mdi),
+                fs: x.fs === undefined ? 1e3 : Units.parseSI(x.fs)
+            };
+            params.acMag = stim;
+        } else if (sourceType === "SQUARE" || sourceType === "TRIANGLE" || sourceType === "SAWTOOTH") {
+            // function-generator shapes are pulse trains: square (duty cycle), triangle, ramp
+            const g = comp.gen || {};
+            const lo = Units.parseSI(g.low) || 0, hi = g.high === undefined ? 5 : Units.parseSI(g.high);
+            const f = Math.max(g.freq === undefined ? 1000 : Units.parseSI(g.freq), 1e-6), per = 1 / f;
+            const duty = Math.min(0.99, Math.max(0.01, (g.duty === undefined ? 50 : Units.parseSI(g.duty)) / 100));
+            const edge = Math.min(per * 1e-4, 1e-6);
+            params.sourceType = "PULSE";
+            if (sourceType === "SQUARE") params.pulse = { v1: lo, v2: hi, delay: 0, rise: edge, fall: edge, width: per * duty - edge, period: per };
+            else if (sourceType === "TRIANGLE") params.pulse = { v1: lo, v2: hi, delay: 0, rise: per / 2, fall: per / 2, width: 0, period: per };
+            else params.pulse = { v1: lo, v2: hi, delay: 0, rise: per - edge, fall: edge, width: 0, period: per };
+            params.acMag = stim;
         } else if (sourceType === "PULSE") {
             const p = comp.pulse || {};
             params.pulse = {
@@ -334,6 +367,8 @@ class NetlistExtractor {
                     if (p.sourceType === "AC") wave = Waveform.sin(p.sin);
                     else if (p.sourceType === "PULSE") wave = Waveform.pulse(p.pulse);
                     else if (p.sourceType === "PWL") wave = Waveform.pwl(p.pwl);
+                    else if (p.sourceType === "EXP") wave = Waveform.exp(p.exp);
+                    else if (p.sourceType === "SFFM") wave = Waveform.sffm(p.sffm);
                     else wave = Waveform.dc(p.dc);
                     c.add(new VoltageSource(e.name, e.nodes, { wave, acMag: p.acMag || 0, acPhase: p.acPhase || 0 }));
                     break;
@@ -343,6 +378,8 @@ class NetlistExtractor {
                     if (p.sourceType === "AC") wave = Waveform.sin(p.sin);
                     else if (p.sourceType === "PULSE") wave = Waveform.pulse(p.pulse);
                     else if (p.sourceType === "PWL") wave = Waveform.pwl(p.pwl);
+                    else if (p.sourceType === "EXP") wave = Waveform.exp(p.exp);
+                    else if (p.sourceType === "SFFM") wave = Waveform.sffm(p.sffm);
                     else wave = Waveform.dc(p.dc);
                     c.add(new CurrentSource(e.name, e.nodes, { wave, acMag: p.acMag || 0, acPhase: p.acPhase || 0 }));
                     break;
@@ -356,6 +393,13 @@ class NetlistExtractor {
                 case "OPAMP": c.add(new OpAmp(e.name, e.nodes, p)); break;
                 case "GATE": c.add(new LogicGate(e.name, e.nodes, e.gate, p)); break;
                 case "555": c.add(new Timer555(e.name, e.nodes, p)); break;
+                case "J": c.add(new JFET(e.name, [e.nodes[0], e.nodes[1], e.nodes[2]], e.pol, p)); break;
+                case "T": c.add(new Transformer(e.name, e.nodes, p)); break;
+                case "RLY": c.add(new Relay(e.name, e.nodes, p)); break;
+                case "FUSE": c.add(new Fuse(e.name, e.nodes, p)); break;
+                case "SCR": case "TRIAC": c.add(new Thyristor(e.name, e.nodes, p)); break;
+                case "REG": c.add(new Regulator(e.name, e.nodes, p)); break;
+                case "FF": c.add(new FlipFlop(e.name, e.nodes, e.ff, p)); break;
             }
         }
         return c;
@@ -408,7 +452,7 @@ class NetlistExtractor {
 
     static spiceName(e) {
         const clean = (s) => String(s).replace(/[^A-Za-z0-9_]/g, "_");
-        const prefix = { R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", SW: "R", D: "D", Q: "Q", M: "M", OPAMP: "X", GATE: "B", "555": "X" }[e.kind];
+        const prefix = { R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", SW: "R", D: "D", Q: "Q", M: "M", OPAMP: "X", GATE: "B", "555": "X", J: "J" }[e.kind] || "X";
         const n = clean(e.name);
         return n.toUpperCase().startsWith(prefix) ? n : `${prefix}${n}`;
     }
@@ -447,6 +491,12 @@ class NetlistExtractor {
                         spec = `SIN(${f(s.offset)} ${f(s.amp)} ${f(s.freq)} 0 0 ${f(s.phase)}) AC ${f(s.amp)}`;
                     } else if (p.sourceType === "PWL") {
                         spec = `PWL(${p.pwl.map(pt => `${f(pt[0])} ${f(pt[1])}`).join(" ")})${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
+                    } else if (p.sourceType === "EXP") {
+                        const q = p.exp;
+                        spec = `EXP(${f(q.v1)} ${f(q.v2)} ${f(q.td1)} ${f(q.tau1)} ${f(q.td2)} ${f(q.tau2)})${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
+                    } else if (p.sourceType === "SFFM") {
+                        const q = p.sffm;
+                        spec = `SFFM(${f(q.vo)} ${f(q.va)} ${f(q.fc)} ${f(q.mdi)} ${f(q.fs)})${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
                     } else if (p.sourceType === "PULSE") {
                         const q = p.pulse;
                         spec = `PULSE(${f(q.v1)} ${f(q.v2)} ${f(q.delay)} ${f(q.rise)} ${f(q.fall)} ${f(q.width)} ${f(q.period)})${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
@@ -489,6 +539,8 @@ class NetlistExtractor {
                         case "OR": expr = `${vcc}*(1-(1-${u(n[0])})*(1-${u(n[1])}))`; break;
                         case "NOR": expr = `${vcc}*(1-${u(n[0])})*(1-${u(n[1])})`; break;
                         case "XOR": expr = `${vcc}*(${u(n[0])}+${u(n[1])}-2*${u(n[0])}*${u(n[1])})`; break;
+                        case "XNOR": expr = `${vcc}*(1-(${u(n[0])}+${u(n[1])}-2*${u(n[0])}*${u(n[1])}))`; break;
+                        case "BUF": expr = `${vcc}*${u(n[0])}`; break;
                         default: expr = `${vcc}*(1-${u(n[0])})`; break;
                     }
                     // same 10 ns lag and 50 ohm output as the built-in model: ideal gate -> RC -> buffer -> Ro
@@ -501,6 +553,47 @@ class NetlistExtractor {
                     lines.push(`R${name}_O ${name}_o ${out} 50`);
                     break;
                 }
+                case "J":
+                    models.set(e.model, { kind: e.modelKind, params: p });
+                    lines.push(`${name} ${n[1]} ${n[0]} ${n[2]} ${e.model}`); // drain gate source
+                    break;
+                case "T": {
+                    // two coupled inductors; winding resistances go in series with the pins
+                    const nm = String(e.name).replace(/[^A-Za-z0-9_]/g, "_");
+                    const l2 = p.l1 * p.ratio * p.ratio;
+                    const pa = p.rp > 0 ? `${nm}_p` : n[0], sa = p.rs > 0 ? `${nm}_s` : n[2];
+                    if (p.rp > 0) lines.push(`R${nm}_P ${n[0]} ${pa} ${f(p.rp)}`);
+                    if (p.rs > 0) lines.push(`R${nm}_S ${n[2]} ${sa} ${f(p.rs)}`);
+                    lines.push(`L${nm}_P ${pa} ${n[1]} ${f(p.l1)}`, `L${nm}_S ${sa} ${n[3]} ${f(l2)}`, `K${nm} L${nm}_P L${nm}_S ${f(p.k)}`);
+                    break;
+                }
+                case "RLY": {
+                    // coil: R + L; the contact is a voltage-controlled switch across the coil resistor
+                    const nm = String(e.name).replace(/[^A-Za-z0-9_]/g, "_");
+                    const vt = (p.pull + p.drop) / 2 * p.rcoil, vh = (p.pull - p.drop) / 2 * p.rcoil;
+                    lines.push(`R${nm}_C ${n[0]} ${nm}_m ${f(p.rcoil)}`, `L${nm}_C ${nm}_m ${n[1]} ${f(p.lcoil)}`,
+                        `S${nm} ${n[2]} ${n[3]} ${n[0]} ${nm}_m SW_${nm}`);
+                    extra.push(`.model SW_${nm} SW(VT=${f(vt)} VH=${f(vh)} RON=${f(p.ron || 0.05)} ROFF=${f(p.roff || 1e9)})`);
+                    break;
+                }
+                case "FUSE":
+                    lines.push(`* ${e.name}: fuse (blows at I2t > ${f(p.rating * p.rating * p.tm)} A2s in the built-in simulator), exported as its cold resistance`);
+                    lines.push(`R${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} ${f(p.r)}`);
+                    break;
+                case "REG": {
+                    // behavioural pass element: smooth-min of the set voltage and (input - dropout)
+                    const nm = String(e.name).replace(/[^A-Za-z0-9_]/g, "_");
+                    const neg = p.vout < 0, a = Math.abs(p.vout);
+                    const b = neg ? `(V(${n[2]})-V(${n[0]})-${f(p.dropout)})` : `(V(${n[0]})-V(${n[2]})-${f(p.dropout)})`;
+                    const sm = `0.5*(${f(a)}+${b}-sqrt((${f(a)}-${b})*(${f(a)}-${b})+0.0025))`;
+                    lines.push(`B${nm}_T ${nm}_o 0 V=V(${n[2]})${neg ? "-" : "+"}${sm}`,
+                        `R${nm}_O ${nm}_o ${n[1]} ${f(p.ro)}`,
+                        `B${nm}_I ${n[0]} ${n[2]} I=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}+${f(p.iq)}`);
+                    break;
+                }
+                case "SCR": case "TRIAC": case "FF":
+                    lines.push(`* ${e.name}: ${e.kind === "FF" ? "flip-flop" : e.kind} has no SPICE model in this export (built-in simulator only)`);
+                    break;
                 case "555":
                     uses555 = true;
                     // pins: GND TRIG OUT RESET VCC DISCH THRES CTRL
@@ -509,7 +602,9 @@ class NetlistExtractor {
             }
         }
 
-        if (extra.length) lines.push("", "* op-amp supply rails", ...extra);
+        const rails = extra.filter(l => !l.startsWith(".model")), swModels = extra.filter(l => l.startsWith(".model"));
+        if (rails.length) lines.push("", "* op-amp supply rails", ...rails);
+        if (swModels.length) lines.push("", "* relay contact models", ...swModels);
 
         if (models.size) {
             lines.push("", "* device models");

@@ -27,7 +27,7 @@ The classic cream-sheet theme is the default; **View > Theme** switches to dark.
 | Edit a part | Double-click it or **Ctrl+E**: the Edit Component dialog (name, values, models, waveforms). **OK** keeps, **Cancel** reverts. |
 | Zoom / pan | Wheel, **Space**-drag or middle-drag, **F** fits, **Ctrl+0** resets. The overview pane also pans. |
 
-Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...).
+Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** rotates and **X** / **Y** mirror left-right / top-bottom (Edit menu, rotate toolbar, also on the placement ghost); wires follow.
 
 **Simulating**
 
@@ -39,7 +39,7 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...).
 - **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
 - **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
-- **Examples** menu: rectifier, LED, zener regulator, CE amplifier, op-amp, 555 oscillator, boost converter.
+- **Examples** menu: rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter.
 
 **Interchange**
 
@@ -49,14 +49,20 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...).
 
 ## What is simulated
 
-R, C, L, voltage and current sources (DC / sine / pulse / piecewise-linear, with an AC-sweep
-magnitude), VCVS and VCCS, ideal switch, potentiometer, per-node initial-condition flags, diode, LED, zener, NPN / PNP BJT, N / P
-MOSFET (level 1 with body diode, gate capacitance and series RD / RS), op-amp (single pole, rail clamp), logic
-gates (with propagation delay), NE555. Part models are standard SPICE parameter sets (1N4148,
-1N4007, 2N2222, 2N3904, 2N7000, IRF540, LM741, ...); `.model` cards from vendor files can be
-imported (Import SPICE with a model-only file) and are remembered between sessions.
+R, C (and polarised electrolytics with ESR), L, transformers (coupled inductors, SPICE `K`), voltage and current sources, VCVS / VCCS,
+ideal switch, potentiometer, per-node initial-condition flags, diodes (rectifier, Schottky, fast, LED, zener, bridge rectifier),
+NPN / PNP BJTs, N / P MOSFETs (level 1 with body diode, gate capacitance, series RD / RS), N / P JFETs, op-amps (single pole, rail clamp),
+logic gates (AND OR NOT NAND NOR XOR XNOR BUF, with propagation delay), D / T / JK flip-flops (rising edge, async set / reset), NE555,
+SCR and TRIAC (latching, gate trigger, holding current), relay (coil + contact with pull-in / drop-out), fuse (blows on I²t),
+voltage regulators (78xx, 79xx, LM317 / LM337, LDOs with dropout), lamp, buzzer, motor, crystal, battery, 7-segment display.
 
-**Analyses**: operating point, DC sweep, transient (with UIC / `.ic`), AC small-signal, and a
+**Sources**: DC, sine, pulse, square / clock (duty cycle), triangle, sawtooth, exponential (`EXP`), frequency-modulated (`SFFM`), piecewise-linear; current sources too.
+
+**Library**: about 190 named parts, with parameters taken from public vendor SPICE models and datasheets (see the comments in
+`js/sim/models-extra.js` for sources and what was fitted). Pick them with **P**. `.model` cards from vendor files can be imported
+(Import SPICE with a model-only file, NJF / PJF included) and are remembered between sessions.
+
+**Analyses**: operating point, DC sweep, transient (with UIC / `.ic`), AC small-signal (shown as gain in dB over unwrapped phase, or linear magnitude), and a
 temperature setting (`.temp`) that scales junction currents the way SPICE does.
 
 The engine (`js/sim`) is a SPICE-style solver: modified nodal analysis, Newton-Raphson with
@@ -67,8 +73,8 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 
 ## Layout
 
-- `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `models`, `model-library`, `engine`, `spice-parser`, `ngspice-backend`
-- `js/cad/` editor internals: `symbols` (pins and bodies), `router` (A* + rubber-band repair), `symbol-draw`
+- `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops), `models`, `models-extra` / `models-parts` (library), `model-library`, `engine`, `spice-parser`, `ngspice-backend`
+- `js/cad/` editor internals: `symbols` (pins and bodies), `parts` (the added parts: symbol, properties, netlist, library entries), `router` (A* + rubber-band repair), `symbol-draw`
 - `js/visualization/` schematic editor and waveform plotter
 - `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
 - `js/ui/` the ISIS-style shell: `theme`, `commands` (one registry for menus, toolbars and keys), `menubar`, `toolbars`, `statusbar`, `overview`, `device-list` + `catalog` (device pane, Pick Devices), `dialogs`, `graph-window`, `live-sim`, `properties`, `sim-runner`, `spice-import`, `icons`
@@ -81,9 +87,9 @@ npm test             # engine, ngspice cross-check (needs ngspice on PATH), ngsp
 SPARSE=1 npm test    # the same with the sparse solver forced on for every circuit
 ```
 
-- `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import (46 checks).
+- `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import, the added parts (58 checks).
 - `tests/ngspice.test.js` runs `tests/decks/*.cir` (diodes, BJT / MOS amplifiers, rectifiers, CMOS, controlled
-  sources, PWL / `.param`, `.ic`, `.temp`, MOSFET RD/RS) through the engine **and** native ngspice and compares operating
+  sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
 
@@ -96,6 +102,7 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/roundtrip.js')).text());   await roundtripTests(); // SPICE -> schematic -> sim
 (0, eval)(await (await fetch('tests/engines.js')).text());     await engineTests();    // built-in vs ngspice-WASM
 (0, eval)(await (await fetch('tests/ui.js')).text());          await uiTests();       // menus, dialogs, device list, live simulation
+(0, eval)(await (await fetch('tests/parts.js')).text());       await partsTests();    // part library, mirror / flip, sources, exports, live displays
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each

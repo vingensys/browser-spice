@@ -20,7 +20,8 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 | Interop | SPICE `.cir` export (models, op-amp and 555 macros, PWL, controlled sources) and import (into an editable schematic, `.param`, `.ic`); vendor `.model` libraries; ngspice-WASM backend |
 | Shell | Proteus ISIS-style UI: menus, toolbars, overview, mode bar + device list, Pick Devices, Edit Component, graph window, status-bar transport, classic and dark themes |
 | Live simulation | Play / pause / step / stop with probes, voltmeters, ammeters, on-sheet scope; interactive switches and pots |
-| Examples | 11 working circuits with probes |
+| Parts | Transformer, relay, fuse, JFET, SCR / TRIAC, regulators, flip-flops, 7-segment, lamp / buzzer / motor / crystal, researched vendor library |
+| Examples | 16 working circuits with probes |
 
 ## Next, in order
 
@@ -29,8 +30,8 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
   and show node voltages on wires (colour / labels).
 - **Virtual instruments**: oscilloscope, function generator, DC voltmeter / ammeter, logic
   analyser as placeable parts (the plot panel becomes the scope).
-- **More parts**: current source, potentiometer, switch / relay, transformer, fuse, LED
-  brightness, 7-segment, buzzer, crystal, JFET, SCR / TRIAC, voltage regulators, more op-amps.
+- **More parts** (done: relay, transformer, fuse, JFET, SCR / TRIAC, regulators, 7-segment, crystal, buzzer). Still to do: LED brightness,
+  counters / shift registers / 74xx, microcontroller model, Darlingtons, optocouplers, more op-amps.
 - **Digital + mixed-signal**: event-driven logic (flip-flops, counters, shift registers,
   74xx, simple microcontroller model) bridged to the analog solver.
 - **Analyses**: DC sweep UI, parametric sweep, Monte Carlo, temperature, noise, Fourier, Bode
@@ -47,7 +48,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 
 ### 3. Schematic capture polish
 - Buses, net labels, power ports, off-sheet connectors, hierarchical sheets.
-- Mirror / flip, AC plots in dB and phase, text and graphic annotations, title block, design-rule / ERC checks
+- Text and graphic annotations, title block, design-rule / ERC checks
   (floating pins, shorted outputs, missing supply, duplicate names).
 - Auto-annotation, cross-probing (click a net, see it everywhere), net highlighting.
 - Move wire segments with neighbours, "drag" mode that keeps wires attached, snap-to-pin.

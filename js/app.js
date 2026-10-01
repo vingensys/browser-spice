@@ -128,6 +128,8 @@
     C("edit.selectall", "Select All", { keys: "Ctrl+A", run: () => editor.selectAll() });
     C("edit.rotate", "Rotate Clockwise", { icon: "rotate", keys: "R", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(1) });
     C("edit.rotateccw", "Rotate Anti-clockwise", { icon: "rotateccw", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(3) });
+    C("edit.mirrorx", "Mirror Left-Right", { icon: "mirrorx", keys: "X", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => editor.mirrorSelected("x") });
+    C("edit.mirrory", "Mirror Top-Bottom", { icon: "mirrory", keys: "Y", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => editor.mirrorSelected("y") });
     C("edit.properties", "Edit Properties…", { keys: "Ctrl+E", global: true, enabled: () => !!editor.selected, run: () => editor.onEdit(editor.selected) });
     C("edit.tidy", "Tidy Wires", { icon: "tidy", keys: "T", run() {
         if (!editor.wires.length) return;
@@ -190,7 +192,7 @@
 
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
-        { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.rotate", "edit.rotateccw", "edit.properties", "edit.tidy"] },
+        { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.rotate", "edit.rotateccw", "edit.mirrorx", "edit.mirrory", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.vprobe", "tool.iprobe"] },
         { title: "Design", items: ["design.settings", "design.erc"] },
@@ -209,7 +211,7 @@
     ]);
 
     // rotate buttons under the device list, as in ISIS
-    new Toolbar($("rotbar"), ["edit.rotate", "edit.rotateccw"]);
+    new Toolbar($("rotbar"), ["edit.rotate", "edit.rotateccw", "edit.mirrorx", "edit.mirrory"]);
 
     // ---------------------------------------------------------------- mode toolbar
 
@@ -277,7 +279,7 @@
     // ---------------------------------------------------------------- context menu
 
     const ctx = $("contextMenu");
-    const ctxEntries = ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "-", "edit.rotate", "edit.properties", "edit.tidy", "-", "tool.wire", "tool.vprobe", "tool.iprobe"];
+    const ctxEntries = ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "-", "edit.rotate", "edit.mirrorx", "edit.properties", "edit.tidy", "-", "tool.wire", "tool.vprobe", "tool.iprobe"];
     window.showContextMenu = (e) => {
         ctx.innerHTML = "";
         for (const id of ctxEntries) {

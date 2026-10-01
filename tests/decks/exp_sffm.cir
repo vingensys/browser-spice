@@ -1,0 +1,10 @@
+EXP and SFFM sources into RC loads
+V1 a 0 EXP(0 5 0.2m 0.3m 2m 0.5m)
+R1 a b 1k
+C1 b 0 200n
+V2 c 0 SFFM(1 0.5 5k 3 500)
+R2 c d 2k
+C2 d 0 20n
+.op
+.tran 2u 5m
+.end

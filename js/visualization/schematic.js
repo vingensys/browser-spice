@@ -24,6 +24,7 @@ class SchematicEditor {
 
         this.tool = "select";
         this.placeRotation = 0;
+        this.placeMirror = false;
         this.placeProps = null;   // properties copied onto each part placed from the device list
 
         // View
@@ -419,6 +420,7 @@ class SchematicEditor {
         this.tool = tool;
         this.placeProps = props;
         this.placeRotation = 0;
+        this.placeMirror = false;
         this.hoverSnap = null;
         this.hoverTarget = null;
         if (tool !== "select") this.selectedWire = null;
@@ -473,7 +475,7 @@ class SchematicEditor {
     static REF_PREFIX = {
         R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", D: "D", DZ: "D", LED: "D",
         BJT_NPN: "Q", BJT_PNP: "Q", NMOS: "Q", PMOS: "Q", OPAMP: "U", IC555: "U",
-        AND: "U", OR: "U", NOT: "U", NAND: "U", NOR: "U", XOR: "U",
+        AND: "U", OR: "U", NOT: "U", NAND: "U", NOR: "U", XOR: "U", XNOR: "U", BUF: "U",
         SW: "SW", POT: "RV", VM: "VM", AM: "AM", SCOPE: "OSC", NODEIC: "IC"
     };
 
@@ -530,6 +532,11 @@ class SchematicEditor {
         const spot = this.findFreeSpot(component, x, y);
         component.x = spot.x;
         component.y = spot.y;
+        const part = typeof PartLib !== "undefined" && PartLib.defs[type];
+        if (part) {
+            Object.assign(component, PartLib.defaults(type));
+            if (!component.model && part.value) component.value = part.value;
+        }
 
         this.components.push(component);
         this.refreshWires();
@@ -539,11 +546,12 @@ class SchematicEditor {
 
     placeAt(x, y) {
         const gx = this.snap(x), gy = this.snap(y);
-        const probe = { type: this.tool, x: gx, y: gy, rotation: this.placeRotation };
+        const probe = { type: this.tool, x: gx, y: gy, rotation: this.placeRotation, mirror: this.placeMirror };
         if (!this.isPlacementFree(probe, gx, gy, this.placeRotation)) return null;
 
         this.saveState();
         const comp = this.addComponent(this.tool, gx, gy, this.placeRotation);
+        if (this.placeMirror) comp.mirror = true;
         if (this.placeProps) Object.assign(comp, JSON.parse(JSON.stringify(this.placeProps)));
         this.draw();
         return comp;
@@ -578,6 +586,41 @@ class SchematicEditor {
             p.c.x = p.x;
             p.c.y = p.y;
             p.c.rotation = p.rotation;
+        }
+        this.refreshWires();
+        this.draw();
+    }
+
+    // axis "x" mirrors left-right, "y" top-bottom. Each part flips about its own centre
+    // (a group flips about the group's centre); top-bottom is mirror + 180 degrees.
+    mirrorSelected(axis = "x") {
+        if (!this.selection.length) {
+            if (this.isPlacing()) {
+                if (axis === "x") this.placeMirror = !this.placeMirror;
+                else { this.placeMirror = !this.placeMirror; this.placeRotation = (this.placeRotation + 180) % 360; }
+                this.draw();
+            }
+            return;
+        }
+        const xs = this.selection.map(c => c.x), ys = this.selection.map(c => c.y);
+        const px = this.snap((Math.min(...xs) + Math.max(...xs)) / 2);
+        const py = this.snap((Math.min(...ys) + Math.max(...ys)) / 2);
+        const single = this.selection.length === 1;
+
+        const poses = this.selection.map(c => {
+            let x = c.x, y = c.y;
+            if (!single) { if (axis === "x") x = 2 * px - c.x; else y = 2 * py - c.y; }
+            const rotation = axis === "x" ? c.rotation : (c.rotation + 180) % 360;
+            return { c, x, y, rotation, mirror: !c.mirror };
+        });
+        const sel = new Set(this.selection);
+        for (const p of poses) {
+            const probe = { type: p.c.type, mirror: p.mirror };
+            if (!this.isPlacementFree(probe, p.x, p.y, p.rotation, sel)) return;
+        }
+        this.saveState();
+        for (const p of poses) {
+            p.c.x = p.x; p.c.y = p.y; p.c.rotation = p.rotation; p.c.mirror = p.mirror;
         }
         this.refreshWires();
         this.draw();
@@ -623,7 +666,9 @@ class SchematicEditor {
         return SYMBOL_DEFS[component.type] || SYMBOL_DEFS.R;
     }
 
-    rotateOffset(x, y, rotation) {
+    // mirror flips the symbol left-right before it is rotated (Proteus "mirror X")
+    rotateOffset(x, y, rotation, mirror = false) {
+        if (mirror) x = -x;
         switch (((rotation % 360) + 360) % 360) {
             case 90: return { x: -y, y: x };
             case 180: return { x: -x, y: -y };
@@ -639,12 +684,12 @@ class SchematicEditor {
     }
 
     getTerminalPosition(component, terminal) {
-        const o = this.rotateOffset(terminal.x, terminal.y, component.rotation);
+        const o = this.rotateOffset(terminal.x, terminal.y, component.rotation, component.mirror);
         return { x: component.x + o.x, y: component.y + o.y };
     }
 
     getTerminalDirection(component, terminal) {
-        return this.rotateOffset(terminal.dir.x, terminal.dir.y, component.rotation);
+        return this.rotateOffset(terminal.dir.x, terminal.dir.y, component.rotation, component.mirror);
     }
 
     // World-space body rectangle. Its interior is solid: wires may run along the
@@ -652,7 +697,7 @@ class SchematicEditor {
     getComponentBox(component, pose = component) {
         const [bx1, by1, bx2, by2] = this.getSymbolDef(component).box;
         const corners = [[bx1, by1], [bx2, by1], [bx2, by2], [bx1, by2]]
-            .map(([x, y]) => this.rotateOffset(x, y, pose.rotation));
+            .map(([x, y]) => this.rotateOffset(x, y, pose.rotation, pose.mirror));
         return {
             x1: pose.x + Math.min(...corners.map(c => c.x)),
             x2: pose.x + Math.max(...corners.map(c => c.x)),
@@ -674,14 +719,14 @@ class SchematicEditor {
     // front of it) may land on a foreign body. That keeps every pin escapable, so
     // wires can always leave and the router never gets boxed in.
     isPlacementFree(component, x, y, rotation, ignore = null) {
-        const pose = { type: component.type, x, y, rotation };
+        const pose = { type: component.type, x, y, rotation, mirror: !!component.mirror };
         const box = this.getComponentBox(pose, pose);
         const g = this.gridSize;
         const inClosed = (px, py, b) => px >= b.x1 && px <= b.x2 && py >= b.y1 && py <= b.y2;
 
         const pinNodes = (c, p) => this.getTerminals(c).flatMap(t => {
-            const o = this.rotateOffset(t.x, t.y, p.rotation);
-            const d = this.rotateOffset(t.dir.x, t.dir.y, p.rotation);
+            const o = this.rotateOffset(t.x, t.y, p.rotation, p.mirror);
+            const d = this.rotateOffset(t.dir.x, t.dir.y, p.rotation, p.mirror);
             const px = p.x + o.x, py = p.y + o.y;
             return [{ x: px, y: py }, { x: px + d.x * g, y: py + d.y * g }];
         });
@@ -1320,6 +1365,12 @@ class SchematicEditor {
             return;
         }
 
+        if ((key === "x" || key === "y") && !event.ctrlKey && !event.metaKey) {
+            event.preventDefault();
+            this.mirrorSelected(key);
+            return;
+        }
+
         if (key === "f" || key === "home") {
             this.fitView();
             return;
@@ -1590,7 +1641,7 @@ class SchematicEditor {
         if (!this.isPlacing() || !this.mouseInside) return;
         const x = this.snap(this.mouse.x);
         const y = this.snap(this.mouse.y);
-        const ghost = { id: -1, type: this.tool, x, y, rotation: this.placeRotation, name: "", value: "" };
+        const ghost = { id: -1, type: this.tool, x, y, rotation: this.placeRotation, mirror: this.placeMirror, name: "", value: "" };
         this.drawComponent(ghost, { free: this.isPlacementFree(ghost, x, y, this.placeRotation) });
     }
 

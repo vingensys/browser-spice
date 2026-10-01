@@ -15,13 +15,15 @@ class SchematicImporter {
         G: ["O+", "O-", "C+", "C-"],
         D: ["1", "2"],
         Q: ["C", "B", "E"],       // parser order (collector, base, emitter)
-        M: ["G", "D", "S"]        // parser order (gate, drain, source)
+        M: ["G", "D", "S"],       // parser order (gate, drain, source)
+        J: ["G", "D", "S"],
+        XFMR: ["P1", "P2", "S1", "S2"]
     };
 
     static import(editor, text) {
         const deck = SpiceParser.parse(text);
         const warnings = [...deck.warnings];
-        const els = SpiceParser.flatten(deck, deck.elements, "", null, warnings);
+        const els = SchematicImporter.coupleInductors(SpiceParser.flatten(deck, deck.elements, "", null, warnings), warnings);
 
         const parts = [];
         for (const e of els) {
@@ -140,6 +142,18 @@ class SchematicImporter {
         return { count: parts.length, title: deck.title, warnings, deck };
     }
 
+    // a K card turns its two inductors into one transformer symbol
+    static coupleInductors(els, warnings) {
+        const used = new Set(), out = [];
+        for (const k of els.filter(e => e.kind === "K")) {
+            const [a, b] = k.inductors.map(n => els.find(e => e.kind === "L" && e.name.toLowerCase().endsWith(n.toLowerCase())));
+            if (!a || !b || used.has(a) || used.has(b)) { warnings.push(`${k.name}: coupling needs two inductors that are not already coupled; ignored`); continue; }
+            used.add(a); used.add(b);
+            out.push({ kind: "XFMR", name: k.name, nodes: [...a.nodes, ...b.nodes], l1: a.value, l2: b.value, k: k.k });
+        }
+        return [...els.filter(e => !used.has(e) && e.kind !== "K"), ...out];
+    }
+
     // one SPICE element -> one schematic part (or null if there is no symbol)
     static mapElement(e, deck, warnings) {
         const N = SpiceParser.number;
@@ -166,6 +180,12 @@ class SchematicImporter {
                         sourceType: "PULSE",
                         pulse: { v1: a[0] || 0, v2: a[1] || 0, delay: a[2] || 0, rise: a[3] || 1e-9, fall: a[4] || 1e-9, width: a[5] === undefined ? 1e-3 : a[5], period: a[6] || 0 }
                     });
+                } else if (w && w.kind === "exp") {
+                    const a = w.args;
+                    Object.assign(props, { sourceType: "EXP", exp: { v1: a[0] || 0, v2: a[1] || 0, td1: a[2] || 0, tau1: a[3] || 1e-3, td2: a[4] === undefined ? 1e-3 : a[4], tau2: a[5] || 1e-3 } });
+                } else if (w && w.kind === "sffm") {
+                    const a = w.args;
+                    Object.assign(props, { sourceType: "SFFM", sffm: { vo: a[0] || 0, va: a[1] || 0, fc: a[2] || 1e3, mdi: a[3] || 0, fs: a[4] || 1e3 } });
                 } else if (w && w.kind === "pwl") {
                     Object.assign(props, { sourceType: "PWL", pwl: w.args.join(" ") });
                 }
@@ -185,6 +205,13 @@ class SchematicImporter {
                 const m = deck.models[e.model];
                 const type = m && m.type === "pnp" ? "BJT_PNP" : "BJT_NPN";
                 return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.bjtParams(m) : undefined } };
+            }
+            case "XFMR":
+                return { ...base, type: "XFMR", props: { l1: String(e.l1), ratio: String(Math.sqrt(e.l2 / e.l1)), k: String(e.k), value: "" } };
+            case "J": {
+                const m = deck.models[e.model];
+                const type = m && m.type === "pjf" ? "JFET_P" : "JFET_N";
+                return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.jfetParams(m) : undefined } };
             }
             case "M": {
                 const m = deck.models[e.model];

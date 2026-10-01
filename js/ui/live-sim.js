@@ -27,7 +27,7 @@ class LiveSim {
     // everything that changes the circuit's equations (switch / wiper settings excluded)
     circuitSignature() {
         const comps = this.editor.components.map(c => {
-            const { closed, position, live, scopeTrace, ...rest } = c;
+            const { closed, position, live, scopeTrace, scopeScale, glow, seg, energized, blown, on, ...rest } = c;
             return rest;
         });
         return JSON.stringify([comps, this.editor.wires.map(w => [w.start, w.end])]);
@@ -177,6 +177,10 @@ class LiveSim {
             if (!ch.probe) continue;
             ch.probe.live = ch.node !== undefined ? Units.formatSI(run.voltage(ch.node), "V") : Units.formatSI(run.current(ch.element), "A");
         }
+        for (const comp of this.editor.components) {
+            const part = PartLib.defs[comp.type];
+            if (part && part.live) part.live(comp, run);
+        }
         for (const m of this.meters) {
             m.comp.live = m.type === "VM" ? fmt(run.voltage(m.nets[0]) - run.voltage(m.nets[1]), "V") : fmt(run.current(m.comp.name), "A");
         }
@@ -211,7 +215,7 @@ class LiveSim {
 
     clearDisplays() {
         for (const prb of this.editor.probes) delete prb.live;
-        for (const c of this.editor.components) { delete c.live; delete c.scopeTrace; }
+        for (const c of this.editor.components) { for (const k of ["live", "scopeTrace", "scopeScale", "glow", "seg", "energized", "blown", "on"]) delete c[k]; }
         this.editor.draw();
     }
 

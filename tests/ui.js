@@ -51,10 +51,10 @@ window.uiTests = async function () {
     reset();
     PickDialog.open(pane);
     const q = document.querySelector("#pick-q");
-    q.value = "irf";
+    q.value = "irf540";
     q.dispatchEvent(new Event("input"));
     const rows = document.querySelectorAll("#pick-res li");
-    ok("pick dialog searches the catalog", rows.length >= 1 && [...rows].every(r => /irf/i.test(r.textContent)), rows.length);
+    ok("pick dialog searches the catalog", rows.length >= 1 && [...rows].every(r => /irf540/i.test(r.textContent)), rows.length);
     rows[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
     document.querySelector(".dialog .btn.primary").click();
     ok("OK adds the device and selects it", pane.devices.includes("IRF540") && pane.selected && pane.selected.name === "IRF540");
@@ -102,10 +102,14 @@ window.uiTests = async function () {
     loadExampleById(editor, "instruments");
     document.getElementById("liveSpeed").value = "0";
     live.start();
-    await wait(900);
+    live.advance(100, true);   // drive the clock too: the preview pane may throttle animation frames
+    live.readout();
+    await wait(300);
     const am = editor.components.find(c => c.type === "AM"), vm = editor.components.find(c => c.type === "VM");
     ok("Play runs the simulation clock", live.state === "running" && live.run.t > 0.001, live.run && live.run.t);
     ok("meters show live readings", /V$/.test(vm.live || "") && /A$/.test(am.live || ""), [vm.live, am.live]);
+    live.paint(true);
+    ok("live displays do not change the circuit signature (no endless restarts)", live.circuitSignature() === live.signature);
     ok("the oscilloscope receives traces", editor.components.find(c => c.type === "SCOPE").scopeTrace.some(t => t.length > 10));
     live.pause();
     const tPause = live.run.t;
