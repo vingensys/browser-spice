@@ -10,28 +10,33 @@ npm run serve        # http://localhost:8137
 
 ## Using it
 
-**Editing (Proteus-style)**
+The shell follows Proteus ISIS: menu bar, command toolbars, an overview and a mode toolbar
+(Devices / Terminals / Generators / Instruments / Graph) on the left with the device list under
+it, the sheet in the middle, and a status bar with the play / step / pause / stop transport.
+The classic cream-sheet theme is the default; **View > Theme** switches to dark.
+
+**Editing**
 
 | Action | How |
 | --- | --- |
-| Place a part | Pick it in the library (or press its hotkey), click to drop. Placement is sticky; **R** rotates the ghost, right-click / **Esc** stops. |
-| Wire | Click or drag from any pin. Move to preview the auto-route, click empty grid to pin a corner, click a pin or wire to finish (clicking a wire makes a junction). **Backspace** removes the last corner, double-click ends in free space, **Esc** cancels. |
-| Reshape a wire | Drag a segment. **T** re-routes the selected wire from scratch (nothing selected: all wires). |
-| Move parts | Drag. Attached wires stretch like rubber bands and keep their shape. |
-| Select | Click, **Shift**-click, or drag a box. **Ctrl+A** selects all. |
-| Copy / paste | **Ctrl+C / X / V**. Wires between copied parts come along. |
-| Rotate / delete | **R** / **Del**. Works on a multi-selection. |
-| Zoom / pan | Scroll to zoom at the cursor, **Space**-drag or middle-drag to pan, **F** fits the view, **Ctrl+0** resets. |
-| Undo / redo | **Ctrl+Z**, **Ctrl+Y** (or **Ctrl+Shift+Z**). |
-| Edit a part | Double-click it, or use the Properties panel (values, models, source waveforms, supplies). |
+| Pick a part | **P** (or the **P** button) opens Pick Devices: search, preview, OK adds it to the device list. Select it in the list, click the sheet to drop it. **R** rotates the ghost, right-click / **Esc** stops. |
+| Wire | Click or drag from any pin. Click empty grid to pin a corner, click a pin or wire to finish (a wire makes a junction). **Backspace** removes a corner, **Esc** cancels. |
+| Reshape / tidy | Drag a segment. **T** re-routes the selection (nothing selected: all wires). |
+| Move, select | Drag parts (wires follow). Click, **Shift**-click or box-select; **Ctrl+A** selects all. |
+| Copy / paste, undo | **Ctrl+C / X / V**, **Ctrl+Z / Y**. |
+| Edit a part | Double-click it or **Ctrl+E**: the Edit Component dialog (name, values, models, waveforms). **OK** keeps, **Cancel** reverts. |
+| Zoom / pan | Wheel, **Space**-drag or middle-drag, **F** fits, **Ctrl+0** resets. The overview pane also pans. |
 
-Hotkeys: **C** capacitor, **L** inductor, **V** source, **G** ground, **D** diode, **Q** NPN,
-**M** NMOS, **U** op-amp, **W** wire tool, **R** resistor (when nothing is selected).
+Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...).
 
 **Simulating**
 
-- **Run DC / AC Sweep / Transient / DC Sweep** from the toolbar (Temp sets the circuit temperature); add voltage / current probes to plot signals.
-- **Stop / Step / start from 0** set the transient run; **AC** sets the sweep range.
+- **Live**: **Play** (F12) runs the circuit continuously. Voltage / current probes, DC voltmeters and ammeters,
+  and oscilloscopes on the sheet update as it runs; the LIVE graph tab plots them. Switches and pots can be
+  changed during a run; editing the circuit restarts it. **Pause**, **Step** (F10), **Stop** (Shift+F12).
+- **Graph analyses** (Graph menu or the graph window tabs): analogue transient, frequency (AC), DC sweep, operating point.
+  **Design > Simulation Settings** sets stop time, step, UIC, AC range, sweep, temperature, solver and live speed.
+- **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
 - **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
 - **Examples** menu: rectifier, LED, zener regulator, CE amplifier, op-amp, 555 oscillator, boost converter.
@@ -66,7 +71,8 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 - `js/cad/` editor internals: `symbols` (pins and bodies), `router` (A* + rubber-band repair), `symbol-draw`
 - `js/visualization/` schematic editor and waveform plotter
 - `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
-- `js/ui/` properties panel, simulation runner, SPICE import; `js/examples.js`, `js/app.js`
+- `js/ui/` the ISIS-style shell: `theme`, `commands` (one registry for menus, toolbars and keys), `menubar`, `toolbars`, `statusbar`, `overview`, `device-list` + `catalog` (device pane, Pick Devices), `dialogs`, `graph-window`, `live-sim`, `properties`, `sim-runner`, `spice-import`, `icons`
+- `js/examples.js`, `js/app.js` (composes the shell and defines the commands)
 
 ## Tests
 
@@ -89,6 +95,7 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/examples.js')).text());    await exampleTests();   // every example's physics
 (0, eval)(await (await fetch('tests/roundtrip.js')).text());   await roundtripTests(); // SPICE -> schematic -> sim
 (0, eval)(await (await fetch('tests/engines.js')).text());     await engineTests();    // built-in vs ngspice-WASM
+(0, eval)(await (await fetch('tests/ui.js')).text());          await uiTests();       // menus, dialogs, device list, live simulation
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each

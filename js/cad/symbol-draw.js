@@ -3,6 +3,11 @@
 
 class SymbolRenderer {
 
+    // theme-aware colour: literals from the dark palette are remapped by the active theme
+    col(color) { return Theme.map(color); }
+    tok(name) { return Theme.token(name); }
+    lw(n) { return n * (Theme.current.lineScale || 1); }
+
     drawComponent(component, ghost = null) {
         const ctx = this.ctx;
 
@@ -12,7 +17,7 @@ class SymbolRenderer {
         if (ghost) ctx.globalAlpha = 0.55;
 
         if (!ghost && this.isSelected(component)) {
-            ctx.strokeStyle = "#6ea8fe";
+            ctx.strokeStyle = this.col("#6ea8fe");
             ctx.lineWidth = 2 / this.zoom;
             ctx.setLineDash([5, 4]);
             const [bx1, by1, bx2, by2] = this.getSymbolDef(component).box;
@@ -49,11 +54,14 @@ class SymbolRenderer {
                 break;
             case "GND": this.drawGround(component); break;
             case "NODEIC": this.drawNodeIC(component); break;
+            case "VM": this.drawMeter(component, "V"); break;
+            case "AM": this.drawMeter(component, "A"); break;
+            case "SCOPE": this.drawScope(component); break;
         }
 
         // Unconnected pins show as red rings (Proteus-style); wired pins are hidden
-        ctx.strokeStyle = ghost && !ghost.free ? "#ff5555" : "#ff5555";
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = this.tok("pinOpen");
+        ctx.lineWidth = this.lw(1.5);
         for (const terminal of this.getTerminals(component)) {
             const p = this.getTerminalPosition(component, terminal);
             if (!ghost && this.connectedPins && this.connectedPins.has(`${p.x},${p.y}`)) continue;
@@ -64,7 +72,7 @@ class SymbolRenderer {
 
         if (ghost && !ghost.free) {
             ctx.globalAlpha = 0.25;
-            ctx.fillStyle = "#ff5555";
+            ctx.fillStyle = this.col("#ff5555");
             const [bx1, by1, bx2, by2] = this.getSymbolDef(component).box;
             ctx.fillRect(bx1, by1, bx2 - bx1, by2 - by1);
         }
@@ -74,8 +82,23 @@ class SymbolRenderer {
 
     drawResistor(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#ffb86c";
-        ctx.lineWidth = 3;
+        if (Theme.current.iecResistor) {
+            ctx.strokeStyle = this.col("#ffb86c");
+            ctx.fillStyle = this.col("#171b23");
+            ctx.lineWidth = this.lw(2);
+            ctx.beginPath();
+            ctx.moveTo(-40, 0); ctx.lineTo(-24, 0);
+            ctx.moveTo(24, 0); ctx.lineTo(40, 0);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.rect(-24, -9, 48, 18);
+            ctx.fill();
+            ctx.stroke();
+            this.drawLabel(component);
+            return;
+        }
+        ctx.strokeStyle = this.col("#ffb86c");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -96,8 +119,8 @@ class SymbolRenderer {
 
     drawCapacitor(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#8be9fd";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#8be9fd");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -117,8 +140,8 @@ class SymbolRenderer {
 
     drawInductor(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#bd93f9";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#bd93f9");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -136,8 +159,8 @@ class SymbolRenderer {
 
     drawVoltageSource(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#50fa7b");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -151,7 +174,7 @@ class SymbolRenderer {
         ctx.stroke();
 
         ctx.font = "18px system-ui";
-        ctx.fillStyle = "#50fa7b";
+        ctx.fillStyle = this.col("#50fa7b");
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText("−", -11, 0);
@@ -164,8 +187,8 @@ class SymbolRenderer {
 
     drawCurrentSource(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#50fa7b");
+        ctx.lineWidth = this.lw(3);
         ctx.beginPath();
         ctx.moveTo(-40, 0); ctx.lineTo(-24, 0);
         ctx.moveTo(24, 0); ctx.lineTo(40, 0);
@@ -175,11 +198,11 @@ class SymbolRenderer {
         ctx.stroke();
 
         // arrow along the current direction (pin 1 -> pin 2)
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = this.lw(2.5);
         ctx.beginPath();
         ctx.moveTo(-13, 0); ctx.lineTo(13, 0);
         ctx.stroke();
-        ctx.fillStyle = "#50fa7b";
+        ctx.fillStyle = this.col("#50fa7b");
         ctx.beginPath();
         ctx.moveTo(15, 0); ctx.lineTo(6, -6); ctx.lineTo(6, 6);
         ctx.closePath();
@@ -190,8 +213,8 @@ class SymbolRenderer {
     // Dependent source: diamond with the control pair on the left, output on the right.
     drawControlledSource(component, current) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#f1fa8c";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#f1fa8c");
+        ctx.lineWidth = this.lw(3);
         ctx.beginPath();
         ctx.moveTo(-40, -20); ctx.lineTo(-22, -20);
         ctx.moveTo(-40, 20); ctx.lineTo(-22, 20);
@@ -199,7 +222,7 @@ class SymbolRenderer {
         ctx.moveTo(40, 20); ctx.lineTo(22, 20);
         ctx.stroke();
 
-        ctx.fillStyle = "rgba(241, 250, 140, 0.08)";
+        ctx.fillStyle = this.col("rgba(241, 250, 140, 0.08)");
         ctx.beginPath();
         ctx.moveTo(0, -34); ctx.lineTo(24, 0); ctx.lineTo(0, 34); ctx.lineTo(-24, 0);
         ctx.closePath();
@@ -207,7 +230,7 @@ class SymbolRenderer {
         ctx.stroke();
 
         ctx.font = "bold 11px system-ui";
-        ctx.fillStyle = "#f1fa8c";
+        ctx.fillStyle = this.col("#f1fa8c");
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(current ? "gm" : "A", 0, 0);
@@ -219,8 +242,8 @@ class SymbolRenderer {
 
     drawSwitch(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#8be9fd";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#8be9fd");
+        ctx.lineWidth = this.lw(3);
         ctx.beginPath();
         ctx.moveTo(-40, 0); ctx.lineTo(-18, 0);
         ctx.moveTo(18, 0); ctx.lineTo(40, 0);
@@ -230,7 +253,7 @@ class SymbolRenderer {
         if (component.closed) ctx.lineTo(18, 0);
         else ctx.lineTo(14, -16);
         ctx.stroke();
-        ctx.fillStyle = "#171b23";
+        ctx.fillStyle = this.col("#171b23");
         for (const x of [-18, 18]) {
             ctx.beginPath();
             ctx.arc(x, 0, 3.5, 0, Math.PI * 2);
@@ -242,8 +265,8 @@ class SymbolRenderer {
 
     drawPot(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#ffb86c";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#ffb86c");
+        ctx.lineWidth = this.lw(3);
         ctx.beginPath();
         ctx.moveTo(-40, 0); ctx.lineTo(-28, 0);
         ctx.lineTo(-20, -8); ctx.lineTo(-8, 8); ctx.lineTo(4, -8); ctx.lineTo(16, 8); ctx.lineTo(28, -8);
@@ -253,11 +276,11 @@ class SymbolRenderer {
         // wiper arrow from the top pin onto the resistor, positioned by its setting
         const pos = Math.min(1, Math.max(0, component.position === undefined ? 0.5 : component.position));
         const wx = -28 + pos * 56;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = this.lw(2.5);
         ctx.beginPath();
         ctx.moveTo(0, -40); ctx.lineTo(0, -22); ctx.lineTo(wx, -22); ctx.lineTo(wx, -10);
         ctx.stroke();
-        ctx.fillStyle = "#ffb86c";
+        ctx.fillStyle = this.col("#ffb86c");
         ctx.beginPath();
         ctx.moveTo(wx, -6); ctx.lineTo(wx - 4, -13); ctx.lineTo(wx + 4, -13);
         ctx.closePath();
@@ -268,9 +291,9 @@ class SymbolRenderer {
     // Initial-condition flag: forces the net's starting voltage in a "start from 0" transient.
     drawNodeIC(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#ff79c6";
-        ctx.fillStyle = "rgba(255, 121, 198, 0.12)";
-        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = this.col("#ff79c6");
+        ctx.fillStyle = this.col("rgba(255, 121, 198, 0.12)");
+        ctx.lineWidth = this.lw(2.5);
         ctx.beginPath();
         ctx.moveTo(0, 20); ctx.lineTo(0, 8);
         ctx.stroke();
@@ -279,16 +302,88 @@ class SymbolRenderer {
         ctx.fill();
         ctx.stroke();
         ctx.font = "bold 11px system-ui";
-        ctx.fillStyle = "#ff79c6";
+        ctx.fillStyle = this.col("#ff79c6");
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(`IC=${component.value || "0 V"}`, 0, -3);
     }
 
+    // Panel meter: a circle with its letter and the live reading underneath.
+    drawMeter(component, letter) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.col("#e8edf5");
+        ctx.fillStyle = this.col("#171b23");
+        ctx.lineWidth = this.lw(2.5);
+        ctx.beginPath();
+        ctx.moveTo(-40, 0); ctx.lineTo(-22, 0);
+        ctx.moveTo(22, 0); ctx.lineTo(40, 0);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(0, 0, 22, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = "bold 20px system-ui";
+        ctx.fillStyle = this.col("#e8edf5");
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(letter, 0, 1);
+        ctx.font = "11px system-ui";
+        ctx.fillText("+", -12, -14);
+
+        ctx.save();
+        ctx.rotate((-component.rotation * Math.PI) / 180);
+        ctx.font = "bold 12px Consolas, monospace";
+        ctx.fillStyle = component.live !== undefined ? this.tok("probeV") : this.tok("value");
+        ctx.textAlign = "center";
+        ctx.fillText(component.live !== undefined ? component.live : (letter === "V" ? "+0.00 V" : "+0.00 A"), 0, 42);
+        ctx.restore();
+    }
+
+    // Oscilloscope symbol: the screen is drawn live by the simulation window.
+    drawScope(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.col("#e8edf5");
+        ctx.lineWidth = this.lw(2);
+        ctx.fillStyle = "#101820";
+        ctx.beginPath();
+        ctx.rect(-40, -58, 96, 116);
+        ctx.fill();
+        ctx.stroke();
+        ctx.strokeStyle = "#2c5a3a";
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 4; i++) {
+            ctx.beginPath(); ctx.moveTo(-34, -52 + i * 26); ctx.lineTo(50, -52 + i * 26); ctx.stroke();
+        }
+        const colors = ["#ffe040", "#40e0ff", "#ff6060", "#60ff60"];
+        const trace = component.scopeTrace;
+        [-40, -20, 20, 40].forEach((y, i) => {
+            ctx.strokeStyle = this.col("#e8edf5");
+            ctx.lineWidth = this.lw(2);
+            ctx.beginPath(); ctx.moveTo(-80, y); ctx.lineTo(-40, y); ctx.stroke();
+            ctx.font = "bold 10px system-ui";
+            ctx.fillStyle = colors[i];
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.fillText("ABCD"[i], -36, y);
+            if (trace && trace[i] && trace[i].length > 1) {
+                ctx.strokeStyle = colors[i];
+                ctx.lineWidth = 1.2;
+                ctx.beginPath();
+                trace[i].forEach((v, k) => {
+                    const px = -22 + (k / (trace[i].length - 1)) * 72;
+                    const py = 0 - Math.max(-1, Math.min(1, v / (component.scopeScale || 10))) * 44;
+                    k ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+                });
+                ctx.stroke();
+            }
+        });
+        this.drawLabel(component);
+    }
+
     drawDiode(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#ff79c6";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#ff79c6");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -297,7 +392,7 @@ class SymbolRenderer {
         ctx.lineTo(40, 0);
         ctx.stroke();
 
-        ctx.fillStyle = "#ff79c6";
+        ctx.fillStyle = this.col("#ff79c6");
         ctx.beginPath();
         ctx.moveTo(-14, -12);
         ctx.lineTo(14, 0);
@@ -318,8 +413,8 @@ class SymbolRenderer {
 
     drawZener(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#ff79c6";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#ff79c6");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -328,7 +423,7 @@ class SymbolRenderer {
         ctx.lineTo(40, 0);
         ctx.stroke();
 
-        ctx.fillStyle = "#ff79c6";
+        ctx.fillStyle = this.col("#ff79c6");
         ctx.beginPath();
         ctx.moveTo(-14, -12);
         ctx.lineTo(14, 0);
@@ -352,8 +447,8 @@ class SymbolRenderer {
     drawLED(component) {
         this.drawDiode(component);
         const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = this.col("#50fa7b");
+        ctx.lineWidth = this.lw(2);
 
         ctx.beginPath();
         ctx.moveTo(2, -14);
@@ -365,8 +460,8 @@ class SymbolRenderer {
 
     drawTransistorNPN(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#bd93f9";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#bd93f9");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -385,7 +480,7 @@ class SymbolRenderer {
         ctx.lineTo(20, 40);
         ctx.stroke();
 
-        ctx.fillStyle = "#bd93f9";
+        ctx.fillStyle = this.col("#bd93f9");
         ctx.beginPath();
         ctx.moveTo(20, 40);
         ctx.lineTo(10, 32);
@@ -401,8 +496,8 @@ class SymbolRenderer {
 
     drawTransistorPNP(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#bd93f9";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#bd93f9");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -421,7 +516,7 @@ class SymbolRenderer {
         ctx.lineTo(20, 40);
         ctx.stroke();
 
-        ctx.fillStyle = "#bd93f9";
+        ctx.fillStyle = this.col("#bd93f9");
         ctx.beginPath();
         ctx.moveTo(-10, 10);
         ctx.lineTo(0, 18);
@@ -437,8 +532,8 @@ class SymbolRenderer {
 
     drawMOSFETN(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#50fa7b");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(-40, 0);
@@ -465,9 +560,9 @@ class SymbolRenderer {
     drawMOSFETP(component) {
         this.drawMOSFETN(component);
         const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
-        ctx.lineWidth = 2;
-        ctx.fillStyle = "#171b23";
+        ctx.strokeStyle = this.col("#50fa7b");
+        ctx.lineWidth = this.lw(2);
+        ctx.fillStyle = this.col("#171b23");
         ctx.beginPath();
         ctx.arc(-22, 0, 4, 0, Math.PI * 2);
         ctx.fill();
@@ -476,8 +571,8 @@ class SymbolRenderer {
 
     drawOpAmp(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#ffb86c";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#ffb86c");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(25, 0);
@@ -488,7 +583,7 @@ class SymbolRenderer {
         ctx.lineTo(-25, 20);
         ctx.stroke();
 
-        ctx.fillStyle = "rgba(255, 184, 108, 0.1)";
+        ctx.fillStyle = this.col("rgba(255, 184, 108, 0.1)");
         ctx.beginPath();
         ctx.moveTo(-25, -35);
         ctx.lineTo(25, 0);
@@ -498,7 +593,7 @@ class SymbolRenderer {
         ctx.stroke();
 
         ctx.font = "bold 14px system-ui";
-        ctx.fillStyle = "#ffb86c";
+        ctx.fillStyle = this.col("#ffb86c");
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText("−", -15, -20);
@@ -512,31 +607,31 @@ class SymbolRenderer {
 
     drawIC555(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#8be9fd";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#8be9fd");
+        ctx.lineWidth = this.lw(3);
 
-        ctx.fillStyle = "#171b23";
+        ctx.fillStyle = this.col("#171b23");
         ctx.beginPath();
         ctx.rect(-40, -55, 80, 110);
         ctx.fill();
         ctx.stroke();
 
         ctx.font = "bold 13px system-ui";
-        ctx.fillStyle = "#8be9fd";
+        ctx.fillStyle = this.col("#8be9fd");
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText("NE555", 0, 0);
 
         ctx.font = "9px system-ui";
         for (const [name, x, y, dx] of this.getSymbolDef(component).pins) {
-            ctx.strokeStyle = "#8be9fd";
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = this.col("#8be9fd");
+            ctx.lineWidth = this.lw(3);
             ctx.beginPath();
             ctx.moveTo(x, y);
             ctx.lineTo(dx * 40, y);
             ctx.stroke();
 
-            ctx.fillStyle = "#9aa4b5";
+            ctx.fillStyle = this.col("#9aa4b5");
             ctx.textAlign = dx < 0 ? "left" : "right";
             ctx.fillText(name, dx * 36, y);
         }
@@ -546,8 +641,8 @@ class SymbolRenderer {
 
     drawLogicGate(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#f1fa8c";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#f1fa8c");
+        ctx.lineWidth = this.lw(3);
 
         const isNot = component.type === "NOT";
         if (isNot) {
@@ -582,7 +677,7 @@ class SymbolRenderer {
             ctx.stroke();
 
             ctx.font = "bold 13px system-ui";
-            ctx.fillStyle = "#f1fa8c";
+            ctx.fillStyle = this.col("#f1fa8c");
             ctx.textAlign = "center";
             ctx.textBaseline = "middle";
             ctx.fillText(component.type, 0, 0);
@@ -599,8 +694,8 @@ class SymbolRenderer {
 
     drawGround(component) {
         const ctx = this.ctx;
-        ctx.strokeStyle = "#e8edf5";
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = this.col("#e8edf5");
+        ctx.lineWidth = this.lw(3);
 
         ctx.beginPath();
         ctx.moveTo(0, -20);
@@ -618,7 +713,7 @@ class SymbolRenderer {
         ctx.save();
         ctx.rotate((-component.rotation * Math.PI) / 180);
         ctx.font = "12px system-ui";
-        ctx.fillStyle = "#e8edf5";
+        ctx.fillStyle = this.col("#e8edf5");
         ctx.textAlign = "center";
         const o = this.rotateOffset(0, 35, component.rotation);
         ctx.fillText("GND", o.x, o.y + 4);
@@ -646,12 +741,12 @@ class SymbolRenderer {
         const valueAt = vertical ? { x: right + 8, y: 12, align: "left" } : { x: 0, y: bottom + 8, align: "center" };
 
         ctx.font = "12px system-ui";
-        ctx.fillStyle = "#e8edf5";
+        ctx.fillStyle = this.tok("label");
         ctx.textAlign = nameAt.align;
         ctx.fillText(component.name, nameAt.x, nameAt.y);
 
         ctx.font = "10px system-ui";
-        ctx.fillStyle = "#9aa4b5";
+        ctx.fillStyle = this.tok("value");
         ctx.textAlign = valueAt.align;
         ctx.fillText(component.value, valueAt.x, valueAt.y);
         ctx.restore();

@@ -4,13 +4,22 @@
 class PropertiesPanel {
     constructor(editor, container) {
         this.editor = editor;
-        this.el = container;
+        this.el = null;
         this.before = null;
+        this.handlers = {
+            focusin: () => { this.before = editor.snapshot(); },
+            input: (e) => this.onInput(e),
+            change: (e) => this.onChange(e)
+        };
+        this.attach(container);
+    }
 
-        // snapshot on focus so one edit session is one undo step
-        container.addEventListener("focusin", () => { this.before = editor.snapshot(); });
-        container.addEventListener("input", e => this.onInput(e));
-        container.addEventListener("change", e => this.onChange(e));
+    // (re)bind the panel to a container: it lives in a hidden store normally and is moved
+    // into the Edit Component dialog while that is open
+    attach(container) {
+        if (this.el) for (const [type, fn] of Object.entries(this.handlers)) this.el.removeEventListener(type, fn);
+        this.el = container;
+        for (const [type, fn] of Object.entries(this.handlers)) container.addEventListener(type, fn);
     }
 
     static esc(s) {

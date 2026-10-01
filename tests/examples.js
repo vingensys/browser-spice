@@ -57,10 +57,10 @@ window.exampleTests = function () {
     check("ce-amp: biased in the active region and amplifies with inversion", () => {
         const { info, sim } = load("ce-amp");
         const op = sim.operatingPoint();
-        const vc = op.nodeVoltages[nodeOf(info, "BJT_NPN1", "C")];
+        const vc = op.nodeVoltages[nodeOf(info, "Q1", "C")];
         if (vc < 4 || vc > 11) throw new Error("collector bias " + vc);
         const r = sim.transient({ tStop: 0.006, tStep: 5e-6, uic: false });
-        const out = tail(r.nodeHistories[nodeOf(info, "BJT_NPN1", "C")], 0.3);
+        const out = tail(r.nodeHistories[nodeOf(info, "Q1", "C")], 0.3);
         const inp = tail(r.nodeHistories[nodeOf(info, "C1", "1")], 0.3);
         const gain = (Math.max(...out) - Math.min(...out)) / (Math.max(...inp) - Math.min(...inp));
         if (gain < 30) throw new Error("gain " + gain);
@@ -74,7 +74,7 @@ window.exampleTests = function () {
     check("inverting-opamp: gain of -10", () => {
         const { info, sim } = load("inverting-opamp");
         const r = sim.transient({ tStop: 0.004, tStep: 5e-6, uic: false });
-        const out = tail(r.nodeHistories[nodeOf(info, "OPAMP1", "OUT")], 0.4);
+        const out = tail(r.nodeHistories[nodeOf(info, "U1", "OUT")], 0.4);
         near(Math.max(...out), 5, 0.4, "positive peak");
         near(Math.min(...out), -5, 0.4, "negative peak");
     });
@@ -82,7 +82,7 @@ window.exampleTests = function () {
     check("555-astable: ~690 Hz at the output", () => {
         const { info, sim } = load("555-astable");
         const r = sim.transient({ tStop: 0.02, tStep: 5e-6, uic: true });
-        const edges = risingEdges(r.timePoints, r.nodeHistories[nodeOf(info, "IC5551", "OUT")], 2.5);
+        const edges = risingEdges(r.timePoints, r.nodeHistories[nodeOf(info, "U1", "OUT")], 2.5);
         if (edges.length < 8) throw new Error("only " + edges.length + " edges");
         const f = (edges.length - 2) / (edges[edges.length - 1] - edges[1]);
         near(f, 1.44 / ((1000 + 20000) * 100e-9), 70, "frequency");
@@ -100,11 +100,11 @@ window.exampleTests = function () {
 
     check("pot-divider: wiper at 25 % loaded by the switch", () => {
         const { info, sim } = load("pot-divider");
-        const w = sim.operatingPoint().nodeVoltages[nodeOf(info, "POT1", "W")];
+        const w = sim.operatingPoint().nodeVoltages[nodeOf(info, "RV1", "W")];
         // 2.5 kΩ above the wiper to 10 V, 7.5 kΩ below it in parallel with the 10 kΩ load (4.286 kΩ)
         near(w, 10 * 4.2857 / (2.5 + 4.2857), 0.05, "wiper (switch closed)");
         const sw = editor.components.find(c => c.type === "SW"); sw.closed = false;
-        const w2 = new SimEngine(NetlistExtractor.extract(editor).circuit).operatingPoint().nodeVoltages[nodeOf(info, "POT1", "W")];
+        const w2 = new SimEngine(NetlistExtractor.extract(editor).circuit).operatingPoint().nodeVoltages[nodeOf(info, "RV1", "W")];
         near(w2, 7.5, 0.01, "wiper (switch open)");
     });
 
@@ -140,7 +140,7 @@ window.exampleTests = function () {
     const pending = (async () => {
         try {
             const { info, sim } = load("555-astable");
-            const out = nodeOf(info, "IC5551", "OUT");
+            const out = nodeOf(info, "U1", "OUT");
             const mine = sim.transient({ tStop: 0.02, tStep: 5e-6, uic: true });
             const raw = await NgspiceBackend.run(NetlistExtractor.toSpice(info.elements, { analysis: ".tran 5u 20m uic" }));
             const ng = NgspiceBackend.toTransient(raw, info);

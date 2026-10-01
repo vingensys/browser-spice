@@ -18,14 +18,15 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 | Simulation | Built-in SPICE engine: OP, DC sweep, transient (adaptive, event-exact), AC, temperature, sparse LU. R C L V I, E/G sources, switch, pot, diode/LED/zener, BJT, MOSFET, op-amp, gates, 555 |
 | Accuracy | 46 engine tests; 16 reference decks within ~1 % of ngspice (OP, transient, AC, temperature, `.ic`); built-in vs ngspice-WASM agree on every example |
 | Interop | SPICE `.cir` export (models, op-amp and 555 macros, PWL, controlled sources) and import (into an editable schematic, `.param`, `.ic`); vendor `.model` libraries; ngspice-WASM backend |
-| Examples | 10 working circuits with probes |
+| Shell | Proteus ISIS-style UI: menus, toolbars, overview, mode bar + device list, Pick Devices, Edit Component, graph window, status-bar transport, classic and dark themes |
+| Live simulation | Play / pause / step / stop with probes, voltmeters, ammeters, on-sheet scope; interactive switches and pots |
+| Examples | 11 working circuits with probes |
 
 ## Next, in order
 
 ### 1. Make simulation feel like Proteus
-- **Live simulation**: run continuously while you edit; animate current (moving dots) and
-  show node voltages on wires (colour / labels); switch and pot "interactive" parts you can
-  click during a run.
+- **Live simulation** (done: run, probes, meters, switches). Still to do: animate current (moving dots)
+  and show node voltages on wires (colour / labels).
 - **Virtual instruments**: oscilloscope, function generator, DC voltmeter / ammeter, logic
   analyser as placeable parts (the plot panel becomes the scope).
 - **More parts**: current source, potentiometer, switch / relay, transformer, fuse, LED
@@ -46,7 +47,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 
 ### 3. Schematic capture polish
 - Buses, net labels, power ports, off-sheet connectors, hierarchical sheets.
-- Mirror / flip, text and graphic annotations, title block, design-rule / ERC checks
+- Mirror / flip, AC plots in dB and phase, text and graphic annotations, title block, design-rule / ERC checks
   (floating pins, shorted outputs, missing supply, duplicate names).
 - Auto-annotation, cross-probing (click a net, see it everywhere), net highlighting.
 - Move wire segments with neighbours, "drag" mode that keeps wires attached, snap-to-pin.

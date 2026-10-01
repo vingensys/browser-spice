@@ -158,10 +158,26 @@ class NetlistExtractor {
         };
 
         const nodeIC = {};
+        const instruments = [];
         for (const comp of editor.components) {
             if (comp.type === "GND") continue;
 
             const pin = (name) => nets.terminalNode(comp, name) || "0";
+            const base = { name: comp.name, comp };
+            if (comp.type === "VM" || comp.type === "SCOPE") {
+                instruments.push({
+                    type: comp.type, comp,
+                    nets: editor.getTerminals(comp).map(t => pin(t.name)),
+                    wired: editor.getTerminals(comp).map(t => nets.wired.has(`${comp.id}:${t.name}`))
+                });
+                continue;
+            }
+            if (comp.type === "AM") {
+                // an ideal ammeter is a 0 V source in series; its branch current is the reading
+                instruments.push({ type: "AM", comp, nets: [pin("+"), pin("-")] });
+                els.push({ ...base, kind: "V", nodes: [pin("+"), pin("-")], params: { sourceType: "DC", dc: 0, acMag: 0 } });
+                continue;
+            }
             if (comp.type === "NODEIC") {
                 const net = pin("1");
                 if (net !== "0") nodeIC[net] = Units.parseSI(comp.value);
@@ -170,9 +186,7 @@ class NetlistExtractor {
             }
             const unwired = editor.getTerminals(comp)
                 .filter(t => !nets.wired.has(`${comp.id}:${t.name}`)).map(t => t.name);
-            if (unwired.length) warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
-
-            const base = { name: comp.name, comp };
+            if (unwired.length && comp.type !== "SCOPE") warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
 
             switch (comp.type) {
                 case "R":
@@ -261,6 +275,7 @@ class NetlistExtractor {
             }
         }
         els.nodeIC = nodeIC;
+        els.instruments = instruments;
         return { els, warnings };
     }
 
@@ -358,7 +373,7 @@ class NetlistExtractor {
 
         const circuit = NetlistExtractor.instantiate(els);
         return {
-            circuit, elements: els, warnings, nodeIC: els.nodeIC || {},
+            circuit, elements: els, warnings, nodeIC: els.nodeIC || {}, instruments: els.instruments || [],
             getPointNodeName: nets.getPointNodeName,
             getTerminalNodeName: nets.terminalNode
         };

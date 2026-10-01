@@ -4,7 +4,7 @@
 
 const HOTKEYS = {
     c: "C", l: "L", v: "V", i: "I", g: "GND", d: "D", q: "BJT_NPN", m: "NMOS", u: "OPAMP",
-    e: "E", s: "SW", p: "POT", w: "wire"
+    e: "E", s: "SW", w: "wire"
 };
 
 class SchematicEditor {
@@ -24,6 +24,7 @@ class SchematicEditor {
 
         this.tool = "select";
         this.placeRotation = 0;
+        this.placeProps = null;   // properties copied onto each part placed from the device list
 
         // View
         this.zoom = 1;
@@ -58,6 +59,8 @@ class SchematicEditor {
         this.connectedPins = new Set();
 
         this.onChange = null;    // fired when selection / tool changes
+        this.onDraw = null;      // fired after every redraw (overview map)
+        this.onPointer = null;   // fired with world coordinates as the mouse moves
         this.onEdit = null;      // fired when a component is double-clicked
         this._notifyKey = "";
 
@@ -289,10 +292,9 @@ class SchematicEditor {
         const idMap = new Map();
         const created = [];
         for (const src of cb.comps) {
-            const count = this.components.filter(c => c.type === src.type).length + 1;
             const comp = Object.assign({}, src, {
                 id: this.nextId++,
-                name: src.type === "GND" ? "GND" : `${src.type}${count}`,
+                name: src.type === "GND" ? "GND" : this.nextReference(src.type),
                 x: src.x + dx,
                 y: src.y + dy
             });
@@ -412,9 +414,10 @@ class SchematicEditor {
         return !!SYMBOL_DEFS[this.tool];
     }
 
-    setTool(tool) {
+    setTool(tool, props = null) {
         this.cancelWire();
         this.tool = tool;
+        this.placeProps = props;
         this.placeRotation = 0;
         this.hoverSnap = null;
         this.hoverTarget = null;
@@ -466,6 +469,22 @@ class SchematicEditor {
     // COMPONENTS
     // ============================================================
 
+    // Standard reference-designator prefixes (R1, C2, D1, Q1, U1, RV1 ...)
+    static REF_PREFIX = {
+        R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", D: "D", DZ: "D", LED: "D",
+        BJT_NPN: "Q", BJT_PNP: "Q", NMOS: "Q", PMOS: "Q", OPAMP: "U", IC555: "U",
+        AND: "U", OR: "U", NOT: "U", NAND: "U", NOR: "U", XOR: "U",
+        SW: "SW", POT: "RV", VM: "VM", AM: "AM", SCOPE: "OSC", NODEIC: "IC"
+    };
+
+    nextReference(type) {
+        const prefix = SchematicEditor.REF_PREFIX[type] || type;
+        const used = new Set(this.components.map(c => c.name));
+        let n = 1;
+        while (used.has(`${prefix}${n}`)) n++;
+        return `${prefix}${n}`;
+    }
+
     addComponent(type, x, y, rotation = 0) {
         const count = this.components.filter(c => c.type === type).length + 1;
 
@@ -492,7 +511,7 @@ class SchematicEditor {
         const component = {
             id: this.nextId++,
             type,
-            name: type === "GND" ? "GND" : `${type}${count}`,
+            name: type === "GND" ? "GND" : this.nextReference(type),
             x: 0,
             y: 0,
             rotation,
@@ -525,13 +544,15 @@ class SchematicEditor {
 
         this.saveState();
         const comp = this.addComponent(this.tool, gx, gy, this.placeRotation);
+        if (this.placeProps) Object.assign(comp, JSON.parse(JSON.stringify(this.placeProps)));
         this.draw();
         return comp;
     }
 
-    rotateSelected() {
+    rotateSelected(steps = 1) {
         if (!this.selection.length) return;
 
+        const deg = 90 * steps;
         const single = this.selection.length === 1;
         let px = 0, py = 0;
         if (!single) {
@@ -541,9 +562,9 @@ class SchematicEditor {
         }
 
         const poses = this.selection.map(c => {
-            const rot = (c.rotation + 90) % 360;
+            const rot = (c.rotation + deg) % 360;
             if (single) return { c, x: c.x, y: c.y, rotation: rot };
-            const o = this.rotateOffset(c.x - px, c.y - py, 90);
+            const o = this.rotateOffset(c.x - px, c.y - py, deg);
             return { c, x: px + o.x, y: py + o.y, rotation: rot };
         });
 
@@ -1040,6 +1061,7 @@ class SchematicEditor {
         const pos = this.getMousePosition(event);
         this.mouse = pos;
         this.mouseInside = true;
+        if (typeof this.onPointer === "function") this.onPointer(pos);
 
         if (this.box) {
             this.box.x2 = pos.x;
@@ -1325,10 +1347,23 @@ class SchematicEditor {
     // RENDERING
     // ============================================================
 
+    // theme helpers (the symbol renderer provides col / tok / lw as well)
+    sheetRect() {
+        // an A4-landscape sheet (0.1 in = one grid cell) that grows to hold everything drawn
+        let w = 2340, h = 1660;
+        for (const c of this.components) {
+            const b = this.getComponentBox(c);
+            w = Math.max(w, Math.ceil((b.x2 + 200) / 100) * 100);
+            h = Math.max(h, Math.ceil((b.y2 + 200) / 100) * 100);
+        }
+        return { x: 0, y: 0, w, h };
+    }
+
     draw() {
         const ctx = this.ctx;
 
-        ctx.clearRect(0, 0, this.width, this.height);
+        ctx.fillStyle = this.tok("workspace");
+        ctx.fillRect(0, 0, this.width, this.height);
 
         this.connectedPins = new Set();
         for (const w of this.wires) {
@@ -1340,36 +1375,56 @@ class SchematicEditor {
         ctx.translate(this.panX, this.panY);
         ctx.scale(this.zoom, this.zoom);
 
+        this.drawSheet();
         this.drawGrid();
         this.drawWires();
         this.drawWirePreview();
         this.drawComponents();
         this.drawGhost();
         this.drawProbes();
+        if (typeof this.drawOverlays === "function") this.drawOverlays();
         this.drawSnapHighlight();
         this.drawSelectionBox();
 
         ctx.restore();
 
-        ctx.fillStyle = "#6b7588";
+        ctx.fillStyle = this.tok("hud");
         ctx.font = "11px system-ui";
         ctx.textAlign = "right";
         ctx.textBaseline = "alphabetic";
         ctx.fillText(`${Math.round(this.zoom * 100)}%`, this.width - 10, this.height - 8);
+        if (typeof this.onDraw === "function") this.onDraw();
+    }
+
+    drawSheet() {
+        const ctx = this.ctx;
+        const r = this.sheetRect();
+        // shadow, paper, then the blue frame ISIS draws around the sheet
+        ctx.fillStyle = "rgba(0, 0, 0, 0.18)";
+        ctx.fillRect(r.x + 6, r.y + 6, r.w, r.h);
+        ctx.fillStyle = this.tok("sheet");
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.strokeStyle = this.tok("border");
+        ctx.lineWidth = 2;
+        ctx.strokeRect(r.x, r.y, r.w, r.h);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(r.x + 14, r.y + 14, r.w - 28, r.h - 28);
     }
 
     drawGrid() {
+        if (this.showGrid === false) return;
         const ctx = this.ctx;
         const g = this.gridSize;
         let step = g;
         while (step * this.zoom < 9) step *= 2;
 
-        ctx.fillStyle = "#202633";
-        const x0 = Math.floor((-this.panX / this.zoom) / step) * step;
-        const y0 = Math.floor((-this.panY / this.zoom) / step) * step;
-        const x1 = (this.width - this.panX) / this.zoom;
-        const y1 = (this.height - this.panY) / this.zoom;
-        const r = 1 / this.zoom;
+        ctx.fillStyle = this.tok("grid");
+        const sheet = this.sheetRect();
+        const x0 = Math.max(sheet.x, Math.floor((-this.panX / this.zoom) / step) * step);
+        const y0 = Math.max(sheet.y, Math.floor((-this.panY / this.zoom) / step) * step);
+        const x1 = Math.min(sheet.x + sheet.w, (this.width - this.panX) / this.zoom);
+        const y1 = Math.min(sheet.y + sheet.h, (this.height - this.panY) / this.zoom);
+        const r = Math.max(0.8, 1 / this.zoom);
 
         for (let x = x0; x <= x1; x += step) {
             for (let y = y0; y <= y1; y += step) {
@@ -1380,13 +1435,14 @@ class SchematicEditor {
 
     drawWires() {
         const ctx = this.ctx;
+        const lw = (n) => n * (Theme.current.lineScale ? Math.max(Theme.current.lineScale, 0.8) : 1);
 
         for (const wire of this.wires) {
             if (!wire.route || wire.route.length < 2) continue;
 
             const isSelected = wire === this.selectedWire;
-            ctx.strokeStyle = wire.blocked ? "#ff5555" : (isSelected ? "#50fa7b" : "#6ea8fe");
-            ctx.lineWidth = isSelected ? 3 : 2;
+            ctx.strokeStyle = wire.blocked ? this.tok("wireBlocked") : (isSelected ? this.tok("wireSelected") : this.tok("wire"));
+            ctx.lineWidth = isSelected ? lw(3) : lw(2);
             ctx.lineJoin = "round";
             ctx.lineCap = "round";
             ctx.setLineDash(wire.blocked ? [6, 4] : []);
@@ -1402,8 +1458,8 @@ class SchematicEditor {
                     const p1 = wire.route[i];
                     const p2 = wire.route[i + 1];
                     if (Math.abs(p2.x - p1.x) + Math.abs(p2.y - p1.y) < this.gridSize) continue;
-                    ctx.fillStyle = "#8be9fd";
-                    ctx.strokeStyle = "#ffffff";
+                    ctx.fillStyle = this.tok("sheet");
+                    ctx.strokeStyle = this.tok("wireSelected");
                     ctx.lineWidth = 1.5;
                     ctx.beginPath();
                     ctx.rect((p1.x + p2.x) / 2 - 4, (p1.y + p2.y) / 2 - 4, 8, 8);
@@ -1414,16 +1470,16 @@ class SchematicEditor {
         }
 
         // junction dots only where 3+ conductors really meet
-        ctx.fillStyle = "#6ea8fe";
+        ctx.fillStyle = this.tok("junction");
         for (const key of this.computeJunctions()) {
             const [x, y] = key.split(",").map(Number);
             ctx.beginPath();
-            ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+            ctx.arc(x, y, 4, 0, Math.PI * 2);
             ctx.fill();
         }
 
         // dangling wire ends
-        ctx.strokeStyle = "#ffb86c";
+        ctx.strokeStyle = this.tok("dangling");
         ctx.lineWidth = 1.5;
         for (const wire of this.wires) {
             if (!wire.route || wire.route.length < 2) continue;
@@ -1444,7 +1500,7 @@ class SchematicEditor {
         if (!this.wiring || !this.previewRoute || this.previewRoute.length < 2) return;
 
         const ctx = this.ctx;
-        ctx.strokeStyle = "#50fa7b";
+        ctx.strokeStyle = this.tok("preview");
         ctx.lineWidth = 2;
         ctx.lineJoin = "round";
         ctx.setLineDash([6, 4]);
@@ -1457,7 +1513,7 @@ class SchematicEditor {
         ctx.stroke();
         ctx.setLineDash([]);
 
-        ctx.fillStyle = "#50fa7b";
+        ctx.fillStyle = this.tok("preview");
         for (const a of this.wireAnchors) {
             ctx.beginPath();
             ctx.arc(a.x, a.y, 3, 0, Math.PI * 2);
@@ -1468,20 +1524,20 @@ class SchematicEditor {
     drawProbes() {
         const ctx = this.ctx;
         for (const prb of this.probes) {
-            const color = prb.type === 'V' ? "#ff79c6" : "#bd93f9";
+            const color = prb.type === "V" ? this.tok("probeV") : this.tok("probeI");
             ctx.fillStyle = color;
-            ctx.strokeStyle = "#ffffff";
+            ctx.strokeStyle = this.tok("sheet");
             ctx.lineWidth = 2;
 
             ctx.beginPath();
-            ctx.arc(prb.x, prb.y, 8, 0, Math.PI * 2);
+            ctx.arc(prb.x, prb.y, 7, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
 
             ctx.font = "11px system-ui";
             ctx.fillStyle = color;
             ctx.textAlign = "center";
-            ctx.fillText(prb.label, prb.x, prb.y - 12);
+            ctx.fillText(prb.live !== undefined ? `${prb.label} = ${prb.live}` : prb.label, prb.x, prb.y - 12);
         }
     }
 
@@ -1493,17 +1549,17 @@ class SchematicEditor {
 
         ctx.lineWidth = 2;
         if (type === "terminal") {
-            ctx.strokeStyle = "#50fa7b";
+            ctx.strokeStyle = this.tok("preview");
             ctx.beginPath();
             ctx.arc(x, y, 8, 0, Math.PI * 2);
             ctx.stroke();
         } else if (type === "wire") {
-            ctx.strokeStyle = "#8be9fd";
+            ctx.strokeStyle = this.tok("preview");
             ctx.beginPath();
             ctx.arc(x, y, 6, 0, Math.PI * 2);
             ctx.stroke();
         } else if (this.tool === "wire" || this.wiring) {
-            ctx.fillStyle = blocked ? "#ff5555" : "#6ea8fe";
+            ctx.fillStyle = blocked ? this.tok("wireBlocked") : this.tok("preview");
             ctx.beginPath();
             ctx.arc(x, y, 3, 0, Math.PI * 2);
             ctx.fill();
@@ -1514,8 +1570,8 @@ class SchematicEditor {
         if (!this.box) return;
         const b = this.box;
         const ctx = this.ctx;
-        ctx.fillStyle = "rgba(110, 168, 254, 0.12)";
-        ctx.strokeStyle = "#6ea8fe";
+        ctx.fillStyle = this.tok("selectionFill");
+        ctx.strokeStyle = this.tok("selection");
         ctx.lineWidth = 1 / this.zoom;
         ctx.setLineDash([4 / this.zoom, 3 / this.zoom]);
         ctx.fillRect(b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1);

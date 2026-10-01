@@ -22,6 +22,7 @@ class SimRunner {
             fStart: num("simFstart", 10),
             fStop: num("simFstop", 1e6),
             engine: this.el("simEngine") ? this.el("simEngine").value : "builtin",
+            liveSpeed: this.el("liveSpeed") ? Number(this.el("liveSpeed").value) : 0.1,
             temp: this.el("simTemp") && this.el("simTemp").value !== "" ? Number(this.el("simTemp").value) : 27,
             sweepSource: this.el("sweepSrc") ? this.el("sweepSrc").value : "",
             sweepStart: this.el("sweepStart") ? Units.parseSI(this.el("sweepStart").value) : 0,
@@ -31,6 +32,7 @@ class SimRunner {
     }
 
     toast(message, kind = "info") {
+        if (typeof AppLog !== "undefined") AppLog.add(kind === "error" ? "err" : (kind === "warn" ? "warn" : "info"), message);
         const t = this.el("toast");
         if (!t) { if (kind === "error") alert(message); return; }
         t.textContent = message;

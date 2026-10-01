@@ -1,0 +1,244 @@
+// Live ("animated") simulation, like pressing Play in ISIS: the engine runs a slice of
+// simulation time every animation frame while probes, meters and the oscilloscope update.
+//
+//   Play    start / resume          Pause   freeze the clock
+//   Step    one frame of progress   Stop    end the run and clear the displays
+//
+// Edits to the circuit restart the run; switch toggles and potentiometer settings are
+// applied to the running engine without a restart.
+
+class LiveSim {
+    constructor(editor, runner, graph) {
+        this.editor = editor;
+        this.runner = runner;
+        this.graph = graph;
+        this.state = "stopped";
+        this.run = null;
+        this.raf = 0;
+        this.listeners = [];
+        this.signature = "";
+        this.lastSig = 0;
+        this.lastDraw = 0;
+    }
+
+    onState(fn) { this.listeners.push(fn); }
+    emit() { this.listeners.forEach(fn => fn(this.state, this.run ? this.run.t : 0)); }
+
+    // everything that changes the circuit's equations (switch / wiper settings excluded)
+    circuitSignature() {
+        const comps = this.editor.components.map(c => {
+            const { closed, position, live, scopeTrace, ...rest } = c;
+            return rest;
+        });
+        return JSON.stringify([comps, this.editor.wires.map(w => [w.start, w.end])]);
+    }
+
+    start() {
+        if (this.state === "paused") { this.state = "running"; this.loop(); this.emit(); return; }
+        if (this.state === "running") return;
+        try {
+            this.build();
+        } catch (e) {
+            console.error(e);
+            this.runner.toast(e.message, "error");
+            return;
+        }
+        this.state = "running";
+        if (this.channels.length && this.graph && !this.graph.visible) this.graph.show("live");
+        else if (this.channels.length && this.graph && this.graph.kind !== "live") this.graph.show("live");
+        this.emit();
+        this.loop();
+    }
+
+    build() {
+        const ed = this.editor;
+        const info = NetlistExtractor.extract(ed);
+        if (info.warnings.length) this.runner.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}`, "warn");
+
+        const s = this.runner.settings();
+        this.info = info;
+        this.engine = new SimEngine(info.circuit, this.runner.engineOptions());
+        this.run = this.engine.beginTransient({ tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC });
+        this.span = s.tStop;
+        this.speed = s.liveSpeed;          // simulated seconds per real second (0 = as fast as possible)
+        this.target = 0;
+        this.lastFrame = performance.now();
+        this.signature = this.circuitSignature();
+
+        // channels: probes first, then scope inputs
+        this.channels = [];
+        for (const prb of ed.probes) {
+            if (prb.type === "V") this.channels.push({ name: prb.label, probe: prb, node: info.getPointNodeName(prb.x, prb.y) });
+            else this.channels.push({ name: prb.label, probe: prb, element: prb.targetName });
+        }
+        this.meters = info.instruments.filter(i => i.type === "VM" || i.type === "AM");
+        for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
+            sc.nets.forEach((net, k) => { if (sc.wired[k]) this.channels.push({ name: `${sc.comp.name}:${"ABCD"[k]}`, node: net, scope: sc.comp, index: k }); });
+        }
+        this.times = [];
+        this.values = this.channels.map(() => []);
+        this.nextSample = 0;
+        this.readout();
+    }
+
+    restart() {
+        const was = this.state;
+        this.cancel();
+        this.state = "stopped";
+        if (was !== "stopped") this.start();
+    }
+
+    pause() {
+        if (this.state !== "running") return;
+        this.state = "paused";
+        this.cancel();
+        this.emit();
+    }
+
+    stop() {
+        this.cancel();
+        this.state = "stopped";
+        this.clearDisplays();
+        this.run = null;
+        this.emit();
+    }
+
+    step() {
+        if (this.state === "stopped") {
+            try { this.build(); } catch (e) { this.runner.toast(e.message, "error"); return; }
+            this.state = "paused";
+        }
+        this.advance(30, true);
+        this.readout();
+        this.paint(true);
+        this.emit();
+    }
+
+    cancel() { if (this.raf) cancelAnimationFrame(this.raf); this.raf = 0; }
+
+    loop() {
+        this.cancel();
+        const frame = (now) => {
+            if (this.state !== "running") return;
+            this.watchEdits(now);
+            if (this.state !== "running") return;
+            try {
+                this.advance(11);
+            } catch (e) {
+                console.error(e);
+                this.runner.toast(e.message, "error");
+                this.pause();
+                return;
+            }
+            this.readout();
+            this.paint(false, now);
+            this.emit();
+            if (this.run.done) { this.pause(); return; }
+            this.raf = requestAnimationFrame(frame);
+        };
+        this.raf = requestAnimationFrame(frame);
+    }
+
+    // Advance by one frame's worth of simulated time (paced by the live-speed setting), never
+    // spending more than `ms` of real time on it.
+    advance(ms, force = false) {
+        const run = this.run;
+        const now = performance.now();
+        const dtWall = Math.min(0.25, (now - this.lastFrame) / 1000);
+        this.lastFrame = now;
+        if (this.speed > 0) {
+            this.target += force ? Math.max(this.speed * 0.02, 1e-6) : this.speed * dtWall;
+            if (this.target - run.t > this.speed * 0.25) this.target = run.t + this.speed * 0.05; // cannot keep up: drop the backlog
+        }
+
+        const t0 = performance.now();
+        const minGap = this.span / 3000; // keep the plot buffers bounded
+        while (!run.done && performance.now() - t0 < ms && (this.speed <= 0 || run.t < this.target)) {
+            run.step();
+            if (run.t >= this.nextSample) {
+                this.times.push(run.t);
+                this.channels.forEach((ch, i) => this.values[i].push(ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element)));
+                this.nextSample = run.t + minGap;
+            }
+        }
+        // keep only the visible time window
+        const cut = run.t - this.span;
+        let k = 0;
+        while (k < this.times.length - 2 && this.times[k] < cut) k++;
+        if (k > 0) { this.times.splice(0, k); this.values.forEach(v => v.splice(0, k)); }
+    }
+
+    // push live numbers into the schematic objects
+    readout() {
+        const run = this.run;
+        if (!run) return;
+        const fmt = (v, u) => `${v >= 0 ? "+" : ""}${Units.formatSI(v, u)}`;
+        for (const ch of this.channels) {
+            if (!ch.probe) continue;
+            ch.probe.live = ch.node !== undefined ? Units.formatSI(run.voltage(ch.node), "V") : Units.formatSI(run.current(ch.element), "A");
+        }
+        for (const m of this.meters) {
+            m.comp.live = m.type === "VM" ? fmt(run.voltage(m.nets[0]) - run.voltage(m.nets[1]), "V") : fmt(run.current(m.comp.name), "A");
+        }
+    }
+
+    // Feed each oscilloscope symbol the recent samples of its channels (auto-scaled).
+    updateScopes() {
+        const scopes = new Map();
+        this.channels.forEach((ch, i) => { if (ch.scope) { if (!scopes.has(ch.scope)) scopes.set(ch.scope, []); scopes.get(ch.scope).push({ ch, i }); } });
+        for (const [comp, list] of scopes) {
+            const trace = [[], [], [], []];
+            let peak = 1e-9;
+            for (const { ch, i } of list) {
+                const v = this.values[i], n = v.length, pts = 96;
+                const out = [];
+                for (let k = 0; k < pts; k++) out.push(n ? v[Math.min(n - 1, Math.floor(k * n / pts))] : 0);
+                trace[ch.index] = out;
+                peak = Math.max(peak, ...out.map(Math.abs));
+            }
+            comp.scopeTrace = trace;
+            comp.scopeScale = peak * 1.1;
+        }
+    }
+
+    paint(force, now = performance.now()) {
+        if (!force && now - this.lastDraw < 33) return;
+        this.lastDraw = now;
+        this.updateScopes();
+        this.editor.draw();
+        if (this.graph) this.graph.paintLive(this);
+    }
+
+    clearDisplays() {
+        for (const prb of this.editor.probes) delete prb.live;
+        for (const c of this.editor.components) { delete c.live; delete c.scopeTrace; }
+        this.editor.draw();
+    }
+
+    // restart on circuit edits (debounced); apply switch / pot changes in place
+    watchEdits(now) {
+        if (now - this.lastSig < 150) return;
+        this.lastSig = now;
+        const sig = this.circuitSignature();
+        if (sig !== this.signature) { this.restart(); return; }
+        this.syncControls();
+    }
+
+    syncControls() {
+        for (const el of this.engine.c.elements) {
+            if (el instanceof Switch) {
+                const comp = this.editor.components.find(c => c.name === el.name);
+                if (comp) el.closed = !!comp.closed;
+            }
+        }
+        for (const comp of this.editor.components) {
+            if (comp.type !== "POT") continue;
+            const total = Units.parseSI(comp.value) || 10000;
+            const pos = Math.min(1, Math.max(0, comp.position === undefined ? 0.5 : comp.position));
+            for (const el of this.engine.c.elements) {
+                if (el.name === `${comp.name}_A`) el.r = Math.max(total * pos, 1e-3);
+                if (el.name === `${comp.name}_B`) el.r = Math.max(total * (1 - pos), 1e-3);
+            }
+        }
+    }
+}

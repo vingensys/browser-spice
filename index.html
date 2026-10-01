@@ -1,777 +1,88 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="classic">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Browser SPICE - Interactive CAD Circuit Simulator</title>
-
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-
-        body {
-            margin: 0;
-            background: #101318;
-            color: #e8edf5;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        }
-
-        header {
-            padding: 14px 22px;
-            border-bottom: 1px solid #2b3140;
-            background: #12161d;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        h1 {
-            margin: 0;
-            font-size: 20px;
-            color: #6ea8fe;
-        }
-
-        .subtitle {
-            color: #9aa4b5;
-            font-size: 12px;
-            margin-top: 4px;
-        }
-
-        /* TOOLBAR */
-        .toolbar {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 16px;
-            background: #171b23;
-            border-bottom: 1px solid #2b3140;
-            flex-wrap: wrap;
-        }
-
-        button {
-            border: 1px solid #3b4454;
-            background: #202633;
-            color: #e8edf5;
-            padding: 7px 11px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            font-weight: 500;
-            transition: all 0.15s ease;
-        }
-
-        button:hover {
-            background: #2a3241;
-            border-color: #505d75;
-        }
-
-        button.active {
-            border-color: #6ea8fe;
-            background: #293b5a;
-            color: #6ea8fe;
-        }
-
-        button.sim-btn {
-            background: #1b382b;
-            border-color: #2e5d46;
-            color: #50fa7b;
-        }
-
-        button.sim-btn:hover {
-            background: #244b39;
-            border-color: #50fa7b;
-        }
-
-        .separator {
-            width: 1px;
-            height: 28px;
-            background: #303747;
-            margin: 0 4px;
-        }
-
-        /* MAIN LAYOUT WITH COMPONENT PALETTE SIDEBAR */
-        main {
-            padding: 16px;
-        }
-
-        .workspace {
-            display: grid;
-            grid-template-columns: 220px minmax(600px, 1fr) 300px;
-            gap: 16px;
-            max-width: 1920px;
-            margin: auto;
-        }
-
-        .palette-sidebar {
-            background: #171b23;
-            border: 1px solid #303747;
-            border-radius: 8px;
-            padding: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .palette-sidebar h3 {
-            margin: 0 0 4px 0;
-            font-size: 14px;
-            color: #6ea8fe;
-            border-bottom: 1px solid #2b3140;
-            padding-bottom: 8px;
-        }
-
-        .palette-group {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .palette-group-title {
-            font-size: 11px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #9aa4b5;
-            margin-top: 6px;
-        }
-
-        .palette-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 10px;
-            background: #202633;
-            border: 1px solid #3b4454;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 13px;
-            transition: all 0.15s ease;
-        }
-
-        .palette-item:hover {
-            background: #2a3241;
-            border-color: #6ea8fe;
-        }
-
-        .palette-item.active {
-            background: #293b5a;
-            border-color: #6ea8fe;
-            color: #6ea8fe;
-        }
-
-        .palette-badge {
-            font-size: 10px;
-            background: #0d1117;
-            padding: 2px 6px;
-            border-radius: 4px;
-            color: #9aa4b5;
-            font-family: Consolas, monospace;
-        }
-
-        .middle-column {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        /* SCHEMATIC CANVAS - BIGGER CAD WORKSPACE */
-        .canvas-container {
-            border: 1px solid #303747;
-            border-radius: 8px;
-            overflow: hidden;
-            background: #0d1117;
-            position: relative;
-        }
-
-        #schematic {
-            width: 100%;
-            height: 620px;
-            display: block;
-            touch-action: none;
-            outline: none;
-        }
-
-        .status {
-            padding: 8px 12px;
-            background: #171b23;
-            border-top: 1px solid #303747;
-            color: #9aa4b5;
-            font-family: Consolas, monospace;
-            font-size: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* PLOT SECTION */
-        .plot-container {
-            border: 1px solid #303747;
-            border-radius: 8px;
-            background: #171b23;
-            padding: 12px;
-        }
-
-        .plot-container h3 {
-            margin: 0 0 10px 0;
-            font-size: 14px;
-            color: #e8edf5;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .plot-controls {
-            display: flex;
-            gap: 6px;
-            align-items: center;
-        }
-
-        .plot-controls button {
-            padding: 4px 8px;
-            font-size: 11px;
-        }
-
-        #plotCanvas {
-            width: 100%;
-            height: 280px;
-            display: block;
-            background: #0d1117;
-            border-radius: 6px;
-            border: 1px solid #252b37;
-        }
-
-        /* RIGHT SIDEBAR PROPERTIES & SIM RESULTS */
-        .right-sidebar {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .panel {
-            background: #171b23;
-            border: 1px solid #303747;
-            border-radius: 8px;
-            padding: 14px;
-        }
-
-        .panel h2 {
-            margin: 0 0 12px 0;
-            font-size: 15px;
-            color: #e8edf5;
-            border-bottom: 1px solid #2b3140;
-            padding-bottom: 8px;
-        }
-
-        .no-selection {
-            color: #7f8999;
-            font-size: 13px;
-            line-height: 1.5;
-        }
-
-        .property {
-            margin-bottom: 14px;
-        }
-
-        .property label {
-            display: block;
-            color: #9aa4b5;
-            font-size: 11px;
-            margin-bottom: 5px;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-
-        .property input,
-        .property select {
-            width: 100%;
-            padding: 8px;
-            background: #0d1117;
-            border: 1px solid #3a4352;
-            border-radius: 5px;
-            color: #e8edf5;
-            font-size: 13px;
-        }
-
-        .property input:focus,
-        .property select:focus {
-            outline: none;
-            border-color: #6ea8fe;
-        }
-
-        .results-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-        }
-
-        .results-table th,
-        .results-table td {
-            padding: 6px 8px;
-            text-align: left;
-            border-bottom: 1px solid #2b3140;
-        }
-
-        .results-table th {
-            color: #9aa4b5;
-            font-weight: 600;
-        }
-
-        .results-table td.val {
-            font-family: Consolas, monospace;
-            color: #50fa7b;
-        }
-
-        /* CONTEXT MENU */
-        .context-menu {
-            display: none;
-            position: fixed;
-            z-index: 1000;
-            background: #171b23;
-            border: 1px solid #3b4454;
-            border-radius: 8px;
-            padding: 6px 0;
-            width: 190px;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
-        }
-
-        .ctx-item {
-            padding: 8px 14px;
-            font-size: 13px;
-            color: #e8edf5;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .ctx-item:hover {
-            background: #2a3241;
-            color: #6ea8fe;
-        }
-
-        .ctx-item.disabled {
-            color: #505d75;
-            cursor: not-allowed;
-        }
-
-        .ctx-item.disabled:hover {
-            background: transparent;
-            color: #505d75;
-        }
-
-        .ctx-key {
-            font-size: 10px;
-            color: #9aa4b5;
-            font-family: Consolas, monospace;
-        }
-
-        .ctx-divider {
-            height: 1px;
-            background: #2b3140;
-            margin: 4px 0;
-        }
-
-        /* MODAL */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            z-index: 100;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .modal-content {
-            background: #171b23;
-            border: 1px solid #303747;
-            border-radius: 8px;
-            padding: 20px;
-            width: 550px;
-            max-width: 90%;
-            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 14px;
-        }
-
-        .modal-header h3 {
-            margin: 0;
-            color: #6ea8fe;
-        }
-
-        .modal-textarea {
-            width: 100%;
-            height: 250px;
-            background: #0d1117;
-            border: 1px solid #3b4454;
-            color: #50fa7b;
-            font-family: Consolas, monospace;
-            font-size: 12px;
-            padding: 10px;
-            border-radius: 6px;
-            resize: vertical;
-        }
-
-        select#exampleSelect {
-            background: #171b23;
-            color: #e8edf5;
-            border: 1px solid #3a4352;
-            border-radius: 6px;
-            padding: 7px 10px;
-            font-size: 13px;
-            cursor: pointer;
-        }
-
-        .sim-settings {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 12px;
-            color: #9aa4b5;
-        }
-
-        .sim-settings input[type="text"],
-        .sim-settings input:not([type]) {
-            background: #0d1117;
-            border: 1px solid #3a4352;
-            border-radius: 4px;
-            color: #e8edf5;
-            padding: 4px 6px;
-            font-size: 12px;
-        }
-
-        .sim-settings select {
-            background: #0d1117;
-            border: 1px solid #3a4352;
-            border-radius: 4px;
-            color: #e8edf5;
-            padding: 3px 6px;
-            font-size: 12px;
-        }
-
-        .sim-settings label.chk { display: flex; align-items: center; gap: 4px; }
-
-        .prop-note {
-            color: #7f8999;
-            font-size: 11px;
-            line-height: 1.4;
-            margin-top: 6px;
-        }
-
-        .toast {
-            position: fixed;
-            left: 50%;
-            bottom: 22px;
-            transform: translateX(-50%) translateY(20px);
-            max-width: 70vw;
-            padding: 10px 16px;
-            border-radius: 8px;
-            background: #1b2230;
-            border: 1px solid #3a4352;
-            color: #e8edf5;
-            font-size: 13px;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.18s, transform 0.18s;
-            z-index: 2000;
-        }
-        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-        .toast.error { border-color: #ff5555; color: #ffb3b3; }
-        .toast.warn { border-color: #ffb86c; color: #ffd9a8; }
-    </style>
+    <title>Browser SPICE - Schematic Capture & Simulation</title>
+    <link rel="stylesheet" href="css/app.css">
 </head>
 
 <body>
+    <div id="app">
+        <div id="menubar"></div>
+        <div id="toolbar"></div>
 
-    <header>
-        <div>
-            <h1>Browser SPICE</h1>
-            <div class="subtitle">Interactive CAD Schematic & Circuit Simulator Engine</div>
-        </div>
-    </header>
-
-    <!-- CLEAN TOP TOOLBAR (FILE & SIMULATION) -->
-    <div class="toolbar">
-        <button id="saveJson" title="Save schematic as a JSON file">💾 Save CAD</button>
-        <button id="loadJson" title="Open a saved schematic JSON file">📂 Open CAD</button>
-        <button id="importCir" title="Import a SPICE .cir netlist as a schematic">📥 Import SPICE</button>
-        <button id="exportCir" title="Export a standard SPICE .cir netlist">⚡ Export Netlist</button>
-        <select id="exampleSelect" title="Load an example circuit">
-            <option value="">Examples…</option>
-        </select>
-
-        <span class="separator"></span>
-
-        <button id="runDC" class="sim-btn">▶ Run DC</button>
-        <button id="runAC" class="sim-btn">▶ Run AC Sweep</button>
-        <button id="runTransient" class="sim-btn">▶ Run Transient</button>
-        <button id="runSweep" class="sim-btn">▶ DC Sweep</button>
-
-        <span class="separator"></span>
-
-        <span class="sim-settings" title="Simulation settings">
-            <label>Stop <input id="simTstop" value="20m" size="5"></label>
-            <label>Step <input id="simTstep" value="20u" size="5"></label>
-            <label class="chk"><input id="simUic" type="checkbox" checked> start from 0</label>
-            <label>AC <input id="simFstart" value="10" size="4">–<input id="simFstop" value="1M" size="4"> Hz</label>
-            <label>Temp <input id="simTemp" value="27" size="3"> °C</label>
-            <label>Sweep <select id="sweepSrc"><option value="">(no sources)</option></select>
-                <input id="sweepStart" value="0" size="3">→<input id="sweepStop" value="5" size="3"> step <input id="sweepStep" value="0.1" size="3"></label>
-            <label>Engine
-                <select id="simEngine" title="Built-in: instant and interactive. ngspice: the industry-standard solver (loads on first use).">
-                    <option value="builtin">Built-in (fast)</option>
-                    <option value="ngspice">ngspice (accurate)</option>
-                </select>
-            </label>
-        </span>
-
-        <input type="file" id="fileInput" accept=".json" style="display: none;">
-        <input type="file" id="spiceInput" accept=".cir,.net,.sp,.spice,.txt" style="display: none;">
-    </div>
-
-    <!-- WORKSPACE -->
-    <main>
-        <div class="workspace">
-            <!-- LEFT COMPONENT PALETTE SIDEBAR -->
-            <div class="palette-sidebar">
-                <h3>Component Library</h3>
-
-                <div class="palette-group-title">Mode & Wiring</div>
-                <div class="palette-group">
-                    <div class="palette-item active" data-tool="select">
-                        <span>Pointer / Select</span>
-                        <span class="palette-badge">Esc</span>
-                    </div>
-                    <div class="palette-item" data-tool="wire">
-                        <span>Wire Tool</span>
-                        <span class="palette-badge">Wire</span>
-                    </div>
-                </div>
-
-                <div class="palette-group-title">Passive Components</div>
-                <div class="palette-group">
-                    <div class="palette-item" data-tool="R">
-                        <span>Resistor</span>
-                        <span class="palette-badge">R</span>
-                    </div>
-                    <div class="palette-item" data-tool="C">
-                        <span>Capacitor</span>
-                        <span class="palette-badge">C</span>
-                    </div>
-                    <div class="palette-item" data-tool="L">
-                        <span>Inductor</span>
-                        <span class="palette-badge">L</span>
-                    </div>
-                </div>
-
-                <div class="palette-group-title">Sources & References</div>
-                <div class="palette-group">
-                    <div class="palette-item" data-tool="V">
-                        <span>Voltage Source</span>
-                        <span class="palette-badge">V</span>
-                    </div>
-                    <div class="palette-item" data-tool="I">
-                        <span>Current Source</span>
-                        <span class="palette-badge">I</span>
-                    </div>
-                    <div class="palette-item" data-tool="E">
-                        <span>VCVS (E)</span>
-                        <span class="palette-badge">E</span>
-                    </div>
-                    <div class="palette-item" data-tool="G">
-                        <span>VCCS (G)</span>
-                        <span class="palette-badge">G</span>
-                    </div>
-                    <div class="palette-item" data-tool="SW">
-                        <span>Switch</span>
-                        <span class="palette-badge">S</span>
-                    </div>
-                    <div class="palette-item" data-tool="POT">
-                        <span>Potentiometer</span>
-                        <span class="palette-badge">P</span>
-                    </div>
-                    <div class="palette-item" data-tool="GND">
-                        <span>Ground</span>
-                        <span class="palette-badge">GND</span>
-                    </div>
-                    <div class="palette-item" data-tool="NODEIC">
-                        <span>Initial Condition</span>
-                        <span class="palette-badge">IC</span>
-                    </div>
-                </div>
-
-                <div class="palette-group-title">Active & Semiconductors</div>
-                <div class="palette-group">
-                    <div class="palette-item" data-tool="D">
-                        <span>Diode (1N4148)</span>
-                        <span class="palette-badge">D</span>
-                    </div>
-                    <div class="palette-item" data-tool="DZ">
-                        <span>Zener Diode</span>
-                        <span class="palette-badge">DZ</span>
-                    </div>
-                    <div class="palette-item" data-tool="LED">
-                        <span>LED Indicator</span>
-                        <span class="palette-badge">LED</span>
-                    </div>
-                    <div class="palette-item" data-tool="BJT_NPN">
-                        <span>NPN Transistor</span>
-                        <span class="palette-badge">Q</span>
-                    </div>
-                    <div class="palette-item" data-tool="BJT_PNP">
-                        <span>PNP Transistor</span>
-                        <span class="palette-badge">Q_P</span>
-                    </div>
-                    <div class="palette-item" data-tool="NMOS">
-                        <span>N-MOSFET</span>
-                        <span class="palette-badge">M</span>
-                    </div>
-                    <div class="palette-item" data-tool="PMOS">
-                        <span>P-MOSFET</span>
-                        <span class="palette-badge">Mp</span>
-                    </div>
-                    <div class="palette-item" data-tool="OPAMP">
-                        <span>Op-Amp (LM741)</span>
-                        <span class="palette-badge">U</span>
-                    </div>
-                    <div class="palette-item" data-tool="IC555">
-                        <span>555 Timer IC</span>
-                        <span class="palette-badge">NE555</span>
-                    </div>
-                </div>
-
-                <div class="palette-group-title">Digital Logic Gates</div>
-                <div class="palette-group">
-                    <div class="palette-item" data-tool="AND">
-                        <span>AND Gate</span>
-                        <span class="palette-badge">&</span>
-                    </div>
-                    <div class="palette-item" data-tool="OR">
-                        <span>OR Gate</span>
-                        <span class="palette-badge">≥1</span>
-                    </div>
-                    <div class="palette-item" data-tool="NOT">
-                        <span>NOT Gate (Inverter)</span>
-                        <span class="palette-badge">1</span>
-                    </div>
-                    <div class="palette-item" data-tool="NAND">
-                        <span>NAND Gate</span>
-                        <span class="palette-badge">!&</span>
-                    </div>
-                    <div class="palette-item" data-tool="NOR">
-                        <span>NOR Gate</span>
-                        <span class="palette-badge">!≥1</span>
-                    </div>
-                    <div class="palette-item" data-tool="XOR">
-                        <span>XOR Gate</span>
-                        <span class="palette-badge">=1</span>
-                    </div>
-                </div>
-
-                <div class="palette-group-title">Measurement Probes</div>
-                <div class="palette-group">
-                    <div class="palette-item" data-tool="vProbe" style="color: #ff79c6;">
-                        <span>Voltage Probe</span>
-                        <span class="palette-badge">V-Prb</span>
-                    </div>
-                    <div class="palette-item" data-tool="iProbe" style="color: #bd93f9;">
-                        <span>Current Probe</span>
-                        <span class="palette-badge">I-Prb</span>
-                    </div>
-                </div>
-            </div>
-
-            <!-- MIDDLE COLUMN: CANVAS & PLOT -->
-            <div class="middle-column">
-                <!-- SCHEMATIC -->
-                <div class="canvas-container">
-                    <canvas id="schematic" tabindex="0"></canvas>
-                    <div class="status">
-                        <span id="statusText">Select a tool from the Component Library or right-click canvas for CAD actions.</span>
-                        <span style="color: #6ea8fe; font-size: 11px;">💡 Scroll = zoom · Space/Middle-drag = pan · F = fit · Shift-click / drag = multi-select</span>
-                    </div>
-                </div>
-
-                <!-- WAVEFORM / BODE PLOT -->
-                <div class="plot-container">
-                    <h3>
-                        <span>Simulation Waveform / Plot</span>
-                        <div class="plot-controls">
-                            <span id="plotTitle" style="font-size: 12px; color: #9aa4b5; font-weight: normal; margin-right: 12px;">No simulation run yet</span>
-                            <button id="zoomInBtn" title="Zoom In X/Y">🔍 +</button>
-                            <button id="zoomOutBtn" title="Zoom Out X/Y">🔍 -</button>
-                            <button id="resetZoomBtn" title="Reset Zoom">⟲ Reset</button>
+        <div id="main">
+            <aside id="leftpane">
+                <div class="pane-title"><span>OVERVIEW</span></div>
+                <div id="overview-wrap"><canvas id="overview"></canvas></div>
+                <div id="leftrow">
+                    <div id="modebar"></div>
+                    <div id="devicepane">
+                        <div class="pane-title">
+                            <span id="devtitle">DEVICES</span>
+                            <span>
+                                <button class="pane-btn" id="pickBtn" title="Pick devices (P)">P</button><button class="pane-btn" id="removeBtn" title="Remove the selected device from the list">−</button>
+                            </span>
                         </div>
-                    </h3>
-                    <canvas id="plotCanvas"></canvas>
-                </div>
-            </div>
-
-            <!-- RIGHT SIDEBAR PROPERTIES & SIM RESULTS -->
-            <div class="right-sidebar">
-                <!-- PROPERTIES -->
-                <div class="panel">
-                    <h2>Properties</h2>
-                    <div id="propertiesContent">
-                        <div class="no-selection">
-                            No component selected.<br><br>
-                            Click a component on the schematic to view and edit its parameters.
-                        </div>
+                        <ul id="devicelist"></ul>
+                        <div id="devpreview-wrap"><canvas id="devpreview"></canvas></div>
+                        <div id="rotbar"></div>
                     </div>
                 </div>
+            </aside>
 
-                <!-- DC RESULTS -->
-                <div class="panel">
-                    <h2>DC Operating Point</h2>
-                    <div id="dcResults">
-                        <div class="no-selection">Run DC simulation to view node voltages & currents.</div>
-                    </div>
-                </div>
-            </div>
+            <section id="center">
+                <div id="sheetwrap"><canvas id="schematic" tabindex="0"></canvas></div>
+                <div id="graphwin" class="hidden"></div>
+            </section>
         </div>
-    </main>
 
-    <!-- RIGHT-CLICK CAD CONTEXT MENU -->
-    <div id="contextMenu" class="context-menu">
-        <div class="ctx-item" id="ctxUndo">↶ Undo <span class="ctx-key">Ctrl+Z</span></div>
-        <div class="ctx-item" id="ctxRedo">↷ Redo <span class="ctx-key">Ctrl+Y</span></div>
-        <div class="ctx-divider"></div>
-        <div class="ctx-item" id="ctxCopy">📋 Copy <span class="ctx-key">Ctrl+C</span></div>
-        <div class="ctx-item" id="ctxPaste">📄 Paste <span class="ctx-key">Ctrl+V</span></div>
-        <div class="ctx-item" id="ctxRotate">🔄 Rotate <span class="ctx-key">R</span></div>
-        <div class="ctx-item" id="ctxDelete">🗑️ Delete <span class="ctx-key">Del</span></div>
-        <div class="ctx-divider"></div>
-        <div class="ctx-item" id="ctxWire">✏️ Draw Wire <span class="ctx-key">W</span></div>
-        <div class="ctx-item" id="ctxVProbe" style="color: #ff79c6;">⚡ Add V-Probe</div>
-        <div class="ctx-item" id="ctxIProbe" style="color: #bd93f9;">⚡ Add I-Probe</div>
+        <div id="statusbar"></div>
     </div>
 
-    <!-- SPICE NETLIST EXPORT MODAL -->
-    <div id="netlistModal" class="modal-overlay">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>SPICE Netlist (.cir)</h3>
-                <button id="closeNetlistModal">✖ Close</button>
-            </div>
-            <textarea id="netlistText" class="modal-textarea" readonly></textarea>
-            <div style="margin-top: 12px; display: flex; justify-content: flex-end; gap: 8px;">
-                <button id="downloadCirBtn" class="sim-btn">💾 Download .cir File</button>
-            </div>
-        </div>
-    </div>
-
+    <div id="dialog-layer"></div>
+    <div id="contextMenu" class="context-menu"></div>
     <div id="toast" class="toast"></div>
 
-    <!-- CORE SCRIPTS -->
+    <!-- parked UI that dialogs borrow: the simulation settings form and the part properties -->
+    <div class="hidden">
+        <div id="settings-form" class="form-grid" style="width:420px">
+            <h4 class="span">Transient</h4>
+            <label>Stop time</label><input id="simTstop" value="20m">
+            <label>Maximum step</label><input id="simTstep" value="20u">
+            <label>Start from zero (UIC)</label><span><input id="simUic" type="checkbox" checked style="width:auto"> capacitors / inductors start empty</span>
+            <label>Live simulation speed</label>
+            <select id="liveSpeed" title="Simulated seconds per real second while the Play button is running">
+                <option value="1">1× (real time)</option>
+                <option value="0.1" selected>0.1×</option>
+                <option value="0.01">0.01×</option>
+                <option value="0">As fast as possible</option>
+            </select>
+            <h4 class="span">AC sweep</h4>
+            <label>Start frequency (Hz)</label><input id="simFstart" value="10">
+            <label>Stop frequency (Hz)</label><input id="simFstop" value="1M">
+            <h4 class="span">DC sweep</h4>
+            <label>Source</label><select id="sweepSrc"><option value="">(no sources)</option></select>
+            <label>From</label><input id="sweepStart" value="0">
+            <label>To</label><input id="sweepStop" value="5">
+            <label>Step</label><input id="sweepStep" value="0.1">
+            <h4 class="span">Environment</h4>
+            <label>Temperature (°C)</label><input id="simTemp" value="27">
+            <label>Solver</label>
+            <select id="simEngine" title="Built-in: instant and interactive. ngspice: the industry-standard solver (loads on first use).">
+                <option value="builtin">Built-in (fast, live)</option>
+                <option value="ngspice">ngspice (accurate, graphs only)</option>
+            </select>
+        </div>
+        <div id="props-store"><div id="propertiesContent"></div></div>
+    </div>
+
+    <input type="file" id="fileInput" accept=".json" class="hidden">
+    <input type="file" id="spiceInput" accept=".cir,.net,.sp,.spice,.lib,.mod,.txt" class="hidden">
+
+    <!-- foundations -->
     <script src="js/utils/complex.js"></script>
     <script src="js/utils/units.js"></script>
 
@@ -785,17 +96,29 @@
     <script src="js/sim/ngspice-backend.js"></script>
 
     <!-- schematic editor -->
+    <script src="js/ui/theme.js"></script>
     <script src="js/cad/symbols.js"></script>
     <script src="js/cad/router.js"></script>
     <script src="js/cad/symbol-draw.js"></script>
     <script src="js/visualization/schematic.js"></script>
     <script src="js/visualization/waveform.js"></script>
 
-    <!-- netlist bridge + UI -->
+    <!-- netlist bridge + application UI -->
     <script src="js/circuit/netlist.js"></script>
+    <script src="js/ui/icons.js"></script>
+    <script src="js/ui/commands.js"></script>
     <script src="js/ui/properties.js"></script>
     <script src="js/ui/sim-runner.js"></script>
     <script src="js/ui/spice-import.js"></script>
+    <script src="js/ui/catalog.js"></script>
+    <script src="js/ui/dialogs.js"></script>
+    <script src="js/ui/device-list.js"></script>
+    <script src="js/ui/menubar.js"></script>
+    <script src="js/ui/toolbars.js"></script>
+    <script src="js/ui/statusbar.js"></script>
+    <script src="js/ui/overview.js"></script>
+    <script src="js/ui/graph-window.js"></script>
+    <script src="js/ui/live-sim.js"></script>
     <script src="js/examples.js"></script>
     <script src="js/app.js"></script>
 </body>

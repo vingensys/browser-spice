@@ -52,7 +52,7 @@ const EXAMPLES = [
     {
         id: "rc-ladder",
         name: "RC ladder (transient)",
-        note: "Press Run Transient: both capacitors charge through the resistors.",
+        note: "Press Play (F12) for the live run, or Graph > Analogue Analysis for a full transient: both capacitors charge through the resistors.",
         settings: { tStop: "50m", tStep: "50u" },
         build(b) {
             const y = 200;
@@ -71,7 +71,7 @@ const EXAMPLES = [
     {
         id: "half-wave",
         name: "Half-wave rectifier + filter",
-        note: "1N4007 rectifier on a 10 V / 50 Hz source. Run Transient to see the ripple.",
+        note: "1N4007 rectifier on a 10 V / 50 Hz source. Press Play (F12) to watch the probes and the ripple.",
         settings: { tStop: "60m", tStep: "100u" },
         build(b) {
             const v = b.part("V", 120, 300, { rot: 270, sourceType: "AC", acMagnitude: 10, frequency: 50, dcOffset: 0, acPhase: 0 });
@@ -211,6 +211,24 @@ const EXAMPLES = [
             b.wire(v, "2", p, "A"); b.wire(p, "B", g, "1"); b.wire(p, "W", sw, "1");
             b.wire(sw, "2", rl, "1"); b.wire(rl, "2", g, "1"); b.wire(v, "1", g, "1");
             b.vprobe(p, "W", "V(wiper)");
+        }
+    },
+    {
+        id: "instruments",
+        name: "Virtual instruments (meters + scope)",
+        note: "Press Play (F12): the ammeter, voltmeter and oscilloscope read the RC circuit live. Double-click a part to change its value.",
+        settings: { tStop: "30m", tStep: "20u" },
+        build(b) {
+            const v = b.part("V", 120, 300, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 0, rise: 1e-6, fall: 1e-6, width: 5e-3, period: 10e-3 } });
+            const r = b.part("R", 260, 200, { value: "1 kΩ" });
+            const am = b.part("AM", 400, 200, {});
+            const c = b.part("C", 540, 300, { rot: 90, value: "2.2 µF" });
+            const vm = b.part("VM", 660, 300, { rot: 90 });
+            const sc = b.part("SCOPE", 860, 240, {});
+            const g = b.part("GND", 400, 440);
+            b.wire(v, "2", r, "1"); b.wire(r, "2", am, "+"); b.wire(am, "-", c, "1");
+            b.wire(c, "1", vm, "+"); b.wire(vm, "-", g, "1"); b.wire(c, "2", g, "1"); b.wire(v, "1", g, "1");
+            b.wire(sc, "A", r, "1"); b.wire(sc, "B", c, "1");
         }
     },
     {

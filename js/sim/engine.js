@@ -267,121 +267,15 @@ class SimEngine {
 
     // tStep is the largest step; with adaptive on, the engine shortens it where the waveform
     // bends sharply and lands exactly on source edges and on comparator crossings.
-    transient({ tStop = 0.01, tStep = 1e-5, method = "trap", uic = true, adaptive = true, lteTol = 0.02, nodeIC = null } = {}) {
-        const c = this.c;
-        const op = this.operatingPoint({ uic, nodeIC });
-        let x = op.x;
+    transient(opts = {}) {
+        const run = new TransientRun(this, opts);
+        while (!run.done) run.step();
+        return run.result;
+    }
 
-        const ctx = this.makeCtx("tran");
-        ctx.x = x;
-        ctx.uic = uic;
-        for (const el of c.elements) el.initState(ctx);
-
-        const res = { timePoints: [0], nodeHistories: {}, currentHistories: {}, steps: 0, rejected: 0, events: 0 };
-        c.names.forEach(n => { if (!c.isInternal(n)) res.nodeHistories[n] = []; });
-        c.elements.forEach(e => { if (!e.name.includes(".")) res.currentHistories[e.name] = []; });
-
-        const record = () => {
-            c.names.forEach((n, i) => { if (!c.isInternal(n)) res.nodeHistories[n].push(x[i]); });
-            c.elements.forEach(e => { if (!e.name.includes(".")) res.currentHistories[e.name].push(e.current(x)); });
-        };
-        record();
-
-        const breaks = [...new Set(c.elements.flatMap(e => e.breakpoints(tStop)))]
-            .filter(t => t > 0 && t <= tStop).sort((a, b) => a - b);
-        const evEls = c.elements.filter(e => e.hasEvents);
-        let bi = 0;
-
-        const tEps = tStop * 1e-12;
-        const hMin = tStep * 1e-8;
-        let t = 0;
-        let afterBreak = true;
-        let hNext = tStep;
-        let xPrev = null, hPrev = 0; // history for the error predictor
-
-        const solve = (hh, meth) => {
-            ctx.mode = "tran";
-            ctx.time = t + hh;
-            ctx.dt = hh;
-            ctx.method = meth;
-            return this.newton(ctx, x, 40);
-        };
-        const flips = (sol) => { ctx.x = sol.x; return evEls.some(e => e.wouldFlip(ctx)); };
-
-        while (t < tStop - tEps) {
-            let h = Math.min(hNext, tStop - t);
-            while (bi < breaks.length && breaks[bi] <= t + tEps) bi++;
-            let hitsBreak = false;
-            if (bi < breaks.length && t + h >= breaks[bi] - tEps) {
-                h = breaks[bi] - t;
-                hitsBreak = true;
-            }
-
-            let r = null, shrink = 0, lteTries = 0, ratio = 0;
-            for (;;) {
-                r = solve(h, (afterBreak || shrink > 0) ? "be" : method);
-                if (!r.ok) {
-                    res.rejected++;
-                    h /= 4;
-                    hitsBreak = false;
-                    shrink++;
-                    if (h < hMin) {
-                        throw new Error(`Transient analysis failed to converge at t = ${(t * 1e3).toPrecision(4)} ms (time step too small).`);
-                    }
-                    continue;
-                }
-                if (adaptive && !afterBreak && xPrev) {
-                    ratio = this.lteRatio(r.x, x, xPrev, h, hPrev, lteTol);
-                    if (ratio > 1 && lteTries < 8 && h > tStep * 1e-3) {
-                        h *= Math.max(0.2, 0.85 / Math.sqrt(ratio));
-                        hitsBreak = false;
-                        lteTries++;
-                        res.rejected++;
-                        continue;
-                    }
-                }
-                break;
-            }
-
-            // a comparator would change state during this step: find the crossing by bisection
-            let hitEvent = false;
-            if (evEls.length && flips(r)) {
-                let lo = 0, hi = h;
-                for (let it = 0; it < 12; it++) {
-                    const mid = (lo + hi) / 2;
-                    const rm = solve(mid, "be");
-                    if (!rm.ok) break;
-                    if (flips(rm)) hi = mid; else lo = mid;
-                }
-                h = hi;
-                r = solve(h, "be"); // refresh companion state for the step that is accepted
-                hitEvent = true;
-                hitsBreak = false;
-                res.events++;
-            }
-
-            xPrev = x;
-            hPrev = h;
-            x = r.x;
-            ctx.x = x;
-            ctx.time = t + h;
-            ctx.dt = h;
-            for (const el of c.elements) el.accept(ctx);
-            t += h;
-            res.steps++;
-            res.timePoints.push(t);
-            record();
-
-            afterBreak = hitsBreak || hitEvent;
-            if (afterBreak) { xPrev = null; }
-            // grow back toward the nominal step, faster when the waveform is smooth
-            hNext = (shrink > 0 || lteTries > 0 || hitEvent)
-                ? Math.min(tStep, h * (ratio < 0.3 ? 2 : 1.4))
-                : Math.min(tStep, h * (ratio < 0.3 ? 2 : 1.4));
-        }
-
-        res.stepsTaken = res.steps;
-        return res;
+    // Resumable version for live simulation: call run.step() repeatedly, read run.x / run.t.
+    beginTransient(opts = {}) {
+        return new TransientRun(this, Object.assign({ tStop: 20, record: false }, opts));
     }
 
     // ------------------------------------------------------------------------ AC
@@ -448,5 +342,156 @@ class SimEngine {
             results.push({ frequency: f, nodeVoltages, sourceCurrents });
         }
         return results;
+    }
+}
+
+
+// One transient analysis in progress. step() advances by one accepted time step.
+class TransientRun {
+    constructor(engine, { tStop = 0.01, tStep = 1e-5, method = "trap", uic = true, adaptive = true, lteTol = 0.02, nodeIC = null, record = true } = {}) {
+        this.engine = engine;
+        const c = engine.c;
+        this.c = c;
+        this.tStop = tStop;
+        this.tStep = tStep;
+        this.method = method;
+        this.adaptive = adaptive;
+        this.lteTol = lteTol;
+        this.record = record;
+
+        const op = engine.operatingPoint({ uic, nodeIC });
+        this.x = op.x;
+
+        this.ctx = engine.makeCtx("tran");
+        this.ctx.x = this.x;
+        this.ctx.uic = uic;
+        for (const el of c.elements) el.initState(this.ctx);
+
+        this.result = { timePoints: [0], nodeHistories: {}, currentHistories: {}, steps: 0, rejected: 0, events: 0 };
+        if (record) {
+            c.names.forEach(n => { if (!c.isInternal(n)) this.result.nodeHistories[n] = []; });
+            c.elements.forEach(e => { if (!e.name.includes(".")) this.result.currentHistories[e.name] = []; });
+            this.log();
+        }
+
+        this.breaks = [...new Set(c.elements.flatMap(e => e.breakpoints(tStop)))]
+            .filter(t => t > 0 && t <= tStop).sort((a, b) => a - b);
+        this.evEls = c.elements.filter(e => e.hasEvents);
+        this.bi = 0;
+        this.tEps = tStop * 1e-12;
+        this.hMin = tStep * 1e-8;
+        this.t = 0;
+        this.afterBreak = true;
+        this.hNext = tStep;
+        this.xPrev = null;
+        this.hPrev = 0;
+    }
+
+    get done() { return this.t >= this.tStop - this.tEps; }
+
+    log() {
+        const { c, result, x } = this;
+        c.names.forEach((n, i) => { if (!c.isInternal(n)) result.nodeHistories[n].push(x[i]); });
+        c.elements.forEach(e => { if (!e.name.includes(".")) result.currentHistories[e.name].push(e.current(x)); });
+    }
+
+    // current voltage of a node / current through an element, for live displays
+    voltage(node) {
+        if (node === "0") return 0;
+        const i = this.c.nodeIndex.get(String(node));
+        return i === undefined ? 0 : this.x[i];
+    }
+
+    current(name) {
+        const el = this.c.elements.find(e => e.name === name);
+        return el ? el.current(this.x) : 0;
+    }
+
+    solve(hh, meth) {
+        const ctx = this.ctx;
+        ctx.mode = "tran";
+        ctx.time = this.t + hh;
+        ctx.dt = hh;
+        ctx.method = meth;
+        return this.engine.newton(ctx, this.x, 40);
+    }
+
+    flips(sol) {
+        this.ctx.x = sol.x;
+        return this.evEls.some(e => e.wouldFlip(this.ctx));
+    }
+
+    step() {
+        const { engine, c, ctx, result, tEps, hMin, tStep } = this;
+        let h = Math.min(this.hNext, this.tStop - this.t);
+        while (this.bi < this.breaks.length && this.breaks[this.bi] <= this.t + tEps) this.bi++;
+        let hitsBreak = false;
+        if (this.bi < this.breaks.length && this.t + h >= this.breaks[this.bi] - tEps) {
+            h = this.breaks[this.bi] - this.t;
+            hitsBreak = true;
+        }
+
+        let r = null, shrink = 0, lteTries = 0, ratio = 0;
+        for (;;) {
+            r = this.solve(h, (this.afterBreak || shrink > 0) ? "be" : this.method);
+            if (!r.ok) {
+                result.rejected++;
+                h /= 4;
+                hitsBreak = false;
+                shrink++;
+                if (h < hMin) {
+                    throw new Error(`Transient analysis failed to converge at t = ${(this.t * 1e3).toPrecision(4)} ms (time step too small).`);
+                }
+                continue;
+            }
+            if (this.adaptive && !this.afterBreak && this.xPrev) {
+                ratio = engine.lteRatio(r.x, this.x, this.xPrev, h, this.hPrev, this.lteTol);
+                if (ratio > 1 && lteTries < 8 && h > tStep * 1e-3) {
+                    h *= Math.max(0.2, 0.85 / Math.sqrt(ratio));
+                    hitsBreak = false;
+                    lteTries++;
+                    result.rejected++;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        // a comparator would change state during this step: find the crossing by bisection
+        let hitEvent = false;
+        if (this.evEls.length && this.flips(r)) {
+            let lo = 0, hi = h;
+            for (let it = 0; it < 12; it++) {
+                const mid = (lo + hi) / 2;
+                const rm = this.solve(mid, "be");
+                if (!rm.ok) break;
+                if (this.flips(rm)) hi = mid; else lo = mid;
+            }
+            h = hi;
+            r = this.solve(h, "be"); // refresh companion state for the step that is accepted
+            hitEvent = true;
+            hitsBreak = false;
+            result.events++;
+        }
+
+        this.xPrev = this.x;
+        this.hPrev = h;
+        this.x = r.x;
+        ctx.x = this.x;
+        ctx.time = this.t + h;
+        ctx.dt = h;
+        for (const el of c.elements) el.accept(ctx);
+        this.t += h;
+        result.steps++;
+        if (this.record) {
+            result.timePoints.push(this.t);
+            this.log();
+        }
+
+        this.afterBreak = hitsBreak || hitEvent;
+        if (this.afterBreak) this.xPrev = null;
+        // grow back toward the nominal step, faster when the waveform is smooth
+        this.hNext = Math.min(tStep, h * (ratio < 0.3 ? 2 : 1.4));
+        return h;
     }
 }
