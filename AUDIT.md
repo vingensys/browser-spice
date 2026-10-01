@@ -15,7 +15,7 @@ against Proteus / ngspice, **P3** polish.
 | --- | --- | --- |
 | No text / graphic annotation, title block, notes | P2 | Cannot document a design on the sheet. |
 | No multi-sheet or hierarchical designs, no buses | P2 | Everything is one flat sheet. Net labels and power ports exist (same name = same net). |
-| No autosave and no unsaved-changes warning (verified) | P1 | Closing the tab loses the design. Only manual Save to a JSON file. New Design is undoable but there is no prompt. |
+| ~~No autosave / unsaved-changes warning~~ | P1 | **Done**: autosave to browser storage with restore, dirty tracking, Save / Don't Save / Cancel prompts. Remaining: autosave is per browser profile (no cloud), and two tabs on the same address overwrite each other's copy. |
 | No wire / net labels shown on wires, no net highlighting or cross-probing | P2 | |
 | Grid and snap size are fixed (20 px = 0.1 in) | P3 | |
 | ERC is basic (unconnected pins, no ground) | P2 | No shorted outputs, floating nets, duplicate names, missing supplies. |
@@ -64,7 +64,7 @@ against Proteus / ngspice, **P3** polish.
   redraw have not been profiled beyond a few hundred parts. (P3)
 
 ## Suggested order
-1. Autosave and an unsaved-changes prompt (P1).
+1. ~~Autosave and an unsaved-changes prompt (P1)~~ done.
 2. Graph cursors, `.measure`-style readouts and CSV export (P2, small, high value).
 3. Counters, shift registers and a 74xx set built on the flip-flop (P2).
 4. Text annotation, title block and net highlighting (P2).

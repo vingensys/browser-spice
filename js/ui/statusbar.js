@@ -14,6 +14,7 @@ class StatusBar {
             <div class="sim-state" id="simstate">READY</div>
             <div id="msgbtn" title="Show messages">No Messages</div>
             <div id="statusText"></div>
+            <div id="docstate" title=""></div>
             <div id="coords">+0.0 +0.0 th</div>
             <div id="build" title="Build of the code you are running. If this is not the latest commit, reload with Ctrl+Shift+R."></div>`;
         root.querySelector("#build").textContent = window.APP_VERSION || "dev";
@@ -27,6 +28,17 @@ class StatusBar {
             const th = (v) => (v * 5).toFixed(1);
             root.querySelector("#coords").textContent = `${pos.x >= 0 ? "+" : ""}${th(pos.x)} ${-pos.y >= 0 ? "+" : ""}${th(-pos.y)} th`;
         };
+    }
+
+    // "Saved" / "Unsaved" plus when the browser copy was last written
+    setDocument(doc) {
+        const el = this.root.querySelector("#docstate");
+        if (!el) return;
+        const t = (ms) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+        const empty = doc.isEmpty();
+        el.textContent = empty ? "" : (doc.dirty ? "Unsaved" : "Saved") + (doc.lastAutoAt && doc.dirty ? ` · autosaved ${t(doc.lastAutoAt)}` : "");
+        el.title = empty ? "" : `${doc.name || "Untitled"}: ${doc.dirty ? "changes are not saved to a file" : "matches the saved file"}${doc.autosaveFailed ? ". Autosave is unavailable." : (doc.lastAutoAt ? `. Browser copy written ${t(doc.lastAutoAt)}.` : "")}`;
+        el.className = doc.autosaveFailed ? "warn" : (doc.dirty && !empty ? "dirty" : "");
     }
 
     refresh() {

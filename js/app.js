@@ -18,9 +18,11 @@
     const pane = new DevicePane(editor, { list: $("devicelist"), title: $("devtitle"), preview: $("devpreview") });
     const overview = new Overview($("overview"), editor);
     const status = new StatusBar($("statusbar"), editor);
+    const doc = new DocumentStore(editor, runner);
+    doc.onChange(() => status.setDocument(doc));
 
     // the console and the tests reach these through the window
-    Object.assign(window, { editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status });
+    Object.assign(window, { editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc });
 
     // an analysis run brings its tab to the front
     for (const [method, kind] of [["runDC", "dc"], ["runAC", "ac"], ["runTransient", "tran"], ["runSweep", "sweep"]]) {
@@ -86,25 +88,25 @@
     const C = (id, label, opts) => Commands.add(Object.assign({ id, label }, opts));
     const toolIs = (t) => () => editor.tool === t;
 
+    const saveToFile = () => {
+        const name = doc.name || "circuit_design.json";
+        download(name, JSON.stringify(doc.serialize(), null, 2), "application/json");
+        doc.markSaved(name);
+    };
+
     C("file.new", "New Design", { icon: "new", keys: "Ctrl+N", global: true, run() {
-        live.stop();
-        editor.saveState();
-        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
-        editor.clearSelection(); editor.resetView(); afterLoad();
+        doc.confirmDiscard(() => {
+            live.stop();
+            editor.saveState();
+            editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+            editor.clearSelection(); editor.resetView(); afterLoad();
+            doc.discardAutosave();
+            doc.markSaved(null);
+        }, saveToFile);
     } });
-    C("file.open", "Open Design…", { icon: "open", keys: "Ctrl+O", global: true, run: () => $("fileInput").click() });
-    C("file.save", "Save Design", { icon: "save", keys: "Ctrl+S", global: true, run() {
-        download("circuit_design.json", JSON.stringify({
-            format: "browser-spice/1",
-            components: editor.components,
-            wires: editor.wires.map(({ blocked, ...w }) => w),
-            probes: editor.probes.map(({ live: l, ...p }) => p),
-            nextId: editor.nextId,
-            view: { zoom: editor.zoom, panX: editor.panX, panY: editor.panY },
-            settings: runner.settings()
-        }, null, 2), "application/json");
-    } });
-    C("file.import", "Import SPICE Netlist / Model Library…", { icon: "import", run: () => $("spiceInput").click() });
+    C("file.open", "Open Design…", { icon: "open", keys: "Ctrl+O", global: true, run: () => doc.confirmDiscard(() => $("fileInput").click(), saveToFile) });
+    C("file.save", "Save Design", { icon: "save", keys: "Ctrl+S", global: true, run: saveToFile });
+    C("file.import", "Import SPICE Netlist / Model Library…", { icon: "import", run: () => doc.confirmDiscard(() => $("spiceInput").click(), saveToFile) });
     C("file.export", "Export SPICE Netlist…", { icon: "export", run: () => runner.guard(() => {
         const { text } = runner.spiceText();
         const ta = document.createElement("textarea");
@@ -192,6 +194,7 @@
             if (empty) {
                 const loaded = loadExampleById(editor, ex.id);
                 afterLoad();
+                doc.markSaved(null);          // an untouched example is not "unsaved work"
                 runner.toast(loaded.note, "info");
                 return;
             }
@@ -381,17 +384,10 @@
             try {
                 const state = JSON.parse(evt.target.result);
                 live.stop();
-                editor.saveState();
-                editor.components = state.components || [];
-                editor.wires = state.wires || [];
-                editor.probes = state.probes || [];
-                editor.nextId = state.nextId || 1;
-                const v = state.view || { zoom: 1, panX: state.panX || 0, panY: state.panY || 0 };
-                editor.zoom = v.zoom || 1; editor.panX = v.panX || 0; editor.panY = v.panY || 0;
-                editor.clearSelection();
-                editor.refreshWires();
-                editor.draw();
+                const r = doc.apply(state);
                 afterLoad();
+                doc.markSaved(file.name);
+                if (r.notes.length) runner.toast(`Opened "${file.name}" with ${r.notes.length} problem(s): ${r.notes.slice(0, 2).join("; ")}${r.notes.length > 2 ? " …" : ""}`, "warn");
             } catch (err) {
                 runner.toast("Invalid design file: " + err.message, "error");
             }
@@ -413,6 +409,7 @@
                     runner.toast(`Added ${r.models} model(s). Press P to pick them.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");
                 } else {
                     afterLoad();
+                    doc.name = null; doc.updateTitle();
                     const warn = r.warnings.length ? ` ${r.warnings.length} note(s): ${r.warnings.slice(0, 2).join("; ")}${r.warnings.length > 2 ? " …" : ""}` : "";
                     runner.toast(`Imported ${r.count} part(s)${r.title ? ` from "${r.title}"` : ""}.${warn}`, r.warnings.length ? "warn" : "info");
                 }
@@ -437,4 +434,14 @@
     hint();
     Commands.refresh();
     AppLog.add("info", "Ready. Press P to pick devices, or open File > Examples.");
+    // ------------------------------------------------------------------- autosave / restore
+
+    const restored = doc.restore();
+    doc.start();
+    if (restored) {
+        editor.fitView();          // the saved pan / zoom belongs to another window size
+        afterLoad();
+        const at = new Date(restored.savedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        runner.toast(`Restored your last session (${restored.parts} parts, autosaved ${at}). File > New starts a blank sheet.`, "info");
+    }
 })();

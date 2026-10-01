@@ -498,3 +498,6 @@ textarea.netlist { width: 640px; max-width: 80vw; height: 380px; font-family: Co
 /* hidden form fields that the simulation runner reads */
 .settings-form { display: none; }
 #build { font-family: Consolas, monospace; font-size: 10px; color: var(--ui-dim); padding: 0 8px; align-self: center; white-space: nowrap; }
+#docstate { font-size: 11px; color: var(--ui-dim); padding: 0 8px; align-self: center; white-space: nowrap; }
+#docstate.dirty { color: var(--ui-text); }
+#docstate.warn { color: #c0392b; font-weight: 600; }

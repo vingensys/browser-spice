@@ -27,6 +27,7 @@
  "js/ui/catalog.js",
  "js/cad/parts.js",
  "js/ui/dialogs.js",
+ "js/ui/document.js",
  "js/ui/device-list.js",
  "js/ui/menubar.js",
  "js/ui/toolbars.js",

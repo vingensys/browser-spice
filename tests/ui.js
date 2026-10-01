@@ -431,6 +431,96 @@ window.uiTests = async function () {
         editor.setTool("select"); pane.setMode("devices");
     }
 
+    // ---- autosave, restore and unsaved-changes handling ----
+    reset();
+    {
+        const KEY = DocumentStore.KEY;
+        const saveRec = () => JSON.parse(localStorage.getItem(KEY) || "null");
+        doc.discardAutosave(); doc.markSaved(null);
+
+        loadExampleById(editor, "instruments");
+        ok("a design with changes since the last save is flagged", doc.dirty === true);
+        doc.autosaveNow();
+        ok("autosave writes the design to browser storage", !!saveRec() && saveRec().state.components.length === editor.components.length);
+        ok("the status bar reports the unsaved state and the autosave time", /Unsaved/.test(document.getElementById("docstate").textContent) && /autosaved/.test(document.getElementById("docstate").textContent), document.getElementById("docstate").textContent);
+        ok("the window title carries the unsaved bullet", document.title.startsWith("• "), document.title);
+
+        // runtime display fields are not saved and do not count as edits
+        live.stop();
+        document.getElementById("liveSpeed").value = "0";
+        live.start(); live.advance(60, true); live.readout(); live.paint(true);
+        const sigRunning = doc.signature();
+        live.stop();
+        ok("simulation displays never reach the saved file", !doc.serialize().components.some(c => DocumentStore.RUNTIME.some(k => k in c)) && !doc.serialize().probes.some(p => "live" in p));
+        ok("running a simulation does not change the document signature", sigRunning === doc.signature());
+        editor.selection = [editor.components[0]]; editor.zoom *= 1.5;
+        ok("selecting and zooming are not edits", sigRunning === doc.signature());
+        const r0 = editor.components.find(c => c.type === "R"); r0.value = "4.7k";
+        ok("changing a value is an edit", doc.signature() !== sigRunning);
+
+        // Save marks it clean
+        doc.markSaved("demo.json");
+        ok("after saving the design is clean and titled with the file name", !doc.dirty && /^demo\.json - /.test(document.title), document.title);
+        r0.value = "10k";
+        ok("editing after a save makes it dirty again", doc.dirty);
+        doc.autosaveNow();
+        ok("the autosave remembers the file name and saved state", saveRec().name === "demo.json" && saveRec().savedSig !== null);
+
+        // restore after "reload"
+        const partsBefore = editor.components.length, settingsBefore = JSON.stringify(runner.settings());
+        editor.components = []; editor.wires = []; editor.probes = [];
+        document.getElementById("simTstop").value = "123m";
+        const back = doc.restore();
+        ok("restore brings back the last session", back && back.parts === partsBefore && editor.components.length === partsBefore && editor.wires.length > 0, back);
+        ok("restore brings back the run settings and the file name", JSON.stringify(runner.settings()) === settingsBefore && doc.name === "demo.json", [settingsBefore, JSON.stringify(runner.settings())]);
+        ok("a restored session is still unsaved (the file on disk is older)", doc.dirty);
+        ok("the restored circuit still simulates", (() => { const i = NetlistExtractor.extract(editor); return Object.values(new SimEngine(i.circuit).operatingPoint().nodeVoltages).every(Number.isFinite); })());
+
+        // damaged copies never block startup
+        localStorage.setItem(KEY, "{not json");
+        ok("a corrupt autosave is ignored and removed", doc.restore() === null && localStorage.getItem(KEY) === null);
+        localStorage.setItem(KEY, JSON.stringify({ savedAt: 1, state: { components: [{ type: "NOPE", x: 1, y: 1 }] } }));
+        ok("an autosave with no usable parts is ignored", doc.restore() === null && localStorage.getItem(KEY) === null);
+
+        // loading a damaged file reports and skips the bad bits
+        reset();
+        const good = editor.addComponent("R", 200, 200); const good2 = editor.addComponent("C", 400, 200);
+        const state = JSON.parse(JSON.stringify(doc.serialize()));
+        state.components.push({ id: 99, type: "WARP_DRIVE", x: 10, y: 10 });
+        state.wires.push({ id: 98, start: { type: "terminal", component: 12345, terminal: "1" }, end: { type: "terminal", component: good.id, terminal: "1" }, route: [] });
+        const applied = doc.apply(state);
+        ok("opening a file drops unknown parts and dangling wires and says so", applied.parts === 2 && applied.notes.length === 2 && editor.components.length === 2, applied);
+        let threw = false; try { doc.apply({ nope: 1 }); } catch (e) { threw = /not a Browser SPICE design/.test(e.message); }
+        ok("something that is not a design is rejected", threw);
+
+        // New Design asks before discarding unsaved work
+        reset();
+        loadExampleById(editor, "led"); doc.markSaved(null); editor.components.find(c => c.type === "R").value = "2.2k";
+        Commands.run("file.new");
+        const dlg = document.querySelector(".dialog");
+        const labels = dlg ? [...dlg.querySelectorAll(".btn")].map(b => b.textContent) : [];
+        ok("New Design with unsaved changes asks Save / Don't Save / Cancel", labels.join(",") === "Save,Don't Save,Cancel", labels);
+        [...dlg.querySelectorAll(".btn")].find(b => b.textContent === "Cancel").click();
+        ok("Cancel keeps the design", editor.components.length > 0);
+        Commands.run("file.new");
+        [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Don't Save").click();
+        ok("Don't Save starts a blank sheet and clears the autosave", editor.components.length === 0 && localStorage.getItem(KEY) === null);
+        loadExampleById(editor, "led"); doc.markSaved(null);
+        Commands.run("file.new");
+        ok("an untouched (clean) design is replaced without a prompt", editor.components.length === 0 && !document.querySelector(".dialog"));
+
+        // closing the page only warns when the browser copy could not be made
+        reset();
+        loadExampleById(editor, "led"); doc.markSaved(null); editor.components[0].x += 0; editor.components.find(c => c.type === "R").value = "3.3k";
+        const ev1 = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(ev1);
+        ok("closing the tab is silent while autosave works", !ev1.defaultPrevented);
+        const realStorage = doc.storage; doc.storage = () => null; doc.lastAutoSig = null; doc.autosaveFailed = false;
+        const ev2 = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(ev2);
+        ok("closing the tab warns when autosave is unavailable", ev2.defaultPrevented && doc.autosaveFailed);
+        doc.storage = realStorage; doc.autosaveFailed = false;
+        doc.discardAutosave(); doc.markSaved(null);
+    }
+
     reset();
     const failed = results.filter(x => !x.pass);
     return { total: results.length, failed: failed.length, failures: failed };
