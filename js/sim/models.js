@@ -62,11 +62,9 @@ function simModel(kind, name) {
     return set[name] || set[SIM_DEFAULT_MODEL[kind]];
 }
 
-// Render a model as a standard SPICE ".model" card (for .cir export / interop)
-function simModelCard(kind, name) {
-    const m = simModel(kind, name);
-    if (!m) return null;
-    const p = m.params;
+// Render model parameters as a standard SPICE ".model" card (for .cir export / interop)
+function simModelCardFromParams(kind, name, p) {
+    if (!p) return null;
     const f = (v) => (typeof v === "number" ? Number(v.toPrecision(6)).toString() : v);
 
     if (kind === "D" || kind === "LED" || kind === "DZ") {
@@ -92,4 +90,9 @@ function simModelCard(kind, name) {
         return `.model ${name} ${t}(LEVEL=1 VTO=${f(kind === "NMOS" ? p.vto : -p.vto)} KP=${f(p.beta)} LAMBDA=${f(p.lambda)})`;
     }
     return null;
+}
+
+function simModelCard(kind, name) {
+    const m = simModel(kind, name);
+    return m ? simModelCardFromParams(kind, name, m.params) : null;
 }

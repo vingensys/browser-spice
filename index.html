@@ -503,6 +503,7 @@
     <div class="toolbar">
         <button id="saveJson" title="Save schematic as a JSON file">💾 Save CAD</button>
         <button id="loadJson" title="Open a saved schematic JSON file">📂 Open CAD</button>
+        <button id="importCir" title="Import a SPICE .cir netlist as a schematic">📥 Import SPICE</button>
         <button id="exportCir" title="Export a standard SPICE .cir netlist">⚡ Export Netlist</button>
         <select id="exampleSelect" title="Load an example circuit">
             <option value="">Examples…</option>
@@ -530,6 +531,7 @@
         </span>
 
         <input type="file" id="fileInput" accept=".json" style="display: none;">
+        <input type="file" id="spiceInput" accept=".cir,.net,.sp,.spice,.txt" style="display: none;">
     </div>
 
     <!-- WORKSPACE -->
@@ -764,6 +766,7 @@
     <script src="js/circuit/netlist.js"></script>
     <script src="js/ui/properties.js"></script>
     <script src="js/ui/sim-runner.js"></script>
+    <script src="js/ui/spice-import.js"></script>
     <script src="js/examples.js"></script>
     <script src="js/app.js"></script>
 </body>

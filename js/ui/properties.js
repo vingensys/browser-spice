@@ -61,9 +61,15 @@ class PropertiesPanel {
 
         if (SIM_MODELS[type]) {
             const names = Object.keys(SIM_MODELS[type]);
-            const current = c.model || SIM_DEFAULT_MODEL[type];
-            const m = simModel(type, current);
-            html += this.select("Model", "model", names.map(n => [n, n]), current, m ? m.desc : "");
+            if (c.customParams) {
+                // imported from a SPICE netlist: keep its exact parameters until the user picks a library part
+                const opts = [[c.model, `${c.model} (imported)`], ...names.map(n => [n, n])];
+                html += this.select("Model", "model", opts, c.model, "Imported SPICE model; pick a library part to replace it.");
+            } else {
+                const current = c.model || SIM_DEFAULT_MODEL[type];
+                const m = simModel(type, current);
+                html += this.select("Model", "model", names.map(n => [n, n]), current, m ? m.desc : "");
+            }
         }
 
         if (type === "OPAMP") {
@@ -87,6 +93,7 @@ class PropertiesPanel {
 
         if (t === "DC") {
             html += this.text("Voltage", "dcVoltage", c.dcVoltage !== undefined ? this.fmt(c.dcVoltage, "V") : c.value, "5 V");
+            html += this.text("AC sweep magnitude", "acStim", c.acStim || "", "0 (set 1 to drive an AC sweep)");
         } else if (t === "AC") {
             html += this.text("Amplitude", "acMagnitude", this.fmt(c.acMagnitude, "V", "5 V"), "5 V");
             html += this.text("DC offset", "dcOffset", this.fmt(c.dcOffset, "V", "0 V"), "0 V");
@@ -101,6 +108,7 @@ class PropertiesPanel {
             html += this.text("Fall time", "pulse.fall", this.fmt(p.fall, "s", "1 µs"), "1 µs");
             html += this.text("Pulse width", "pulse.width", this.fmt(p.width, "s", "500 µs"), "500 µs");
             html += this.text("Period", "pulse.period", this.fmt(p.period, "s", "1 ms"), "1 ms");
+            html += this.text("AC sweep magnitude", "acStim", c.acStim || "", "0");
         }
         return html;
     }
@@ -160,7 +168,10 @@ class PropertiesPanel {
 
         if (e.target.tagName === "SELECT") {
             this.assign(comp, prop, v);
-            if (prop === "model") comp.value = v;
+            if (prop === "model") {
+                comp.value = v;
+                if (SIM_MODELS[comp.type] && SIM_MODELS[comp.type][v]) delete comp.customParams;
+            }
             if (prop === "sourceType") {
                 // seed sensible defaults when switching waveform
                 if (v === "PULSE" && !comp.pulse) comp.pulse = { v1: 0, v2: 5, delay: 0, rise: 1e-6, fall: 1e-6, width: 5e-4, period: 1e-3 };

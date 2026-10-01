@@ -148,6 +148,27 @@
         reader.readAsText(file);
     });
 
+    $("importCir").addEventListener("click", () => $("spiceInput").click());
+    $("spiceInput").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            try {
+                const r = SchematicImporter.import(editor, evt.target.result);
+                props.render();
+                updateStatus();
+                const warn = r.warnings.length ? ` ${r.warnings.length} note(s): ${r.warnings.slice(0, 2).join("; ")}${r.warnings.length > 2 ? " …" : ""}` : "";
+                runner.toast(`Imported ${r.count} part(s)${r.title ? ` from "${r.title}"` : ""}.${warn}`, r.warnings.length ? "warn" : "info");
+            } catch (err) {
+                console.error(err);
+                runner.toast("Could not import that netlist: " + err.message, "error");
+            }
+            e.target.value = "";
+        };
+        reader.readAsText(file);
+    });
+
     $("exportCir").addEventListener("click", () => runner.showNetlist());
     $("closeNetlistModal").addEventListener("click", () => { $("netlistModal").style.display = "none"; });
     $("downloadCirBtn").addEventListener("click", () => download("circuit.cir", $("netlistText").value, "text/plain"));

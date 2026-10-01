@@ -51,13 +51,24 @@ class NetlistExtractor {
             }
         }
 
+        // Connectivity rules: a wire's own points are one conductor; two wires connect only
+        // where they share a pin or an END point (an end landing on another wire's run is a
+        // T-junction). Interior corners of different wires that merely coincide do NOT connect.
+        const vertexKey = (wire, i) => {
+            const last = wire.route.length - 1;
+            const p = wire.route[i];
+            return (i === 0 || i === last) ? getKey(p.x, p.y) : `w${wire.id}#${i}`;
+        };
+        const points = []; // for probe lookup: { x, y, key }
+
         for (const wire of editor.wires) {
             if (!wire.route || wire.route.length < 2) continue;
 
             for (let i = 0; i < wire.route.length; i++) {
-                const k1 = getKey(wire.route[i].x, wire.route[i].y);
-                ds.makeSet(k1);
-                if (i > 0) ds.union(getKey(wire.route[i - 1].x, wire.route[i - 1].y), k1);
+                const k = vertexKey(wire, i);
+                ds.makeSet(k);
+                points.push({ x: wire.route[i].x, y: wire.route[i].y, key: k });
+                if (i > 0) ds.union(vertexKey(wire, i - 1), k);
             }
 
             for (const [end, pt] of [[wire.start, wire.route[0]], [wire.end, wire.route[wire.route.length - 1]]]) {
@@ -66,6 +77,10 @@ class NetlistExtractor {
                     if (k) ds.union(k, getKey(pt.x, pt.y));
                 }
             }
+        }
+        for (const [key] of terminalNodeKeys) {
+            const [x, y] = terminalNodeKeys.get(key).split(",").map(Number);
+            points.push({ x, y, key: terminalNodeKeys.get(key) });
         }
 
         // T-junctions: a wire end touching another wire's run joins that run
@@ -78,8 +93,8 @@ class NetlistExtractor {
                     for (let j = 0; j < wireB.route.length - 1; j++) {
                         const a = wireB.route[j], b = wireB.route[j + 1];
                         if (editor.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) {
-                            ds.union(keyA, getKey(a.x, a.y));
-                            ds.union(keyA, getKey(b.x, b.y));
+                            ds.union(keyA, vertexKey(wireB, j));
+                            ds.union(keyA, vertexKey(wireB, j + 1));
                         }
                     }
                 }
@@ -111,14 +126,13 @@ class NetlistExtractor {
         };
 
         const getPointNodeName = (x, y) => {
-            let closestKey = null;
+            let closest = null;
             let minDist = 25;
-            for (const k of ds.parent.keys()) {
-                const [kx, ky] = k.split(",").map(Number);
-                const d = Math.hypot(x - kx, y - ky);
-                if (d < minDist) { minDist = d; closestKey = k; }
+            for (const p of points) {
+                const d = Math.hypot(x - p.x, y - p.y);
+                if (d < minDist) { minDist = d; closest = p; }
             }
-            return closestKey ? nameForKey(closestKey) : "0";
+            return closest ? nameForKey(closest.key) : "0";
         };
 
         // wires attached to a terminal (to detect unconnected pins)
@@ -171,7 +185,7 @@ class NetlistExtractor {
                 case "LED":
                 case "DZ": {
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
-                    els.push({ ...base, kind: "D", model, modelKind: comp.type, nodes: [pin("1"), pin("2")], params: simModel(comp.type, model).params });
+                    els.push({ ...base, kind: "D", model, modelKind: comp.type, nodes: [pin("1"), pin("2")], params: comp.customParams || simModel(comp.type, model).params });
                     break;
                 }
                 case "BJT_NPN":
@@ -179,7 +193,7 @@ class NetlistExtractor {
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
                     els.push({
                         ...base, kind: "Q", model, modelKind: comp.type, pol: comp.type === "BJT_NPN" ? 1 : -1,
-                        nodes: [pin("B"), pin("C"), pin("E")], params: simModel(comp.type, model).params
+                        nodes: [pin("B"), pin("C"), pin("E")], params: comp.customParams || simModel(comp.type, model).params
                     });
                     break;
                 }
@@ -188,7 +202,7 @@ class NetlistExtractor {
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
                     els.push({
                         ...base, kind: "M", model, modelKind: comp.type, pol: comp.type === "NMOS" ? 1 : -1,
-                        nodes: [pin("G"), pin("D"), pin("S")], params: simModel(comp.type, model).params
+                        nodes: [pin("G"), pin("D"), pin("S")], params: comp.customParams || simModel(comp.type, model).params
                     });
                     break;
                 }
@@ -224,6 +238,8 @@ class NetlistExtractor {
         const sourceType = comp.sourceType || "DC";
         const dc = Units.parseSI(comp.dcVoltage !== undefined ? comp.dcVoltage : comp.value);
         const params = { sourceType, dc: isFinite(dc) ? dc : 0 };
+        // small-signal magnitude for AC sweeps on DC / pulse sources (SPICE "DC x AC y")
+        const stim = Units.parseSI(comp.acStim) || 0;
 
         if (sourceType === "AC") {
             params.sin = {
@@ -245,7 +261,9 @@ class NetlistExtractor {
                 width: p.width === undefined ? 5e-4 : Units.parseSI(p.width),
                 period: p.period === undefined ? 1e-3 : Units.parseSI(p.period)
             };
-            params.acMag = 0;
+            params.acMag = stim;
+        } else {
+            params.acMag = stim;
         }
         return params;
     }
@@ -357,22 +375,22 @@ class NetlistExtractor {
                         const q = p.pulse;
                         spec = `PULSE(${f(q.v1)} ${f(q.v2)} ${f(q.delay)} ${f(q.rise)} ${f(q.fall)} ${f(q.width)} ${f(q.period)})`;
                     } else {
-                        spec = `DC ${f(p.dc)}`;
+                        spec = `DC ${f(p.dc)}${p.acMag ? ` AC ${f(p.acMag)}` : ""}`;
                     }
                     lines.push(`${name} ${n[0]} ${n[1]} ${spec}`);
                     break;
                 }
                 case "D":
-                    models.set(e.model, e.modelKind);
+                    models.set(e.model, { kind: e.modelKind, params: p });
                     lines.push(`${name} ${n[0]} ${n[1]} ${e.model}`);
                     break;
                 case "Q":
-                    models.set(e.model, e.modelKind);
+                    models.set(e.model, { kind: e.modelKind, params: p });
                     // SPICE order: collector base emitter
                     lines.push(`${name} ${n[1]} ${n[0]} ${n[2]} ${e.model}`);
                     break;
                 case "M":
-                    models.set(e.model, e.modelKind);
+                    models.set(e.model, { kind: e.modelKind, params: p });
                     // drain gate source bulk(=source)
                     lines.push(`${name} ${n[1]} ${n[0]} ${n[2]} ${n[2]} ${e.model} W=1u L=1u`);
                     break;
@@ -412,7 +430,7 @@ class NetlistExtractor {
 
         if (models.size) {
             lines.push("", "* device models");
-            for (const [name, kind] of models) lines.push(simModelCard(kind, name));
+            for (const [name, m] of models) lines.push(simModelCardFromParams(m.kind, name, m.params));
         }
         if (subckts.size) {
             lines.push("", "* behavioural op-amp macromodels (single pole, clamped output)");
