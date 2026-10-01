@@ -4,6 +4,10 @@ Compiled after a hands-on pass through the running app, the test suites and the 
 reproduced it; the rest comes from reading the code. Priority: **P1** blocks real use, **P2** a clear gap
 against Proteus / ngspice, **P3** polish.
 
+## 0b. Bugs found while building the graph tools (fixed)
+- **Time axis was drawn by sample index** (verified): with the adaptive solver the steps are uneven, so waveforms were stretched or squeezed against the tick labels. The axis is now true time / log frequency, with min-max decimation for dense data.
+- **Layout overflow**: the page grid took its width from the canvas's last size, so a narrower window pushed the right side (graph panels, scroll bars) off screen. Fixed with `minmax(0, 1fr)`.
+
 ## 0. Things that looked broken but were not the app's fault
 - **Stale browser cache (P1, fixed).** `python3 -m http.server` lets browsers cache JavaScript, so after an update
   you can keep running the old shell: no context menus, no waveform glyphs, no example placement. Fixed with
@@ -36,8 +40,8 @@ against Proteus / ngspice, **P3** polish.
 ## 3. Graphs and instruments
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| No measurement cursors, peak / rise-time readouts, or multi-axis graphs (verified: no cursor code) | P2 | Hover shows values only. |
-| No export of graph data (CSV) or image | P2 | |
+| ~~No cursors / measurements~~ | P2 | **Done**: cursors A / B, per-trace readouts, frequency / duty / rise-fall, AC peak / −3 dB / unity gain / phase margin. Still missing: multi-axis graphs, user-defined `.measure` expressions. |
+| ~~No export of graph data~~ | P2 | **Done**: CSV (all / visible / between cursors), measurements CSV, PNG. |
 | Oscilloscope is a trace preview on the sheet, not an interactive instrument (no time/div, trigger, channels volts/div) | P2 | |
 | No logic analyser, signal generator panel, or spectrum view | P3 | |
 
@@ -65,7 +69,7 @@ against Proteus / ngspice, **P3** polish.
 
 ## Suggested order
 1. ~~Autosave and an unsaved-changes prompt (P1)~~ done.
-2. Graph cursors, `.measure`-style readouts and CSV export (P2, small, high value).
+2. ~~Graph cursors, readouts and CSV export~~ done.
 3. Counters, shift registers and a 74xx set built on the flip-flop (P2).
 4. Text annotation, title block and net highlighting (P2).
 5. ERC rules, then CI for the test suites.

@@ -37,6 +37,8 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 - **Live**: **Play** (F12) runs the circuit continuously. Voltage / current probes, DC voltmeters and ammeters,
   and oscilloscopes on the sheet update as it runs; the LIVE graph tab plots them. Switches and pots can be
   changed during a run; editing the circuit restarts it. **Pause**, **Step** (F10), **Stop** (Shift+F12).
+- **Cursors and measurements**: click a graph to place cursor **A**, **Shift**+click for **B**, drag a cursor line to move it. The **Measure** panel shows each trace at the cursors and Δ, plus min / max / peak-to-peak / mean / RMS, frequency, duty and rise / fall time (between the cursors, or over the visible range). On a frequency plot it gives gain and phase at the cursors, the peak, the −3 dB band, the unity-gain frequency and the phase margin.
+- **Export**: **Export ▾** (or right-click the graph) saves the plotted data as CSV (all, visible range, or between the cursors), the measurements as CSV, or the picture as PNG. Works on the LIVE tab too.
 - **Graph analyses** (Graph menu or the graph window tabs): analogue transient, frequency (AC), DC sweep, operating point.
   **Design > Simulation Settings** sets stop time, step, UIC, AC range, sweep, temperature, solver and live speed.
 - **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
@@ -86,7 +88,7 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 
 - `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops), `models`, `models-extra` / `models-parts` (library), `model-library`, `engine`, `spice-parser`, `ngspice-backend`
 - `js/cad/` editor internals: `symbols` (pins and bodies), `parts` (the added parts: symbol, properties, netlist, library entries), `router` (A* + rubber-band repair), `symbol-draw`
-- `js/visualization/` schematic editor and waveform plotter
+- `js/visualization/` schematic editor, waveform plotter and the graph maths (`plot-math`)
 - `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
 - `js/ui/` the ISIS-style shell: `theme`, `commands` (one registry for menus, toolbars and keys), `menubar`, `toolbars`, `statusbar`, `overview`, `device-list` + `catalog` (device pane, Pick Devices), `dialogs`, `graph-window`, `live-sim`, `properties`, `sim-runner`, `spice-import`, `icons`
 - `js/examples.js`, `js/app.js` (composes the shell and defines the commands)
@@ -103,6 +105,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
   sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
+- `tests/plot.test.js` the graph maths (interpolation, statistics, frequency, edges, AC figures, CSV).
 
 Browser suites (load in the running app and call from the console):
 
@@ -114,6 +117,7 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/engines.js')).text());     await engineTests();    // built-in vs ngspice-WASM
 (0, eval)(await (await fetch('tests/ui.js')).text());          await uiTests();       // menus, dialogs, device list, live simulation
 (0, eval)(await (await fetch('tests/parts.js')).text());       await partsTests();    // part library, mirror / flip, sources, exports, live displays
+(0, eval)(await (await fetch('tests/graph.js')).text());       await graphTests();    // cursors, measurements, CSV / PNG export, true time axis
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each

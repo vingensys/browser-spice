@@ -34,7 +34,7 @@
     // ------------------------------------------------------------------ helpers
 
     const download = (name, text, type) => {
-        const blob = new Blob([text], { type });
+        const blob = text instanceof Blob ? text : new Blob([text], { type });
         const a = document.createElement("a");
         a.href = URL.createObjectURL(blob);
         a.download = name;
@@ -43,6 +43,8 @@
         a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
+
+    window.downloadFile = download;
 
     const afterLoad = () => {
         runner.refreshSweepSources();

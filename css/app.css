@@ -57,7 +57,8 @@ input, select, textarea, button { font: inherit; color: inherit; }
 
 #app {
     display: grid;
-    grid-template-rows: auto auto 1fr auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);   /* never wider than the window, whatever the canvas was last sized to */
     height: 100vh;
 }
 
@@ -162,7 +163,7 @@ input, select, textarea, button { font: inherit; color: inherit; }
 
 #main {
     display: grid;
-    grid-template-columns: 232px 1fr;
+    grid-template-columns: 232px minmax(0, 1fr);
     min-height: 0;
 }
 
@@ -331,9 +332,10 @@ input, select, textarea, button { font: inherit; color: inherit; }
     display: flex;
     min-height: 0;
 }
-.graph-plot { flex: 1; min-width: 0; background: var(--graph-bg); position: relative; }
+.graph-plot { flex: 1; min-width: 0; overflow: hidden; background: var(--graph-bg); position: relative; }
 #plotCanvas { width: 100%; height: 100%; display: block; }
 #dcResults {
+    flex: 0 0 250px;
     width: 250px;
     overflow: auto;
     background: var(--ui-bg-2);
@@ -501,3 +503,23 @@ textarea.netlist { width: 640px; max-width: 80vw; height: 380px; font-family: Co
 #docstate { font-size: 11px; color: var(--ui-dim); padding: 0 8px; align-self: center; white-space: nowrap; }
 #docstate.dirty { color: var(--ui-text); }
 #docstate.warn { color: #c0392b; font-weight: 600; }
+
+/* graph cursors and measurements */
+.tb-btn.txt { width: auto; padding: 0 8px; font-size: 12px; }
+.tb-btn.active { background: var(--ui-select); color: #fff; }
+#measure {
+    flex: 0 0 310px; width: 310px; overflow: auto; background: var(--ui-bg-2); border-left: 1px solid var(--ui-border);
+    padding: 6px 8px; font-size: 12px;
+}
+.meas-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.meas-hint { color: var(--ui-dim); margin: 4px 0 8px; line-height: 1.4; }
+.meas-series { margin: 10px 0 2px; display: flex; align-items: center; gap: 6px; }
+.meas-series .swatch { width: 10px; height: 10px; display: inline-block; }
+table.meas { width: 100%; border-collapse: collapse; }
+table.meas td { padding: 1px 0; vertical-align: top; }
+table.meas td:first-child { color: var(--ui-dim); padding-right: 8px; white-space: nowrap; }
+table.meas td:last-child { text-align: right; font-family: Consolas, monospace; }
+
+#center, #graphwin, .graph-body { min-width: 0; }
+.graph-head button, .graph-head select, #plotTitle { white-space: nowrap; }
+#plotTitle { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

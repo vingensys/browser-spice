@@ -17,6 +17,7 @@
  "js/cad/symbol-draw.js",
  "js/visualization/schematic.js",
  "js/cad/probes.js",
+ "js/visualization/plot-math.js",
  "js/visualization/waveform.js",
  "js/circuit/netlist.js",
  "js/ui/icons.js",
