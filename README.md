@@ -45,8 +45,8 @@ Hotkeys: **C** capacitor, **L** inductor, **V** source, **G** ground, **D** diod
 ## What is simulated
 
 R, C, L, voltage and current sources (DC / sine / pulse / piecewise-linear, with an AC-sweep
-magnitude), VCVS and VCCS, ideal switch, potentiometer, diode, LED, zener, NPN / PNP BJT, N / P
-MOSFET (level 1 with body diode and gate capacitance), op-amp (single pole, rail clamp), logic
+magnitude), VCVS and VCCS, ideal switch, potentiometer, per-node initial-condition flags, diode, LED, zener, NPN / PNP BJT, N / P
+MOSFET (level 1 with body diode, gate capacitance and series RD / RS), op-amp (single pole, rail clamp), logic
 gates (with propagation delay), NE555. Part models are standard SPICE parameter sets (1N4148,
 1N4007, 2N2222, 2N3904, 2N7000, IRF540, LM741, ...); `.model` cards from vendor files can be
 imported (Import SPICE with a model-only file) and are remembered between sessions.
@@ -58,7 +58,7 @@ The engine (`js/sim`) is a SPICE-style solver: modified nodal analysis, Newton-R
 junction limiting, gmin and source stepping, trapezoidal / backward-Euler transient with
 local-error step control, exact landing on source edges and comparator crossings,
 charge-conserving junction capacitances, and a Markowitz sparse LU for larger circuits
-(about 7 ms per step at 1,100 unknowns).
+with the pivot order reused between iterations (about 2 ms per step at 1,100 unknowns, 5 ms at 2,200).
 
 ## Layout
 
@@ -77,7 +77,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
 
 - `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import (46 checks).
 - `tests/ngspice.test.js` runs `tests/decks/*.cir` (diodes, BJT / MOS amplifiers, rectifiers, CMOS, controlled
-  sources, PWL / `.param`, `.ic`, `.temp`) through the engine **and** native ngspice and compares operating
+  sources, PWL / `.param`, `.ic`, `.temp`, MOSFET RD/RS) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
 
@@ -92,4 +92,4 @@ Browser suites (load in the running app and call from the console):
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each
-within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay; MOSFETs are level 1.
+within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay (the export models the same lag); MOSFETs are level 1.

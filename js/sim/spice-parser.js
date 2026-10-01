@@ -262,7 +262,7 @@ class SpiceParser {
     static mosParams(m, w, l) {
         const p = m ? m.params : {};
         const ratio = (w || 1e-4) / (l || 1e-4);
-        return { vto: Math.abs(p.vto === undefined ? 0 : p.vto), beta: (p.kp || 2e-5) * ratio, lambda: p.lambda || 0 };
+        return { vto: Math.abs(p.vto === undefined ? 0 : p.vto), beta: (p.kp || 2e-5) * ratio, lambda: p.lambda || 0, rd: p.rd || 0, rs: p.rs || 0 };
     }
 
     // flatten subcircuits into a plain element list with prefixed names / nodes

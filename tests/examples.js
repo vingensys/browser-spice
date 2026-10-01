@@ -108,6 +108,26 @@ window.exampleTests = function () {
         near(w2, 7.5, 0.01, "wiper (switch open)");
     });
 
+    check("initial-condition flag: capacitor discharges from its IC and round-trips to .ic", () => {
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        const b = new ExampleBuilder(editor);
+        const c = b.part("C", 300, 200, { rot: 90, value: "1 µF" });
+        const r = b.part("R", 440, 200, { rot: 90, value: "1 kΩ" });
+        const ic = b.part("NODEIC", 300, 60, { value: "3 V" });
+        const g = b.part("GND", 370, 340);
+        b.wire(c, "1", r, "1"); b.wire(c, "2", g, "1"); b.wire(r, "2", g, "1"); b.wire(ic, "1", c, "1");
+        b.finish();
+        const info = NetlistExtractor.extract(editor);
+        const net = nodeOf(info, "C1", "1");
+        near(info.nodeIC[net], 3, 1e-9, ".ic value");
+        const r2 = new SimEngine(info.circuit).transient({ tStop: 3e-3, tStep: 2e-5, uic: true, nodeIC: info.nodeIC });
+        const v = r2.nodeHistories[net];
+        near(v[0], 3, 0.01, "V(0)");
+        const k = r2.timePoints.findIndex(t => t >= 1e-3);
+        near(v[k], 3 * Math.exp(-1), 0.05, "V(1 ms)");
+        if (!/\.ic v\(1\)=3/.test(NetlistExtractor.toSpice(info.elements, { analysis: ".tran 20u 3m uic" }))) throw new Error("no .ic line in the export");
+    });
+
     check("boost: steps 5 V up to ~9.7 V", () => {
         const { info, sim } = load("boost");
         const r = sim.transient({ tStop: 0.02, tStep: 1e-6, uic: true });

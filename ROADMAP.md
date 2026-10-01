@@ -34,7 +34,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
   74xx, simple microcontroller model) bridged to the analog solver.
 - **Analyses**: DC sweep UI, parametric sweep, Monte Carlo, temperature, noise, Fourier, Bode
   with phase and margins.
-- **Convergence**: symbolic reuse in the sparse LU (it re-orders every iteration today), `.nodeset`.
+- **Convergence**: `.nodeset`, higher-level MOSFET models (BSIM), JFET.
 
 ### 2. Industry-standard interchange
 - **SPICE**: `.include` / `.lib` vendor models, `.subckt` as hierarchical sheets, `.param`,

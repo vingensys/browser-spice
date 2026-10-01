@@ -146,7 +146,7 @@ class SimRunner {
                 res = NgspiceBackend.toTransient(raw, info);
                 label = " (ngspice)";
             } else {
-                res = new SimEngine(info.circuit, this.engineOptions()).transient({ tStop: s.tStop, tStep: s.tStep, uic: s.uic, method: "trap" });
+                res = new SimEngine(info.circuit, this.engineOptions()).transient({ tStop: s.tStop, tStep: s.tStep, uic: s.uic, method: "trap", nodeIC: info.nodeIC });
             }
             const ms = performance.now() - t0;
 

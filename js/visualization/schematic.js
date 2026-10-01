@@ -479,6 +479,7 @@ class SchematicEditor {
         else if (type === "G") defaultValue = "10 mS";
         else if (type === "SW") defaultValue = "open";
         else if (type === "POT") defaultValue = "10 kΩ";
+        else if (type === "NODEIC") defaultValue = "0 V";
         else if (type === "IC555") defaultValue = "NE555";
 
         // semiconductors start with their library default model

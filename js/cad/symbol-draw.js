@@ -48,6 +48,7 @@ class SymbolRenderer {
                 this.drawLogicGate(component);
                 break;
             case "GND": this.drawGround(component); break;
+            case "NODEIC": this.drawNodeIC(component); break;
         }
 
         // Unconnected pins show as red rings (Proteus-style); wired pins are hidden
@@ -262,6 +263,26 @@ class SymbolRenderer {
         ctx.closePath();
         ctx.fill();
         this.drawLabel(component);
+    }
+
+    // Initial-condition flag: forces the net's starting voltage in a "start from 0" transient.
+    drawNodeIC(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = "#ff79c6";
+        ctx.fillStyle = "rgba(255, 121, 198, 0.12)";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(0, 20); ctx.lineTo(0, 8);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.rect(-28, -14, 56, 22);
+        ctx.fill();
+        ctx.stroke();
+        ctx.font = "bold 11px system-ui";
+        ctx.fillStyle = "#ff79c6";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`IC=${component.value || "0 V"}`, 0, -3);
     }
 
     drawDiode(component) {

@@ -25,7 +25,7 @@ window.roundtripTests = async function () {
             let worst = 0;
             if (tran) {
                 const a = dEng.transient({ tStop: tran.tStop, tStep: tran.tStep, uic: tran.uic, nodeIC: deck.ic });
-                const b = sEng.transient({ tStop: tran.tStop, tStep: tran.tStep, uic: tran.uic });
+                const b = sEng.transient({ tStop: tran.tStop, tStep: tran.tStep, uic: tran.uic, nodeIC: info.nodeIC });
                 // compare the probes that exist in both: element currents are name-matched
                 const names = Object.keys(a.currentHistories).filter(n => b.currentHistories[n]);
                 for (const n of names) {

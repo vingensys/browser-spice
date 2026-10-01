@@ -119,41 +119,59 @@ class SparseSystem {
         this.add(j, i, -g);
     }
 
+    // Newton iterations re-solve the same circuit structure over and over, so the pivot order
+    // found by the first (searching) factorisation is replayed afterwards. If a replayed pivot
+    // has become too small, fall back to a fresh search.
     solve() {
+        if (this.plan) {
+            try { return this.factor(this.plan); } catch (e) { if (!(e instanceof PivotReplayError)) throw e; }
+        }
+        return this.factor(null);
+    }
+
+    factor(plan) {
         const n = this.n;
         const rows = this.rows.map(m => new Map(m));
         const b = Float64Array.from(this.b);
         const cols = Array.from({ length: n }, () => new Set());
         for (let i = 0; i < n; i++) for (const j of rows[i].keys()) cols[j].add(i);
 
-        const rowActive = new Uint8Array(n).fill(1);
         const colActive = new Uint8Array(n).fill(1);
         const pivots = []; // { p, q, pv, prow }
-        const THRESH = 0.1;
+        const order = [];
+        const THRESH = 0.1, REPLAY_THRESH = 0.01;
 
         for (let k = 0; k < n; k++) {
-            // sparsest active column
-            let q = -1, best = Infinity;
-            for (let j = 0; j < n; j++) {
-                if (!colActive[j]) continue;
-                const c = cols[j].size;
-                if (c < best) { best = c; q = j; if (c <= 1) break; }
-            }
-            if (q < 0 || best === 0) {
-                // an active column with no entries: structurally singular
-                throw new SingularMatrixError(q < 0 ? k : q);
-            }
+            let p = -1, q = -1;
 
-            let maxAbs = 0;
-            for (const i of cols[q]) maxAbs = Math.max(maxAbs, Math.abs(rows[i].get(q)));
-            if (maxAbs < 1e-30) throw new SingularMatrixError(q);
+            if (plan) {
+                ({ p, q } = plan[k]);
+                const entry = rows[p].get(q);
+                if (entry === undefined || !colActive[q]) throw new PivotReplayError();
+                let maxAbs = 0;
+                for (const i of cols[q]) maxAbs = Math.max(maxAbs, Math.abs(rows[i].get(q)));
+                if (maxAbs < 1e-30 || Math.abs(entry) < REPLAY_THRESH * maxAbs) throw new PivotReplayError();
+            } else {
+                // sparsest active column
+                let best = Infinity;
+                for (let j = 0; j < n; j++) {
+                    if (!colActive[j]) continue;
+                    const c = cols[j].size;
+                    if (c < best) { best = c; q = j; if (c <= 1) break; }
+                }
+                if (q < 0 || best === 0) throw new SingularMatrixError(q < 0 ? k : q);
 
-            // among acceptable rows prefer the one with the fewest entries (least fill)
-            let p = -1, bestLen = Infinity;
-            for (const i of cols[q]) {
-                if (Math.abs(rows[i].get(q)) >= THRESH * maxAbs && rows[i].size < bestLen) {
-                    bestLen = rows[i].size;
-                    p = i;
+                let maxAbs = 0;
+                for (const i of cols[q]) maxAbs = Math.max(maxAbs, Math.abs(rows[i].get(q)));
+                if (maxAbs < 1e-30) throw new SingularMatrixError(q);
+
+                // among acceptable rows prefer the one with the fewest entries (least fill)
+                let bestLen = Infinity;
+                for (const i of cols[q]) {
+                    if (Math.abs(rows[i].get(q)) >= THRESH * maxAbs && rows[i].size < bestLen) {
+                        bestLen = rows[i].size;
+                        p = i;
+                    }
                 }
             }
 
@@ -179,10 +197,12 @@ class SparseSystem {
             // retire the pivot row and column
             for (const j of prow.keys()) cols[j].delete(p);
             cols[q].clear();
-            rowActive[p] = 0;
             colActive[q] = 0;
             pivots.push({ p, q, pv, prow });
+            order.push({ p, q });
         }
+
+        if (!plan) this.plan = order;
 
         const x = new Float64Array(n);
         for (let k = n - 1; k >= 0; k--) {
@@ -194,6 +214,8 @@ class SparseSystem {
         return x;
     }
 }
+
+class PivotReplayError extends Error { }
 
 // Pick the solver by problem size (dense wins for small systems, sparse for large ones).
 const SPARSE_THRESHOLD = { n: 70 };

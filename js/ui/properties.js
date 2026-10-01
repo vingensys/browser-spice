@@ -56,6 +56,8 @@ class PropertiesPanel {
 
         if (type === "V") html += this.sourceRows(c, "V");
         else if (type === "I") html += this.sourceRows(c, "A");
+        else if (type === "NODEIC") html += this.text("Initial voltage", "value", c.value, "0 V") +
+            `<div class="prop-note">Sets this net's voltage at the start of a "start from 0" transient.</div>`;
         else if (type === "E") html += this.text("Voltage gain", "value", c.value, "10");
         else if (type === "G") html += this.text("Transconductance (S)", "value", c.value, "10m");
         else if (type === "SW") html += this.select("State", "closed", [["false", "Open"], ["true", "Closed"]], String(!!c.closed), "Double-click the switch to toggle it.");

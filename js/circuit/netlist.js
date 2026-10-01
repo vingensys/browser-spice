@@ -157,10 +157,17 @@ class NetlistExtractor {
             return x === 0 && (v === undefined || v === "" || v === null) ? fallback : x;
         };
 
+        const nodeIC = {};
         for (const comp of editor.components) {
             if (comp.type === "GND") continue;
 
             const pin = (name) => nets.terminalNode(comp, name) || "0";
+            if (comp.type === "NODEIC") {
+                const net = pin("1");
+                if (net !== "0") nodeIC[net] = Units.parseSI(comp.value);
+                if (!nets.wired.has(`${comp.id}:1`)) warnings.push(`${comp.name}: initial-condition flag is not connected to a net`);
+                continue;
+            }
             const unwired = editor.getTerminals(comp)
                 .filter(t => !nets.wired.has(`${comp.id}:${t.name}`)).map(t => t.name);
             if (unwired.length) warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
@@ -172,7 +179,7 @@ class NetlistExtractor {
                     els.push({ ...base, kind: "R", nodes: [pin("1"), pin("2")], params: { r: P(comp.value, 1000) || 1000 } });
                     break;
                 case "C":
-                    els.push({ ...base, kind: "C", nodes: [pin("1"), pin("2")], params: { c: P(comp.value, 1e-6) || 1e-6, ic: Units.parseSI(comp.ic) || 0 } });
+                    els.push({ ...base, kind: "C", nodes: [pin("1"), pin("2")], params: { c: P(comp.value, 1e-6) || 1e-6, ic: (comp.ic === undefined || comp.ic === "" || comp.ic === null) ? undefined : Units.parseSI(comp.ic) } });
                     break;
                 case "L":
                     els.push({ ...base, kind: "L", nodes: [pin("1"), pin("2")], params: { l: P(comp.value, 1e-3) || 1e-3, ic: Units.parseSI(comp.ic) || 0 } });
@@ -253,6 +260,7 @@ class NetlistExtractor {
                     break;
             }
         }
+        els.nodeIC = nodeIC;
         return { els, warnings };
     }
 
@@ -350,7 +358,7 @@ class NetlistExtractor {
 
         const circuit = NetlistExtractor.instantiate(els);
         return {
-            circuit, elements: els, warnings,
+            circuit, elements: els, warnings, nodeIC: els.nodeIC || {},
             getPointNodeName: nets.getPointNodeName,
             getTerminalNodeName: nets.terminalNode
         };
@@ -391,7 +399,7 @@ class NetlistExtractor {
     }
 
     static toSpice(els, opts = {}) {
-        const { title = "Browser SPICE export", analysis = ".op" } = opts;
+        const { title = "Browser SPICE export", analysis = ".op", nodeIC = els.nodeIC } = opts;
         const f = (v) => (typeof v === "number" ? Number(v.toPrecision(6)).toString() : v);
         const lines = [`* ${title}`, `* generated ${new Date().toISOString()}`, ""];
         const models = new Map();
@@ -468,7 +476,14 @@ class NetlistExtractor {
                         case "XOR": expr = `${vcc}*(${u(n[0])}+${u(n[1])}-2*${u(n[0])}*${u(n[1])})`; break;
                         default: expr = `${vcc}*(1-${u(n[0])})`; break;
                     }
-                    lines.push(`${name} ${n[n.length - 1]} 0 V=${expr}`);
+                    // same 10 ns lag and 50 ohm output as the built-in model: ideal gate -> RC -> buffer -> Ro
+                    const out = n[n.length - 1];
+                    const tpd = 10e-9, rd = 1000;
+                    lines.push(`B${name}_G ${name}_a 0 V=${expr}`);
+                    lines.push(`R${name}_D ${name}_a ${name}_f ${rd}`);
+                    lines.push(`C${name}_D ${name}_f 0 ${f(tpd / rd)}`);
+                    lines.push(`B${name}_B ${name}_o 0 V=V(${name}_f)`);
+                    lines.push(`R${name}_O ${name}_o ${out} 50`);
                     break;
                 }
                 case "555":
@@ -507,6 +522,11 @@ class NetlistExtractor {
         if (uses555) {
             // the behavioural latch needs tighter tolerances than the default 0.1 %
             lines.push("", ".options reltol=1e-4 vntol=1e-7", ...NetlistExtractor.NE555_SUBCKT);
+        }
+
+        // initial conditions only mean something for a "start from 0" (UIC) run
+        if (nodeIC && Object.keys(nodeIC).length && /uic/i.test(analysis)) {
+            lines.push("", `.ic ${Object.entries(nodeIC).map(([n, v]) => `v(${n})=${f(v)}`).join(" ")}`);
         }
 
         lines.push("", analysis, ".end");

@@ -41,7 +41,8 @@ const SYMBOL_DEFS = {
     },
     AND: GATE2, OR: GATE2, NAND: GATE2, NOR: GATE2, XOR: GATE2,
     NOT: { pins: [["A", -40, 0, -1, 0], ["Y", 40, 0, 1, 0]], box: [-40, -30, 40, 30] },
-    GND: { pins: [["1", 0, -20, 0, -1]], box: [-20, -20, 20, 40] }
+    GND: { pins: [["1", 0, -20, 0, -1]], box: [-20, -20, 20, 40] },
+    NODEIC: { pins: [["1", 0, 20, 0, 1]], box: [-30, -20, 30, 20] }
 };
 
 class MinHeap {

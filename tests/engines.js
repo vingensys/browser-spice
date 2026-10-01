@@ -101,7 +101,7 @@ window.engineTests = async function () {
         b.wire(inv, "Y", rl, "1"); b.wire(rl, "2", g, "1"); b.wire(va, "1", g, "1"); b.wire(vb, "1", g, "1");
         b.vprobe(nand, "Y", "nand"); b.vprobe(inv, "Y", "and");
         b.finish();
-    }, { tStop: 400e-6, tStep: 0.5e-6 }, { op: 0.02, tran: 0.3 }); // levels agree; the built-in gate has a 10 ns propagation delay at each edge
+    }, { tStop: 400e-6, tStep: 0.5e-6 }, { op: 0.02, tran: 0.1 });
 
     const failed = results.filter(r => !r.pass);
     return { total: results.length, failed: failed.length, failures: failed, results };

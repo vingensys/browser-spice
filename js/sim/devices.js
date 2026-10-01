@@ -847,7 +847,7 @@ class MOSFET extends NonlinearElement {
     constructor(name, nodes, polarity, p = {}) {
         super(name, nodes);
         this.pol = polarity;
-        this.p = Object.assign({ vto: 2, beta: 0.02, lambda: 0.01 }, p);
+        this.p = Object.assign({ vto: 2, beta: 0.02, lambda: 0.01, rd: 0, rs: 0 }, p);
         this.vgs = 0;
         this.id = 0;
     }
@@ -856,6 +856,9 @@ class MOSFET extends NonlinearElement {
         super.bind(circuit);
         const [g, d, s] = this.nodeNames;
         const p = this.p;
+        // series drain / source resistance sits between the pin and an internal node
+        this.di = p.rd > 0 ? circuit.internalNode(`${this.name}#d`) : this.n[1];
+        this.si = p.rs > 0 ? circuit.internalNode(`${this.name}#s`) : this.n[2];
         if (p.bodyDiode) {
             const pins = this.pol > 0 ? [s, d] : [d, s];
             circuit.add(new Diode(`${this.name}.bd`, pins, p.bodyDiode));
@@ -865,8 +868,7 @@ class MOSFET extends NonlinearElement {
     }
 
     beginSolve(ctx) {
-        const [g, d, s] = this.n;
-        this.vgs = this.pol * (ctx.v(g) - ctx.v(s));
+        this.vgs = this.pol * (ctx.v(this.n[0]) - ctx.v(this.si));
     }
 
     // forward-mode square-law current; returns id, gm, gds
@@ -898,8 +900,10 @@ class MOSFET extends NonlinearElement {
     }
 
     stamp(ctx) {
-        const [g, d, s] = this.n;
+        const g = this.n[0], d = this.di, s = this.si;
         const p = this.pol;
+        if (this.p.rd > 0) ctx.sys.addG(this.n[1], d, 1 / this.p.rd);
+        if (this.p.rs > 0) ctx.sys.addG(this.n[2], s, 1 / this.p.rs);
 
         let vgs = p * (ctx.v(g) - ctx.v(s));
         const vds = p * (ctx.v(d) - ctx.v(s));
@@ -930,7 +934,7 @@ class MOSFET extends NonlinearElement {
     current(x) {
         const v = (i) => (i < 0 ? 0 : x[i]);
         const p = this.pol;
-        return p * this.eval(p * (v(this.n[0]) - v(this.n[2])), p * (v(this.n[1]) - v(this.n[2]))).id;
+        return p * this.eval(p * (v(this.n[0]) - v(this.si)), p * (v(this.di) - v(this.si))).id;
     }
 }
 
@@ -978,7 +982,10 @@ class BehavioralDriver extends NonlinearElement {
 
     // p.ic seeds the lagged output (like .ic): needed to kick off ring oscillators,
     // whose DC solution is the unstable all-mid-rail equilibrium.
-    initState(ctx) { this.vf = this.p && this.p.ic !== undefined ? this.p.ic : this.vtEff; }
+    // UIC means a true zero start: the lagged output begins at 0 (or p.ic) instead of its DC value
+    initState(ctx) {
+        this.vf = this.p && this.p.ic !== undefined ? this.p.ic : (ctx.uic ? 0 : this.vtEff);
+    }
     accept() { this.vf = this.vtEff; }
 }
 
@@ -1036,7 +1043,7 @@ class OpAmp extends BehavioralDriver {
         ac.add(out, inN, G * re, G * im);
     }
 
-    initState() { this.aPrev = this.aNow; }
+    initState(ctx) { this.aPrev = ctx.uic ? 0 : this.aNow; }
     accept() { this.aPrev = this.aNow; }
     current() { return 0; }
 }

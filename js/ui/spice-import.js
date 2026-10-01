@@ -95,6 +95,16 @@ class SchematicImporter {
             route: null
         });
 
+        // .ic node voltages become initial-condition flags on their nets
+        for (const [net, v] of Object.entries(deck.ic || {})) {
+            const pins = pinsOf.get(net);
+            if (!pins || !pins.length) { warnings.push(`.ic v(${net}) refers to an unknown net and was skipped`); continue; }
+            const anchor = pins[0];
+            const flag = editor.addComponent("NODEIC", anchor.x, anchor.y - 120, 0);
+            flag.value = Units.formatSI(v, "V");
+            pins.push({ comp: flag, pin: "1", x: flag.x, y: flag.y + 20 });
+        }
+
         for (const [net, pins] of pinsOf) {
             if (isGround(net)) {
                 // every ground connection gets its own symbol just below the pin
@@ -138,12 +148,7 @@ class SchematicImporter {
 
         switch (e.kind) {
             case "R": return { ...base, type: "R", props: { value: Units.formatSI(e.value, "Ω") } };
-            case "C": {
-                // an explicit IC=, else the voltage implied by any .ic node voltages
-                const node = (n) => (deck.ic && deck.ic[n]) || 0;
-                const ic = e.ic !== undefined ? e.ic : (deck.ic ? node(e.nodes[0]) - node(e.nodes[1]) : "");
-                return { ...base, type: "C", props: { value: Units.formatSI(e.value, "F"), ic } };
-            }
+            case "C": return { ...base, type: "C", props: { value: Units.formatSI(e.value, "F"), ic: e.ic !== undefined ? e.ic : "" } };
             case "L": return { ...base, type: "L", props: { value: Units.formatSI(e.value, "H"), ic: e.ic || "" } };
             case "V":
             case "I": {

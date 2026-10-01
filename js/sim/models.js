@@ -35,7 +35,7 @@ const SIM_MODELS = {
     },
     NMOS: {
         "2N7000": { desc: "Small N-MOSFET, 60 V / 200 mA", params: { vto: 2.0, beta: 0.025, lambda: 0.01, cgs: 18e-12, cgd: 3e-12, bodyDiode: { is: 1e-12, n: 1.2, rs: 0.5 } } },
-        "IRF540": { desc: "Power N-MOSFET, 100 V / 28 A", params: { vto: 3.5, beta: 3.5, lambda: 0.005, cgs: 1.6e-9, cgd: 100e-12, bodyDiode: { is: 1e-11, n: 1.2, rs: 0.01 } } },
+        "IRF540": { desc: "Power N-MOSFET, 100 V / 28 A", params: { vto: 3.5, beta: 3.5, lambda: 0.005, rd: 0.008, rs: 0.004, cgs: 1.6e-9, cgd: 100e-12, bodyDiode: { is: 1e-11, n: 1.2, rs: 0.01 } } },
         "BS170": { desc: "Small N-MOSFET, 60 V / 500 mA", params: { vto: 2.0, beta: 0.04, lambda: 0.01, cgs: 24e-12, cgd: 4e-12, bodyDiode: { is: 1e-12, n: 1.2, rs: 0.5 } } }
     },
     PMOS: {
@@ -87,7 +87,8 @@ function simModelCardFromParams(kind, name, p) {
     if (kind === "NMOS" || kind === "PMOS") {
         const t = kind === "NMOS" ? "NMOS" : "PMOS";
         // Level 1: KP * W/L = beta, so use W=L=1u and KP=beta
-        return `.model ${name} ${t}(LEVEL=1 VTO=${f(kind === "NMOS" ? p.vto : -p.vto)} KP=${f(p.beta)} LAMBDA=${f(p.lambda)})`;
+        const extra = `${p.rd ? ` RD=${f(p.rd)}` : ""}${p.rs ? ` RS=${f(p.rs)}` : ""}`;
+        return `.model ${name} ${t}(LEVEL=1 VTO=${f(kind === "NMOS" ? p.vto : -p.vto)} KP=${f(p.beta)} LAMBDA=${f(p.lambda)}${extra})`;
     }
     return null;
 }
