@@ -628,6 +628,44 @@ window.analysisTests = async function () {
     Commands.run("view.sidebar");
     ok("and shows it again", !document.body.classList.contains("nosidebar") && getComputedStyle(document.getElementById("leftpane")).display !== "none");
 
+
+    // ======================================================== rule check across sheets
+    clear(); editor.resetSheets();
+    const eb = new ExampleBuilder(editor);
+    const esh = editor.addSheet("LONELY"); editor.switchSheet(1);
+    const ec = new ExampleBuilder(editor); ec.part("R", 200, 200, { value: "1k" }); ec.finish();
+    editor.switchSheet(0);
+    eb.part("V", 100, 300, { rot: 270, dcVoltage: 5, value: "5 V" }); eb.part("GND", 100, 440); eb.part("SHEET", 500, 200, { sheet: 99 }); eb.finish();
+    const eres = ErcChecker.run(editor, { allSheets: true });
+    ok("a sheet symbol with no sheet and an unused sheet are reported", eres.issues.some(i => i.rule === "sheet" && /does not point at a sheet/.test(i.text)) && eres.issues.some(i => i.rule === "sheet" && /LONELY.*not used/.test(i.text)), eres.issues.map(i => i.text));
+    ok("problems on other sheets are listed with the sheet's name", eres.issues.some(i => /^\[LONELY\].*not connected/.test(i.text)), eres.issues.map(i => i.text));
+    ok("the plain run still checks only the open sheet", !ErcChecker.run(editor).issues.some(i => /^\[LONELY\]/.test(i.text)));
+    const other = eres.issues.find(i => /^\[LONELY\]/.test(i.text) && i.refs.length);
+    editor.revealRefs(other.refs);
+    ok("clicking such an issue opens its sheet", editor.sheets[editor.sheetIndex].name === "LONELY", editor.sheetIndex);
+    editor.resetSheets(); sheetBar.render();
+
+
+    // ======================================================== per-instance parameters on a sheet symbol
+    clear(); editor.resetSheets();
+    const pi_ib = new ExampleBuilder(editor);
+    const pi_ish = editor.addSheet("RDIV"); editor.switchSheet(1);
+    editor.params = [{ name: "rv", value: "1k" }];
+    const pi_ic2 = new ExampleBuilder(editor);
+    const pi_ipin = pi_ic2.part("PORT", 120, 200, { net: "IN", value: "IN" }), pi_ir = pi_ic2.part("R", 300, 200, { value: "{rv}" }), pi_iout = pi_ic2.part("PORT", 500, 200, { net: "OUT", value: "OUT" });
+    pi_ic2.wire(pi_ipin, "1", pi_ir, "1"); pi_ic2.wire(pi_ir, "2", pi_iout, "1"); pi_ic2.finish();
+    editor.switchSheet(0);
+    editor.params = [{ name: "rv", value: "1k" }, { name: "scale", value: "3" }];
+    const pi_iu1 = pi_ib.part("SHEET", 400, 200, { sheet: pi_ish.id }), pi_iu2 = pi_ib.part("SHEET", 640, 200, { sheet: pi_ish.id, overrides: "rv = 2k*scale" });
+    const pi_iv = pi_ib.part("V", 100, 300, { rot: 270, dcVoltage: 1, value: "1 V" }), pi_ig = pi_ib.part("GND", 100, 440), pi_ig2 = pi_ib.part("GND", 900, 440), pi_irl = pi_ib.part("R", 900, 300, { rot: 90, value: "1 kΩ" });
+    pi_ib.wire(pi_iv, "2", pi_iu1, "IN"); pi_ib.wire(pi_iu1, "OUT", pi_iu2, "IN"); pi_ib.wire(pi_iu2, "OUT", pi_irl, "1"); pi_ib.wire(pi_iv, "1", pi_ig, "1"); pi_ib.wire(pi_irl, "2", pi_ig2, "1"); pi_ib.finish();
+    const pi_iinfo = NetlistExtractor.extract(editor);
+    const pi_rvals = pi_iinfo.elements.filter(e => e.kind === "R" && /\./.test(e.name)).map(e => [e.name, e.params.r]);
+    ok("each use of a sheet gets its own parameter values (1 kΩ by default, 2k × scale = 6 kΩ for the second)", pi_rvals.length === 2 && pi_rvals.some(r => r[1] === 1000) && pi_rvals.some(r => r[1] === 6000), pi_rvals);
+    pi_iu2.overrides = "nonsense";
+    ok("a bad override is reported, not silently ignored", NetlistExtractor.extract(editor).warnings.some(w => /not name=value/.test(w)));
+    editor.resetSheets(); sheetBar.render(); editor.params = [];
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

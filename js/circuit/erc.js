@@ -28,10 +28,11 @@ class ErcChecker {
         contention: "Two outputs must not drive the same net",
         led: "An LED needs a current-limiting resistor",
         probe: "A probe on ground always reads zero",
-        power: "Ports with the same name must agree"
+        power: "Ports with the same name must agree",
+        sheet: "Every sheet must be used, and every sheet symbol must point at a sheet"
     };
 
-    static run(editor) {
+    static run(editor, opts = {}) {
         const nets = NetlistExtractor.nets(editor);
         const { els } = NetlistExtractor.elements(editor, nets);
         const issues = [];
@@ -234,6 +235,23 @@ class ErcChecker {
         // errors first, then by rule
         const order = Object.keys(ErcChecker.RULES);
         issues.sort((a, b) => (a.level === b.level ? 0 : a.level === "err" ? -1 : 1) || order.indexOf(a.rule) - order.indexOf(b.rule));
+        // ---- the other sheets of a multi-sheet design ---------------------------------------------------
+        if (opts.allSheets && editor.sheets && editor.sheets.length > 1) {
+            const used = new Map();
+            editor.sheets.forEach((sh, i) => {
+                const st = i === editor.sheetIndex ? editor.liveSheetState() : sh.data;
+                if (!st) return;
+                for (const c of st.components) if (c.type === "SHEET") {
+                    if (editor.sheetIndexOf(c.sheet) < 0) issues.push({ level: "err", rule: "sheet", text: `[${sh.name}] ${c.name} does not point at a sheet.`, refs: [{ comp: c, x: c.x, y: c.y, sheet: sh.id }] });
+                    else used.set(Number(c.sheet), (used.get(Number(c.sheet)) || 0) + 1);
+                }
+                if (i !== editor.sheetIndex) {
+                    const sub = ErcChecker.run(SchematicEditor.headless(st, editor.params));
+                    for (const is of sub.issues) issues.push({ ...is, text: `[${sh.name}] ${is.text}`, refs: is.refs.map(r => ({ ...r, sheet: sh.id })) });
+                }
+            });
+            editor.sheets.forEach((sh, i) => { if (i > 0 && !used.has(sh.id)) issues.push({ level: "warn", rule: "sheet", text: `Sheet ${sh.name} is not used by any sheet symbol, so it is not simulated.`, refs: [] }); });
+        }
         return { issues, nets, elements: els };
     }
 

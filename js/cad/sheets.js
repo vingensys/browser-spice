@@ -264,7 +264,9 @@ PartLib.add("SHEET", {
     rows: (p, c) => {
         const ed = SheetHub.editor;
         const options = ed ? ed.sheets.filter((s, i) => i !== ed.sheetIndex).map(s => [String(s.id), s.name]) : [];
-        return p.select("Sheet", "sheet", [["0", "(none)"], ...options], String(c.sheet || 0), "Double-click the symbol to open the sheet. Its PORT parts become the pins.");
+        return p.select("Sheet", "sheet", [["0", "(none)"], ...options], String(c.sheet || 0), "Double-click the symbol to open the sheet. Its PORT parts become the pins.") +
+            p.text("Parameters for this use", "overrides", c.overrides || "", "rv=2k; cv=10n") +
+            `<div class="prop-note">Gives the sheet's design parameters other values for this symbol only, so one sheet can be used twice with different values.</div>`;
     },
     netlist: () => [],
     catalog: [{ name: "SHEET SYMBOL", category: "Terminals", desc: "Uses another sheet of this design (hierarchy)", props: { sheet: 0, value: "SHEET" } }]

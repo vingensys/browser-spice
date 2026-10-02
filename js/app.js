@@ -64,7 +64,7 @@
     // --------------------------------------------------------------- electrical rules
 
     function runErc() {
-        const result = ErcChecker.run(editor);
+        const result = ErcChecker.run(editor, { allSheets: true });
         const errs = result.issues.filter(i => i.level === "err").length, warns = result.issues.length - errs;
         AppLog.add("info", `Electrical rules check: ${result.issues.length ? `${errs} error(s), ${warns} warning(s)` : "no problems found"}.`);
         result.issues.forEach(i => AppLog.add(i.level, i.text));

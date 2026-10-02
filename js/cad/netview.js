@@ -87,6 +87,7 @@ class NetView {
     revealRefs(refs) {
         const r = refs && refs[0];
         if (!r) return;
+        if (r.sheet !== undefined && this.sheets[this.sheetIndex].id !== r.sheet && this.sheetIndexOf(r.sheet) >= 0) { this.sheetStack = []; this.switchSheet(this.sheetIndexOf(r.sheet)); }
         this.clearSelection();
         if (r.comp && this.components.some(c => c.id === r.comp.id)) this.selection = [this.components.find(c => c.id === r.comp.id)];
         else if (r.wire) this.selectedWire = this.wires.find(w => w.id === r.wire.id) || null;

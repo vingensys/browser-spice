@@ -20,18 +20,37 @@ class Hierarchy {
             sourced.add(name);
         }
         const ctx = { editor, els, warnings, power, sourced, instances: 0 };
-        for (const c of editor.components) if (c.type === "SHEET") Hierarchy.instance(ctx, editor, nets, c, c.name, 1, (id) => id);
+        for (const c of editor.components) if (c.type === "SHEET") Hierarchy.instance(ctx, editor, nets, c, c.name, 1, (id) => id, editor.params || []);
         els.instances = ctx.instances;
     }
 
-    static instance(ctx, parent, parentNets, comp, path, depth, mapParent) {
+    // "rv=2k; cv=gain*1n" on a sheet symbol: values for this instance's parameters, evaluated in the parent's context
+    static overrideParams(parentParams, text, warnings, where) {
+        const src = String(text || "").trim();
+        if (!src) return parentParams;
+        const { values } = DesignParams.resolve(parentParams);
+        const out = parentParams.map(p => ({ ...p })), seen = new Set();
+        for (const part of src.split(/[;\n]/).map(s => s.trim()).filter(Boolean)) {
+            const m = /^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$/.exec(part);
+            if (!m) { warnings.push(`${where}: "${part}" is not name=value`); continue; }
+            let v;
+            try { v = Expr.compile(m[2].replace(/^\{|\}$/g, ""), values).eval([], 0); } catch (e) { warnings.push(`${where}: ${m[1]}: ${e.message.replace(/ in expression.*$/, "")}`); continue; }
+            const i = out.findIndex(p => String(p.name).toLowerCase() === m[1].toLowerCase());
+            if (i >= 0) out[i] = { name: out[i].name, value: String(v) }; else out.push({ name: m[1], value: String(v) });
+            seen.add(m[1].toLowerCase());
+        }
+        return out;
+    }
+
+    static instance(ctx, parent, parentNets, comp, path, depth, mapParent, parentParams) {
         const { editor, els, warnings, power, sourced } = ctx;
         if (depth > Hierarchy.MAX_DEPTH) { warnings.push(`${path}: sheets contain each other more than ${Hierarchy.MAX_DEPTH} levels deep (a sheet that uses itself?); not expanded`); return; }
         const sheetId = Number(comp.sheet);
         const state = editor.sheetState(sheetId);
         if (!state) { warnings.push(`${comp.name}: no sheet selected`); return; }
         ctx.instances++;
-        const child = SchematicEditor.headless(state, editor.params);
+        const params = Hierarchy.overrideParams(parentParams, comp.overrides, warnings, path);
+        const child = SchematicEditor.headless(state, params);
         const cnets = NetlistExtractor.nets(child);
         if (cnets.hasGround) els.childGround = true;
 
@@ -76,7 +95,7 @@ class Hierarchy {
             els.push(copy);
         }
         for (const [net, v] of Object.entries(cels.nodeIC || {})) els.nodeIC[node(net)] = v;
-        for (const sc of child.components) if (sc.type === "SHEET") Hierarchy.instance(ctx, child, cnets, sc, `${path}.${sc.name}`, depth + 1, node);
+        for (const sc of child.components) if (sc.type === "SHEET") Hierarchy.instance(ctx, child, cnets, sc, `${path}.${sc.name}`, depth + 1, node, params);
     }
 
     // every component of the design with its instance path: [{ comp, path, ref }], the sheets expanded once per use
