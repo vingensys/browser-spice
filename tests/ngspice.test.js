@@ -13,7 +13,7 @@ const { spawnSync } = require("child_process");
 const root = path.join(__dirname, "..");
 const files = [
     "js/utils/complex.js", "js/utils/units.js",
-    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/logic-ics.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js", "js/sim/spice-parser.js"
+    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/logic-ics.js", "js/sim/expression.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js", "js/sim/spice-parser.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const { SimEngine, SpiceParser, SPARSE_THRESHOLD } = new Function(src + "\nreturn { SimEngine, SpiceParser, SPARSE_THRESHOLD };")();

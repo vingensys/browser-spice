@@ -185,6 +185,27 @@ window.analysisTests = async function () {
     clear();
     ok("an empty sheet has nothing to export", Exporter.renderImage(editor) === null && Exporter.bomCsv(editor).split("\r\n").filter(Boolean).length === 1);
 
+
+    // ======================================================== behavioural sources in the schematic
+    clear();
+    SchematicImporter.import(editor, "bsrc\nV1 in 0 2\nR1 in 0 1k\nB1 out 0 V = 3*v(in) + v(in,0)*0.5\nR2 out 0 10k\nB2 x 0 I = -v(out)/1k\nR3 x 0 1k\n.end");
+    const bsrc = editor.components.filter(c => c.type === "BSRC");
+    ok("an imported B card becomes a behavioural source part with sense pins", bsrc.length === 2 && bsrc[0].mode === "V" && /v\(A\)/.test(bsrc[0].expr) && editor.getTerminals(bsrc[0]).length === 6, bsrc.map(c => c.expr));
+    const bi = NetlistExtractor.extract(editor);
+    const bop = new SimEngine(bi.circuit).operatingPoint();
+    const outNet = bi.getTerminalNodeName(bsrc[0], "O+");
+    ok("it simulates as written (3*2 + 0.5*2 = 7 V)", near(bop.nodeVoltages[outNet], 7, 1e-5), bop.nodeVoltages[outNet]);
+    ok("its current form drives R3 (I = -7 mA flows x -> 0, so +7 mA enters x: 7 V)", near(bop.nodeVoltages[bi.getTerminalNodeName(bsrc[1], "O+")], 7, 1e-4), bop.nodeVoltages);
+    const exp = NetlistExtractor.toSpice(bi.elements, {}).split("\n").filter(l => /^B/.test(l));
+    ok("the SPICE export writes B cards with the net numbers", exp.length === 2 && /V=3\*v\(\w+\)/i.test(exp[0]) && /^B\w* \S+ \S+ I=/.test(exp[1]), exp);
+    byName("B1") && (byName("B1").expr = "foo(1)");
+    let bthrown = ""; try { NetlistExtractor.extract(editor); } catch (e) { bthrown = e.message; }
+    ok("a bad expression is reported with the part's name", /B1.*unknown function/.test(bthrown), bthrown);
+    ok("Pick Devices offers both behavioural sources", DeviceCatalog.all().filter(e => e.type === "BSRC").length === 2);
+    clear();
+    SchematicImporter.import(editor, "many\nV1 a 0 1\nR1 a b 1k\nR2 b c 1k\nR3 c d 1k\nR4 d e 1k\nR5 e 0 1k\nB1 o 0 V=v(a)+v(b)+v(c)+v(d)+v(e)\nR6 o 0 1k\n.end");
+    ok("a B source reading more than four nodes is skipped with a warning, not mangled", !editor.components.some(c => c.type === "BSRC"));
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

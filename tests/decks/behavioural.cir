@@ -1,0 +1,16 @@
+Behavioural sources: gain, square-law, tanh clipper, time and current references
+V1 in 0 SIN(0 2 1k) AC 1
+R1 in 0 1k
+B1 g 0 V = 3*v(in)
+R2 g 0 10k
+B2 0 sq I = v(in)*v(in)/1k
+R3 sq 0 500
+B3 clip 0 V = 2*tanh(v(in)/1.5)
+R4 clip 0 10k
+B4 sense 0 V = -i(v1)*1000 + 0.5*sin(2*pi*500*time)
+R5 sense 0 10k
+B5 sw 0 V = v(in) > 0.5 ? 3 : (v(in) < -0.5 ? -3 : v(in)*6)
+R6 sw 0 10k
+.tran 10u 3m
+.ac dec 10 10 100k
+.end

@@ -444,6 +444,7 @@ class NetlistExtractor {
                 case "REG": c.add(new Regulator(e.name, e.nodes, p)); break;
                 case "FF": c.add(new FlipFlop(e.name, e.nodes, e.ff, p)); break;
                 case "DIGITAL": c.add(new DigitalIC(e.name, e.nodes, LOGIC_ICS[e.ic], p)); break;
+                case "BSRC": c.add(new BSource(e.name, e.nodes, { mode: e.params.mode, expr: e.params.expr })); break;
                 case "CCCS": c.add(new CCCS(e.name, e.nodes, { ctrl: e.ctrl, gain: p.gain, vsat: p.vsat })); break;
             }
         }
@@ -637,6 +638,9 @@ class NetlistExtractor {
                         `B${nm}_I ${n[0]} ${n[2]} I=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}+${f(p.iq)}`);
                     break;
                 }
+                case "BSRC":
+                    lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^B/i, "")} ${n[0]} ${n[1]} ${p.mode}=${p.expr}`);
+                    break;
                 case "CCCS": {
                     // output current = gain * I(sense source) with a smooth saturation near 0 V
                     const sense = NetlistExtractor.spiceName({ kind: "V", name: e.ctrl });

@@ -539,3 +539,95 @@ class FlipFlop extends Element {
         this.clkHigh = this.high(ctx, this.n[2]);
     }
 }
+
+
+// ------------------------------------------------------------- behavioural source (SPICE "B")
+// nodes: [out+, out-]. mode "V": v(out+) - v(out-) = f(...) ; mode "I": f(...) flows from out+ through the source to out-.
+// f reads node voltages v(a) / v(a,b), branch currents i(Vname) and `time`. Newton gets its slopes by differencing.
+class BSource extends NonlinearElement {
+    constructor(name, nodes, { mode = "V", expr = "0" } = {}) {
+        super(name, nodes);
+        this.mode = mode === "I" ? "I" : "V";
+        this.exprText = expr;
+        this.expr = Expr.compile(expr);
+        this.branches = this.mode === "V" ? 1 : 0;
+        this.last = 0;
+        this.jac = null;
+    }
+
+    bind(circuit) {
+        super.bind(circuit);
+        this.circuit = circuit;
+        this.refs = this.expr.vars.map(v => (v.type === "v" ? { a: circuit.node(v.a), b: v.b === null ? -1 : circuit.node(v.b) } : { name: v.name }));
+        this.vals = new Array(this.expr.vars.length).fill(0);
+    }
+
+    read(ctx) {
+        this.refs.forEach((r, k) => {
+            if (r.name !== undefined) {
+                const el = this.circuit.elements.find(e => e.name.toLowerCase() === r.name);
+                if (!el || !el.branches) throw new Error(`${this.name}: i(${r.name}) needs a voltage source with that name`);
+                r.idx = el.br;
+                this.vals[k] = ctx.x ? ctx.x[el.br] : 0;
+            } else this.vals[k] = ctx.v(r.a) - (r.b < 0 ? 0 : ctx.v(r.b));
+        });
+    }
+
+    // value and slopes with respect to each variable
+    linearise(ctx) {
+        this.read(ctx);
+        const time = ctx.mode === "tran" ? ctx.time : 0, f0 = this.expr.eval(this.vals, time), d = [];
+        for (let k = 0; k < this.vals.length; k++) {
+            const x = this.vals[k], h = 1e-7 * (1 + Math.abs(x));
+            this.vals[k] = x + h;
+            const f1 = this.expr.eval(this.vals, time);
+            this.vals[k] = x - h;
+            const f2 = this.expr.eval(this.vals, time);
+            this.vals[k] = x;
+            d.push((f1 - f2) / (2 * h));
+        }
+        return { f0, d };
+    }
+
+    // add the linearised dependence f ~ f0 + sum d_k (var_k - x_k) as matrix columns on `row` with sign `sgn`
+    columns(add, row, sgn, d) {
+        this.refs.forEach((r, k) => {
+            if (!d[k]) return;
+            if (r.name !== undefined) add(row, r.idx, sgn * d[k]);
+            else { add(row, r.a, sgn * d[k]); if (r.b >= 0) add(row, r.b, -sgn * d[k]); }
+        });
+    }
+
+    stamp(ctx) {
+        const { f0, d } = this.linearise(ctx), [p, n] = this.n, s = ctx.sys;
+        let off = f0;                                           // f0 - sum d_k x_k: the constant part
+        for (let k = 0; k < d.length; k++) off -= d[k] * this.vals[k];
+        this.jac = d; this.last = f0;
+        const scale = ctx.srcScale === undefined ? 1 : ctx.srcScale;
+        if (this.mode === "I") {
+            this.columns((i, j, v) => s.add(i, j, v), p, 1, d);
+            this.columns((i, j, v) => s.add(i, j, v), n, -1, d);
+            s.rhs(p, -off * scale); s.rhs(n, off * scale);
+        } else {
+            const br = this.br;
+            s.add(p, br, 1); s.add(n, br, -1); s.add(br, p, 1); s.add(br, n, -1);
+            this.columns((i, j, v) => s.add(i, j, v), br, -1, d);
+            s.rhs(br, off * scale);
+        }
+    }
+
+    stampAC(ac) {
+        const d = this.jac;
+        const [p, n] = this.n, add = (i, j, v) => ac.add(i, j, v, 0);
+        if (this.mode === "I") {
+            if (!d) return;
+            this.columns(add, p, 1, d); this.columns(add, n, -1, d);
+        } else {
+            const br = this.br;
+            add(p, br, 1); add(n, br, -1); add(br, p, 1); add(br, n, -1);
+            if (d) this.columns(add, br, -1, d);
+        }
+    }
+
+    current(x) { return this.mode === "V" ? x[this.br] : this.last; }
+}

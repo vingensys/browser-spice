@@ -4,6 +4,7 @@
  "js/sim/linalg.js",
  "js/sim/devices.js",
  "js/sim/logic-ics.js",
+ "js/sim/expression.js",
  "js/sim/devices-extra.js",
  "js/sim/models.js",
  "js/sim/models-extra.js",

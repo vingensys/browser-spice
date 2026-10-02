@@ -8,20 +8,21 @@ const path = require("path");
 const root = path.join(__dirname, "..");
 const files = [
     "js/utils/complex.js", "js/utils/units.js",
-    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/logic-ics.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js",
+    "js/sim/linalg.js", "js/sim/devices.js", "js/sim/logic-ics.js", "js/sim/expression.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js",
     "js/sim/spice-parser.js", "js/sim/model-library.js"
 ];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const S = new Function(src + `
 return { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
          Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard, Complex,
-         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, DigitalIC, LOGIC_ICS, Switch, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
+         JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, DigitalIC, LOGIC_ICS, Switch, BSource, Expr, SPARSE_THRESHOLD, DenseSystem, SparseSystem, SingularMatrixError, SpiceParser, SimModelLibrary, SIM_MODELS };`)();
 if (process.env.SPARSE) S.SPARSE_THRESHOLD.n = 0; // force the sparse solver for every circuit
 
 const { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, CurrentSource,
     Diode, BJT, MOSFET, OpAmp, LogicGate, Timer555, Waveform, SIM, simModel, simModelCard,
     JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, DigitalIC, LOGIC_ICS } = S;
 
+const { BSource, Expr, SpiceParser } = S;
 let passed = 0, failed = 0;
 const failures = [];
 function test(name, fn) {
@@ -1002,6 +1003,84 @@ test("EXP and SFFM waveforms", () => {
     near(e.at(7e-3), 5 * (1 - Math.exp(-6)) - 5 * (1 - Math.exp(-1)), 1e-9, "decay");
     const f = Waveform.sffm({ vo: 1, va: 2, fc: 1000, mdi: 3, fs: 100 });
     near(f.at(0.25e-3), 1 + 2 * Math.sin(2 * Math.PI * 1000 * 0.25e-3 + 3 * Math.sin(2 * Math.PI * 100 * 0.25e-3)), 1e-12);
+});
+
+
+console.log("behavioural (B) sources and expressions");
+
+test("expressions: operators, precedence, functions, ternary and SPICE suffixes", () => {
+    const ev = (t, vals = [], time = 0) => Expr.compile(t).eval(vals, time);
+    near(ev("2+3*4"), 14, 1e-12); near(ev("(2+3)*4"), 20, 1e-12); near(ev("-2^2"), -4, 1e-12, "unary minus binds looser than ^"); near(ev("2^3^2"), 512, 1e-12, "^ groups to the right");
+    near(ev("10k*1.5"), 15000, 1e-9); near(ev("2meg/4"), 5e5, 1e-6); near(ev("3u*1e6"), 3, 1e-12);
+    near(ev("sin(pi/2)+cos(0)"), 2, 1e-12); near(ev("max(3,min(9,5))"), 5, 1e-12); near(ev("limit(7,0,5)"), 5, 1e-12);
+    near(ev("1<2 && 3>2 ? 10 : 20"), 10, 1e-12); near(ev("!0 + (2==2)"), 2, 1e-12); near(ev("if(0,1,2)"), 2, 1e-12);
+    near(ev("time*1k", [], 0.002), 2, 1e-12); near(ev("pwr(-2,2)"), -4, 1e-12); near(ev("u(-1)+u(2)+uramp(-3)+uramp(3)"), 4, 1e-12);
+    if (!Number.isFinite(ev("1/0")) || !Number.isFinite(ev("ln(0)")) || !Number.isFinite(ev("sqrt(-1)")) || !Number.isFinite(ev("exp(1e4)"))) throw new Error("non-finite results escape");
+});
+test("expressions: variables are collected once and evaluated from the value list", () => {
+    const e = Expr.compile("v(a,b)*2 + v(a,b) + v(c) + i(vx)");
+    if (e.vars.length !== 3 || e.vars[0].type !== "v" || e.vars[0].b !== "b" || e.vars[2].name !== "vx") throw new Error(JSON.stringify(e.vars));
+    near(e.eval([1, 10, 100]), 3 + 10 + 100, 1e-12);
+});
+test("expressions: errors say what is wrong", () => {
+    for (const [t, re] of [["2+", /ends too soon/], ["foo(1)", /unknown function/], ["bar", /unknown name/], ["sin(1,2)", /takes 1 argument/], ["(1+2", /expected "\)"/], ["1 $ 2", /unexpected/], ["v()", /node names|expected/]]) {
+        let msg = ""; try { Expr.compile(t); } catch (e) { msg = e.message; }
+        if (!re.test(msg)) throw new Error(`${t}: ${msg}`);
+    }
+});
+test("B voltage source: V = 3*v(in) is an ideal gain of 3", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], vdc(1.5))); c.add(new Resistor("R1", ["in", "0"], { r: 1000 }));
+    c.add(new BSource("B1", ["out", "0"], { mode: "V", expr: "3*v(in)" })); c.add(new Resistor("R2", ["out", "0"], { r: 1000 }));
+    const op = new SimEngine(c).operatingPoint();
+    near(op.nodeVoltages.out, 4.5, 1e-6); near(op.currents.B1, 4.5e-3 * (op.currents.B1 < 0 ? -1 : 1), 1e-6, "branch current");
+});
+test("B current source with a nonlinear (square-law) expression converges", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["a", "0"], vdc(2)));
+    c.add(new BSource("B1", ["0", "x"], { mode: "I", expr: "v(a)*v(a)/1k" })); c.add(new Resistor("R1", ["x", "0"], { r: 500 }));
+    near(new SimEngine(c).operatingPoint().nodeVoltages.x, 2, 1e-6);          // 4 mA * 500
+});
+test("B source feedback: a nonlinear expression of its own output (x = 1 - x^3 / 3 -> Newton)", () => {
+    const c = new SimCircuit();
+    c.add(new BSource("B1", ["x", "0"], { mode: "V", expr: "1 - v(x)^3/3" }));
+    const x = new SimEngine(c).operatingPoint().nodeVoltages.x;
+    near(x + x * x * x / 3, 1, 1e-6);
+});
+test("B source reads the current of a voltage source with i(name)", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], vdc(5))); c.add(new Resistor("R1", ["in", "0"], { r: 1000 }));
+    c.add(new BSource("B1", ["out", "0"], { mode: "V", expr: "abs(i(v1))*1000" })); c.add(new Resistor("R2", ["out", "0"], { r: 1e4 }));
+    near(new SimEngine(c).operatingPoint().nodeVoltages.out, 5, 1e-5);
+});
+test("B source uses time in a transient run", () => {
+    const c = new SimCircuit();
+    c.add(new BSource("B1", ["o", "0"], { mode: "V", expr: "sin(2*pi*1k*time)" })); c.add(new Resistor("R1", ["o", "0"], { r: 1000 }));
+    const r = new SimEngine(c).transient({ tStop: 1e-3, tStep: 1e-6 });
+    const at = (t) => { const k = r.timePoints.findIndex(x => x >= t); return r.nodeHistories.o[k]; };
+    near(at(0.25e-3), 1, 5e-3); near(at(0.75e-3), -1, 5e-3);
+});
+test("B source in AC analysis behaves as its small-signal gain", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], { wave: Waveform.dc(0), acMag: 1 })); c.add(new Resistor("R1", ["in", "0"], { r: 1000 }));
+    c.add(new BSource("B1", ["out", "0"], { mode: "V", expr: "3*v(in)" })); c.add(new Resistor("R2", ["out", "0"], { r: 1000 }));
+    const r = new SimEngine(c).ac({ fStart: 100, fStop: 1000, pointsPerDecade: 2 });
+    near(r[0].nodeVoltages.out.magnitude(), 3, 1e-6);
+    const d = new SimCircuit();     // a tanh clipper at its operating point has gain 2/1.5 * (1 - tanh^2); at 0 V: 1.3333
+    d.add(new VoltageSource("V1", ["in", "0"], { wave: Waveform.dc(0), acMag: 1 })); d.add(new Resistor("R1", ["in", "0"], { r: 1000 }));
+    d.add(new BSource("B1", ["out", "0"], { mode: "V", expr: "2*tanh(v(in)/1.5)" })); d.add(new Resistor("R2", ["out", "0"], { r: 1000 }));
+    near(new SimEngine(d).ac({ fStart: 100, fStop: 1000, pointsPerDecade: 2 })[0].nodeVoltages.out.magnitude(), 4 / 3, 1e-4);
+});
+test("SPICE decks: B cards parse (V= and I=, spaces around =), and inside a subcircuit the names are prefixed", () => {
+    const deck = SpiceParser.parse("t\nV1 in 0 2\nB1 out 0 V = 3*V(in)\nR1 out 0 1k\n.end");
+    const { circuit, warnings } = SpiceParser.build(deck);
+    if (warnings.length) throw new Error(warnings.join(";"));
+    near(new SimEngine(circuit).operatingPoint().nodeVoltages.out, 6, 1e-6);
+    const sub = SpiceParser.parse("t\n.subckt amp i o\nB1 o 0 V=2*v(i)\n.ends\nV1 in 0 1.5\nX1 in out amp\nR1 out 0 1k\n.end");
+    const r = SpiceParser.build(sub);
+    near(new SimEngine(r.circuit).operatingPoint().nodeVoltages.out, 3, 1e-6);
+    const bad = SpiceParser.build(SpiceParser.parse("t\nV1 in 0 1\nB1 out 0 V=foo(2)\nR1 out 0 1k\n.end"));
+    if (!bad.warnings.some(w => /unknown function/.test(w))) throw new Error("a bad expression should warn: " + bad.warnings);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

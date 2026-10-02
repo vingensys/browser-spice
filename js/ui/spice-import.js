@@ -17,7 +17,8 @@ class SchematicImporter {
         Q: ["C", "B", "E"],       // parser order (collector, base, emitter)
         M: ["G", "D", "S"],       // parser order (gate, drain, source)
         J: ["G", "D", "S"],
-        XFMR: ["P1", "P2", "S1", "S2"]
+        XFMR: ["P1", "P2", "S1", "S2"],
+        B: ["O+", "O-", "A", "B", "C", "D"]
     };
 
     static import(editor, text) {
@@ -205,6 +206,23 @@ class SchematicImporter {
                 const m = deck.models[e.model];
                 const type = m && m.type === "pnp" ? "BJT_PNP" : "BJT_NPN";
                 return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.bjtParams(m) : undefined } };
+            }
+            case "B": {
+                // the schematic part has four sense pins (A-D): numbered nets in the expression become pin letters
+                const ground = (n) => n === "0" || n === "gnd";
+                const sense = [];
+                const letter = (n) => { let k = sense.indexOf(n); if (k < 0) { sense.push(n); k = sense.length - 1; } return "ABCD"[k] || null; };
+                let overflow = false;
+                const expr = e.expr.replace(/\bv\(\s*([^),\s]+)\s*(?:,\s*([^)\s]+)\s*)?\)/g, (_, a, b) => {
+                    const la = ground(a) ? null : letter(a), lb = b === undefined || ground(b) ? null : letter(b);
+                    if ((!ground(a) && !la) || (b !== undefined && !ground(b) && !lb)) overflow = true;
+                    if (!la && !lb) return "0";
+                    if (!lb) return `v(${la})`;
+                    if (!la) return `(-v(${lb}))`;
+                    return `v(${la},${lb})`;
+                });
+                if (overflow) { warnings.push(`${e.name}: reads more than four nodes; a schematic B source has inputs A-D, so it was skipped`); return null; }
+                return { ...base, type: "BSRC", nodes: [...e.nodes, ...sense], props: { mode: e.mode, expr, value: expr } };
             }
             case "XFMR":
                 return { ...base, type: "XFMR", props: { l1: String(e.l1), ratio: String(Math.sqrt(e.l2 / e.l1)), k: String(e.k), value: "" } };

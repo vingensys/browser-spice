@@ -837,6 +837,38 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
 }
 
 
+// ------------------------------------------------------------- behavioural source (SPICE "B")
+
+PartLib.add("BSRC", {
+    prefix: "B", value: "2*v(A)", props: { mode: "V", expr: "2*v(A)" },
+    symbol: { pins: [["A", -60, -40, -1, 0], ["B", -60, -20, -1, 0], ["C", -60, 20, -1, 0], ["D", -60, 40, -1, 0], ["O+", 60, -20, 1, 0], ["O-", 60, 20, 1, 0]], box: [-60, -60, 60, 60] },
+    quietPins: true,
+    label: (c) => String(c.expr === undefined ? "0" : c.expr),
+    draw(r, c) {
+        const ctx = r.ctx, col = "#ffb86c";
+        r.partIC(c, [-40, -52, 80, 104], col, { names: true });
+        r.partText(c.mode === "I" ? "B  I=" : "B  V=", 0, -30, { size: 11, bold: true, color: col });
+        const text = String(c.expr === undefined ? "" : c.expr), shown = text.length > 12 ? text.slice(0, 11) + "…" : text;
+        r.partText(shown, 0, 0, { size: 10, color: "#e8edf5" });
+        r.drawLabel(c);
+    },
+    rows: (p, c) => p.select("Type", "mode", [["V", "Voltage source  V = f(...)"], ["I", "Current source  I = f(...)"]], c.mode || "V") +
+        p.text("Expression", "expr", c.expr, "e.g. 2*v(A) + sin(2*pi*1k*time)") +
+        `<div class="prop-note">Read the sense inputs with v(A), v(B), v(C), v(D) or differentially v(A,B); i(V1) reads the current of a voltage source; time is the simulation time. Operators + - * / ^ and comparisons, ?:, and abs sqrt exp ln log sin cos tan atan atan2 tanh min max pow limit u uramp if. An open input reads 0 V. Output current flows from O+ through the source to O- for a current source; O+ is the positive terminal of a voltage source.</div>`,
+    netlist(c, k) {
+        const text = String(c.expr === undefined ? "0" : c.expr);
+        // v(A) -> the net on pin A; unwired sense pins are ground
+        const sub = text.replace(/\bv\(\s*([a-d])\s*(?:,\s*([a-d])\s*)?\)/gi, (_, a, b) => `v(${k.pin(a.toUpperCase())}${b ? "," + k.pin(b.toUpperCase()) : ""})`);
+        try { Expr.compile(sub); } catch (e) { throw new Error(`${c.name}: ${e.message}`); }
+        return [{ ...k.base, kind: "BSRC", nodes: [k.pin("O+"), k.pin("O-")], params: { mode: c.mode === "I" ? "I" : "V", expr: sub, shown: text } }];
+    },
+    catalog: [
+        { name: "BSOURCE-V", category: "Simulator Primitives", desc: "Behavioural voltage source: V = any expression of node voltages, currents and time", props: { mode: "V", expr: "2*v(A)", value: "2*v(A)" } },
+        { name: "BSOURCE-I", category: "Simulator Primitives", desc: "Behavioural current source: I = any expression of node voltages, currents and time", props: { mode: "I", expr: "v(A)/1k", value: "v(A)/1k" } }
+    ]
+});
+
+
 // ------------------------------------------------------------- library hooks
 
 // models of the semiconductor-like parts show up in the catalog like any other model

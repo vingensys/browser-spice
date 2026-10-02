@@ -212,6 +212,11 @@ class SpiceParser {
             case "k": return { kind: "K", name, inductors: [tok[1], tok[2]], k: N(tok[3]) };
             case "e": return { kind: "E", name, nodes: [tok[1], tok[2], tok[3], tok[4]], gain: N(tok[5]) };
             case "g": return { kind: "G", name, nodes: [tok[1], tok[2], tok[3], tok[4]], gm: N(tok[5]) };
+            case "b": {
+                const m = /^\S+\s+(\S+)\s+(\S+)\s+([vi])\s*=\s*(.+)$/i.exec(line.trim());
+                if (!m) { warnings.push(`${name}: a behavioural source needs V=expression or I=expression; ignored`); return null; }
+                return { kind: "B", name, nodes: [m[1].toLowerCase(), m[2].toLowerCase()], mode: m[3].toUpperCase(), expr: m[4].trim().toLowerCase() };
+            }
             case "x": return { kind: "X", name, nodes: tok.slice(1, -1).filter(t => !t.includes("=")), sub: tok.filter(t => !t.includes("=")).pop() };
             default:
                 warnings.push(`element ${name} (${kind.toUpperCase()}) is not supported and was ignored`);
@@ -291,7 +296,12 @@ class SpiceParser {
         };
         for (const el of elements) {
             if (el.kind !== "X") {
-                out.push({ ...el, name: prefix ? `${prefix}.${el.name}` : el.name, nodes: (el.nodes || []).map(mapNode) });
+                const copy = { ...el, name: prefix ? `${prefix}.${el.name}` : el.name, nodes: (el.nodes || []).map(mapNode) };
+                if (el.kind === "B" && (prefix || portMap)) {         // names inside the expression belong to the subcircuit too
+                    copy.expr = el.expr.replace(/\bv\(\s*([^),\s]+)\s*(?:,\s*([^)\s]+)\s*)?\)/g, (_, a, b) => `v(${mapNode(a)}${b ? "," + mapNode(b) : ""})`)
+                        .replace(/\bi\(\s*([^)\s]+)\s*\)/g, (_, a) => `i(${prefix ? prefix + "." + a : a})`);
+                }
+                out.push(copy);
                 continue;
             }
             const sub = deck.subckts[el.sub];
@@ -357,6 +367,11 @@ class SpiceParser {
                 }
                 case "E": circuit.add(new VCVS(nm, e.nodes, { gain: e.gain })); break;
                 case "G": circuit.add(new VCCS(nm, e.nodes, { gm: e.gm })); break;
+                case "B": {
+                    try { circuit.add(new BSource(nm, e.nodes, { mode: e.mode, expr: e.expr })); }
+                    catch (err) { warnings.push(`${e.name}: ${err.message}; ignored`); }
+                    break;
+                }
             }
         }
         return { circuit, warnings };
