@@ -987,7 +987,7 @@ class SchematicEditor {
 
     findTerminal(x, y, tolerance = 16) {
         let best = null;
-        let bestDist = tolerance / this.zoom;
+        let bestDist = (tolerance * (this.hitBoost || 1)) / this.zoom;
 
         for (const component of this.components) {
             for (const terminal of this.getTerminals(component)) {
@@ -1211,6 +1211,7 @@ class SchematicEditor {
     // ============================================================
 
     pointerDown(event) {
+        if (this.touchDown(event)) return;
         const pos = this.getMousePosition(event);
         this.mouse = pos;
         this.mouseInside = true;
@@ -1336,7 +1337,11 @@ class SchematicEditor {
             return;
         }
 
-        // empty space: rubber-band selection
+        // empty space: a finger pans the sheet (a tap clears the selection); a mouse rubber-bands
+        if (event.pointerType === "touch") {
+            this.isPanning = true; this.panStart = { x: event.clientX, y: event.clientY }; this.panTravel = 0;
+            return;
+        }
         if (!event.shiftKey) this.clearSelection();
         this.box = { x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y, additive: event.shiftKey, base: [...this.selection] };
         this.draw();
@@ -1344,7 +1349,9 @@ class SchematicEditor {
     }
 
     pointerMove(event) {
+        if (this.touchMove(event)) return;
         if (this.isPanning) {
+            this.panTravel = (this.panTravel || 0) + Math.abs(event.clientX - this.panStart.x) + Math.abs(event.clientY - this.panStart.y);
             this.panX += event.clientX - this.panStart.x;
             this.panY += event.clientY - this.panStart.y;
             this.panStart = { x: event.clientX, y: event.clientY };
@@ -1415,8 +1422,14 @@ class SchematicEditor {
     }
 
     pointerUp(event) {
+        if (this.touchUp(event)) return;
+        this.pointerUpCore(event);
+    }
+
+    pointerUpCore(event) {
         if (this.isPanning) {
             this.isPanning = false;
+            if (event.pointerType === "touch" && (this.panTravel || 0) < 8 && this.tool === "select") { this.clearSelection(); this.draw(); this.notify(); }
             this.updateCursor();
             return;
         }

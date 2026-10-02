@@ -956,6 +956,69 @@ window.analysisTests = async function () {
     ok("running with the built-in solver says so", /approximated by the built-in solver/.test(warned), warned);
     editor.resetSheets();
 
+
+    // ======================================================== touch
+    {
+        clear(); editor.resetSheets(); loadExampleById(editor, "rc-ladder");
+        const cv = editor.canvas, rect = () => cv.getBoundingClientRect();
+        const tp = (type, id, x, y) => cv.dispatchEvent(new PointerEvent(type, { pointerId: id, pointerType: "touch", clientX: rect().left + x, clientY: rect().top + y, button: 0, buttons: type === "pointerup" ? 0 : 1, bubbles: true, cancelable: true, isPrimary: id === 1 }));
+        const scr = (wx, wy) => ({ x: editor.panX + wx * editor.zoom, y: editor.panY + wy * editor.zoom });
+        editor.setTool("select"); editor.clearSelection();
+        // pinch: two fingers apart by d, then twice as far -> zoom doubles around the midpoint and the sheet point under it stays
+        const z0 = editor.zoom, mid = { x: 400, y: 300 }, wBefore = { x: (mid.x - editor.panX) / editor.zoom, y: (mid.y - editor.panY) / editor.zoom };
+        tp("pointerdown", 1, mid.x - 50, mid.y); tp("pointerdown", 2, mid.x + 50, mid.y);
+        tp("pointermove", 1, mid.x - 100, mid.y); tp("pointermove", 2, mid.x + 100, mid.y);
+        const wAfter = { x: (mid.x - editor.panX) / editor.zoom, y: (mid.y - editor.panY) / editor.zoom };
+        ok("two fingers pinch-zoom, keeping the sheet point under them", Math.abs(editor.zoom / z0 - 2) < 0.01 || editor.zoom === 3 || Math.abs(editor.zoom - Math.min(3, z0 * 2)) < 0.01, [z0, editor.zoom]);
+        ok("and the point under the fingers does not slide", Math.abs(wAfter.x - wBefore.x) < 0.5 && Math.abs(wAfter.y - wBefore.y) < 0.5, [wBefore, wAfter]);
+        tp("pointerup", 1, mid.x - 100, mid.y); tp("pointerup", 2, mid.x + 100, mid.y);
+        ok("lifting the fingers ends the gesture without side effects", !editor.pinch && editor.touches.size === 0 && !editor.wiring && editor.tool === "select");
+        editor.resetView(); editor.draw();
+        // one finger on empty sheet pans
+        const px0 = editor.panX, py0 = editor.panY;
+        tp("pointerdown", 3, 700, 450); tp("pointermove", 3, 640, 410); tp("pointerup", 3, 640, 410);
+        ok("one finger dragging empty sheet pans it", Math.abs(editor.panX - (px0 - 60)) < 1 && Math.abs(editor.panY - (py0 - 40)) < 1, [editor.panX - px0, editor.panY - py0]);
+        // tap empty clears the selection
+        editor.selection = [editor.components[0]];
+        tp("pointerdown", 4, 700, 460); tp("pointerup", 4, 700, 460);
+        ok("a tap on empty sheet clears the selection", editor.selection.length === 0);
+        // bigger targets: a pin 15 px away is hit by a finger but not by a mouse
+        const r1 = editor.components.find(c => c.type === "R"), pinPos = editor.getTerminalPosition(r1, editor.getTerminals(r1)[0]);
+        const ps = scr(pinPos.x, pinPos.y);
+        const dist = 15 * editor.zoom;
+        cv.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 9, pointerType: "mouse", clientX: rect().left + ps.x - dist, clientY: rect().top + ps.y - 0, button: 0, buttons: 1, bubbles: true }));
+        const mouseStarted = editor.wiring;
+        cv.dispatchEvent(new PointerEvent("pointerup", { pointerId: 9, pointerType: "mouse", clientX: rect().left + ps.x - dist, clientY: rect().top + ps.y, button: 0, buttons: 0, bubbles: true }));
+        editor.cancelWire(); editor.setTool("select"); editor.clearSelection();
+        tp("pointerdown", 5, ps.x - dist, ps.y);
+        ok("a finger reaches a pin 15 px away (touch targets are larger) where a mouse would not start a wire", editor.wiring === true && mouseStarted === false, [mouseStarted, editor.wiring]);
+        tp("pointerup", 5, ps.x - dist, ps.y); editor.cancelWire(); editor.setTool("select");
+        // double tap on a part opens its properties (onEdit)
+        const rc = editor.components.find(c => c.type === "C"), cs = scr(rc.x, rc.y);
+        let edited = null; const oe = editor.onEdit; editor.onEdit = (c) => { edited = c; };
+        tp("pointerdown", 6, cs.x, cs.y); tp("pointerup", 6, cs.x, cs.y);
+        tp("pointerdown", 7, cs.x + 2, cs.y + 1); tp("pointerup", 7, cs.x + 2, cs.y + 1);
+        editor.onEdit = oe;
+        ok("a double tap on a part does what a double click does", edited === rc, edited && edited.name);
+        editor.clearSelection();
+        // long press opens the context menu
+        const menu = document.getElementById("contextMenu"); menu.style.display = "none";
+        const e0 = scr(rc.x, rc.y);
+        tp("pointerdown", 8, e0.x, e0.y); await wait(750);
+        ok("a long press opens the right-click menu", menu.style.display !== "none" && menu.children.length > 0, menu.style.display);
+        tp("pointerup", 8, e0.x, e0.y); menu.style.display = "none";
+        ok("and lifting after it does not also click", editor.tool === "select" && !editor.move);
+        // touch toolbar
+        touchBar.set(true);
+        ok("the touch toolbar shows commands for the keys a tablet lacks", document.querySelectorAll("#touchbar button").length >= 9 && getComputedStyle(document.getElementById("touchbar")).display !== "none");
+        document.querySelector('#touchbar [data-cmd="tool.wire"]').click();
+        ok("its buttons run the commands (Wire tool)", editor.tool === "wire");
+        document.querySelector('#touchbar [data-cmd="tool.select"]').click();
+        Commands.run("view.touchbar");
+        ok("View > Touch Toolbar hides it again", !touchBar.on && getComputedStyle(document.getElementById("touchbar")).display === "none");
+        editor.resetSheets();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

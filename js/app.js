@@ -22,12 +22,13 @@
     SheetHub.editor = editor;
     if (window.innerWidth < 760) document.body.classList.add("nosidebar");
     const sheetBar = new SheetBar($("sheetbar"), editor, runner);
+    const touchBar = new TouchBar($("sheetwrap"));
     const doc = new DocumentStore(editor, runner);
     doc.onChange(() => status.setDocument(doc));
     const opOverlay = new OpOverlay(editor, runner, live, doc);
 
     // the console and the tests reach these through the window
-    Object.assign(window, { sheetBar, editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc, opOverlay });
+    Object.assign(window, { touchBar, sheetBar, editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc, opOverlay });
 
     // an analysis run brings its tab to the front
     for (const [method, kind] of [["runDC", "dc"], ["runAC", "ac"], ["runNoise", "noise"], ["runTransient", "tran"], ["runSweep", "sweep"]]) {
@@ -126,7 +127,7 @@
     C("edit.paste", "Paste", { icon: "paste", keys: "Ctrl+V", enabled: () => !!editor.clipboard, run: () => editor.beginPaste() });
     C("edit.delete", "Delete", { icon: "delete", keys: "Del", enabled: hasSel, run: () => editor.removeSelected() });
     C("edit.selectall", "Select All", { keys: "Ctrl+A", run: () => editor.selectAll() });
-    C("edit.rotate", "Rotate Clockwise", { icon: "rotate", keys: "R", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(1) });
+    C("edit.rotate", "Rotate Clockwise", { icon: "rotate", keys: "R", enabled: () => editor.selection.length > 0 || editor.isPlacing(), run: () => { if (editor.isPlacing() && !editor.selection.length) { editor.placeRotation = (editor.placeRotation + 90) % 360; editor.draw(); } else editor.rotateSelected(1); } });
     C("edit.rotateccw", "Rotate Anti-clockwise", { icon: "rotateccw", enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(3) });
     C("edit.drag", "Drag Object", { enabled: () => editor.selection.length > 0, run: () => editor.beginDragObject() });
     C("edit.rotate180", "Rotate 180°", { enabled: () => editor.selection.length > 0, run: () => editor.rotateSelected(2) });
@@ -173,6 +174,7 @@
         editor.onEdit(c);
     } });
     C("design.ercnext", "Next ERC Issue", { keys: "F4", global: true, enabled: () => !!(ErcDialog.last && ErcDialog.last.issues.length), run: () => ErcDialog.next(editor) });
+    C("view.touchbar", "Touch Toolbar", { checked: () => touchBar.on, run: () => touchBar.toggle() });
     C("view.sidebar", "Sidebar", { checked: () => !document.body.classList.contains("nosidebar"), run: () => { document.body.classList.toggle("nosidebar"); editor.resize(); editor.draw(); } });
     C("view.op", "Show Operating Point", { icon: "", checked: () => opOverlay.on, run: () => opOverlay.toggle() });
     C("net.highlight", "Highlight Net", { keys: "H", run: () => editor.toggleHighlightAt(editor.mouseInside ? editor.mouse.x : undefined, editor.mouseInside ? editor.mouse.y : undefined) });
@@ -263,7 +265,7 @@
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
-        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.sidebar", "-", "view.classic", "view.dark"] },
+        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.sidebar", "view.touchbar", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },

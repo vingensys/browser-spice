@@ -614,3 +614,18 @@ body.nosidebar #leftpane { display: none; }
     .dialog { max-width: 96vw; }
     #statusbar #build, #statusbar #coords { display: none; }
 }
+
+/* touch */
+#schematic { touch-action: none; -webkit-touch-callout: none; user-select: none; }
+@media (pointer: coarse) {
+    .tb-btn { min-width: 38px; min-height: 38px; }
+    .menu-item, .cm-item, .context-menu div { padding-top: 9px; padding-bottom: 9px; }
+    .dialog .btn, .dialog button { min-height: 36px; }
+    .dialog input, .dialog select { min-height: 32px; font-size: 15px; }
+    #sheetbar button { padding: 6px 14px; }
+}
+
+#touchbar { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: none; gap: 4px; padding: 4px; background: rgba(30, 36, 44, 0.88); border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.4); z-index: 20; max-width: 96%; overflow-x: auto; }
+#touchbar button { min-width: 42px; height: 42px; font-size: 20px; border: none; border-radius: 8px; background: #3a4452; color: #fff; cursor: pointer; }
+#touchbar button.active { background: #2b6cb0; }
+#touchbar button.disabled { opacity: 0.35; }

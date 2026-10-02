@@ -56,7 +56,7 @@ against Proteus / ngspice, **P3** polish.
 ## 5. UI
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| ~~Not usable on a phone-width screen~~ | P3 | **Improved**: View > Sidebar hides the left pane (it starts hidden below 760 px), the toolbar scrolls and dialogs fit. Touch drawing is still mouse-oriented. |
+| ~~Not usable on a phone-width screen~~ | P3 | **Improved**: View > Sidebar hides the left pane (it starts hidden below 760 px), the toolbar scrolls and dialogs fit. Touch drawing: pinch zoom, one-finger pan, long-press menu, double-tap, larger pin hit targets and a floating touch toolbar (View > Touch Toolbar, automatic on coarse pointers). |
 | ~~Dialogs do not trap focus~~ | P3 | **Done**: dialogs have a role and label, trap Tab and return focus; icon buttons get names. The schematic canvas itself is not screen-reader accessible. |
 | No customisable shortcuts, no localisation | P3 | |
 | ~~No in-app help~~ | P3 | **Done**: Help > Getting Started, the command palette (Ctrl+K). |
