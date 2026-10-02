@@ -473,7 +473,7 @@
         reader.onload = (evt) => {
             try {
                 live.stop();
-                const r = SchematicImporter.import(editor, evt.target.result);
+                const r = KicadImporter.isKicad(evt.target.result) ? KicadImporter.import(editor, evt.target.result) : SchematicImporter.import(editor, evt.target.result);
                 if (r.models || r.subckts) {
                     pane.render();
                     runner.toast(`Added ${[r.models ? `${r.models} model(s)` : "", r.subckts ? `${r.subckts} subcircuit(s)` : ""].filter(Boolean).join(" and ")}. Press P to pick them.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");

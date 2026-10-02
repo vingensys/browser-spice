@@ -49,7 +49,7 @@ against Proteus / ngspice, **P3** polish.
 ## 4. Interoperability
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| No KiCad, Eagle, Altium import / export; no PDF schematic export, no KiCad / Eagle / Altium schematic import (BOM CSV, PNG, SVG, KiCad netlist and an HTML report that prints to PDF are done) | P2 | Roadmap section 2. |
+| No KiCad, Eagle, Altium import / export; no PDF schematic export, KiCad schematic (`.kicad_sch`) and netlist (`.net`) import is done for simulatable parts (R C L D Q M V I, power symbols, labels); Eagle / Altium import is not (BOM CSV, PNG, SVG, KiCad netlist and an HTML report that prints to PDF are done) | P2 | Roadmap section 2. |
 | File format is undocumented JSON with no migration path | P2 | `browser-spice/1`. |
 | No PCB layout | P2 | The other half of Proteus (roadmap section 4). |
 

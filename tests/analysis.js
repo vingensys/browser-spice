@@ -1019,6 +1019,21 @@ window.analysisTests = async function () {
         editor.resetSheets();
     }
 
+    // ======================================================== KiCad import
+    {
+        clear(); editor.resetSheets();
+        const kc = await (await fetch("tests/kicad/divider.kicad_sch")).text();
+        ok("a KiCad schematic is recognised by its content", KicadImporter.isKicad(kc) && !KicadImporter.isKicad("* a spice deck\nR1 1 0 1k"));
+        const kr = KicadImporter.import(editor, kc);
+        ok("it imports as parts (V1, R1, R2) with grounds", kr.count === 3 && editor.components.some(c => c.type === "GND"), kr.count);
+        const kinfo = NetlistExtractor.extract(editor);
+        const kop = new SimEngine(kinfo.circuit).operatingPoint();
+        ok("and the labelled node simulates to 5 V x 2k/3k", Object.values(kop.nodeVoltages).some(v => Math.abs(v - 10 / 3) < 1e-6) && Object.values(kop.nodeVoltages).some(v => Math.abs(v - 5) < 1e-6), kop.nodeVoltages);
+        let kbad = null; try { KicadImporter.import(editor, "(kicad_sch (version 1))"); } catch (e) { kbad = e.message; }
+        ok("a schematic with nothing simulatable says so", /No simulatable/.test(kbad || ""), kbad);
+        clear();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };
