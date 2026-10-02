@@ -57,7 +57,9 @@ function generate(seed) {
         lines.push(`B1 ${o} 0 V = ${pick(["2*v(%a)", "tanh(v(%a)/2)*3", "v(%a)*v(%b)/5", "max(-3,min(3,v(%a)*2))", "abs(v(%a))+0.5*v(%b)"]).replace(/%a/g, a).replace(/%b/g, b)}`);
         R(o, "0");
     }
-    if (models) lines.push(".model DM D(IS=1e-14 N=1.05 RS=5 CJO=2p)", ".model QM NPN(IS=1e-14 BF=120 VAF=80 CJE=3p CJC=2p TF=0.3n)");
+    // BJT models: plain, or with the Gummel-Poon extras (reverse Early, high-injection knees, leakage, series resistances)
+    const gp = kind === "bjt" && r() < 0.6 ? ` VAR=${fmt(logu(10, 100))} IKF=${fmt(logu(5e-3, 0.1))} IKR=${fmt(logu(5e-3, 0.1))} ISE=${fmt(logu(1e-15, 1e-12))} NE=${fmt(1.2 + r())} ISC=${fmt(logu(1e-15, 1e-12))} NC=${fmt(1.2 + r())} RB=${fmt(logu(5, 200))} RC=${fmt(logu(0.5, 20))} RE=${fmt(logu(0.1, 5))}` : "";
+    if (models) lines.push(".model DM D(IS=1e-14 N=1.05 RS=5 CJO=2p)", `.model QM NPN(IS=1e-14 BF=120 VAF=80 CJE=3p CJC=2p TF=0.3n${gp})`);
     const probe = nodes.concat(kind === "behavioural" ? [`n${n + 1}`] : []);
     lines.push(`.tran ${tran ? "0.1u 0.4m" : "20u 1m"}`, ".ac dec 10 10 100k", ".end");
     return { text: lines.join("\n") + "\n", probe, tran: true };

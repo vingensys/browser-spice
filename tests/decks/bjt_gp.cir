@@ -1,0 +1,15 @@
+Gummel-Poon BJT amplifier: high-injection knee, reverse Early voltage, leakage and series resistances
+VCC vcc 0 DC 12
+VIN in 0 SIN(0 0.02 2k) AC 0.02
+CIN in b 10u
+R1 vcc b 18k
+R2 b 0 3.9k
+RC vcc c 330
+RE e 0 39
+CE e 0 220u
+Q1 c b e QGP
+.model QGP NPN(IS=2e-14 BF=180 BR=4 NF=1.0 NR=1.0 VAF=60 VAR=25 IKF=0.04 IKR=0.02 ISE=3e-13 NE=1.5 ISC=2e-13 NC=1.6 RB=80 RC=3 RE=0.8 CJE=8p CJC=4p TF=0.4n TR=20n)
+.op
+.ac dec 10 10 100Meg
+.tran 2u 2m
+.end

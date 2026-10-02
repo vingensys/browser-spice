@@ -271,7 +271,9 @@ class SpiceParser {
         const p = m ? m.params : {};
         return {
             is: p.is || 1e-16, bf: p.bf || 100, br: p.br || 1, nf: p.nf || 1, nr: p.nr || 1,
-            vaf: p.vaf || p.va || 0,
+            vaf: p.vaf || p.va || 0, var: p.var || p.vb || 0, ikf: p.ikf || p.ik || 0, ikr: p.ikr || 0,
+            ise: p.ise || p.c2 * (p.bf || 100) || 0, ne: p.ne || 1.5, isc: p.isc || p.c4 * (p.bf || 100) || 0, nc: p.nc || 2,
+            rb: p.rb || 0, rc: p.rc || 0, re: p.re || 0,
             cje: p.cje || 0, vje: p.vje || 0.75, mje: p.mje || 0.33,
             cjc: p.cjc || 0, vjc: p.vjc || 0.75, mjc: p.mjc || 0.33,
             tf: p.tf || 0, tr: p.tr || 0, fc: p.fc || 0.5,

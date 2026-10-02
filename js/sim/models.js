@@ -78,6 +78,14 @@ function simModelCardFromParams(kind, name, p) {
     if (kind === "BJT_NPN" || kind === "BJT_PNP") {
         const t = kind === "BJT_NPN" ? "NPN" : "PNP";
         const parts = [`IS=${f(p.is)}`, `BF=${f(p.bf)}`, `BR=${f(p.br)}`, `NF=${f(p.nf)}`, `NR=${f(p.nr)}`, `VAF=${f(p.vaf)}`];
+        if (p.var) parts.push(`VAR=${f(p.var)}`);
+        if (p.ikf) parts.push(`IKF=${f(p.ikf)}`);
+        if (p.ikr) parts.push(`IKR=${f(p.ikr)}`);
+        if (p.ise) parts.push(`ISE=${f(p.ise)}`, `NE=${f(p.ne === undefined ? 1.5 : p.ne)}`);
+        if (p.isc) parts.push(`ISC=${f(p.isc)}`, `NC=${f(p.nc === undefined ? 2 : p.nc)}`);
+        if (p.rb) parts.push(`RB=${f(p.rb)}`);
+        if (p.rc) parts.push(`RC=${f(p.rc)}`);
+        if (p.re) parts.push(`RE=${f(p.re)}`);
         if (p.cje) parts.push(`CJE=${f(p.cje)}`, `VJE=${f(p.vje || 0.75)}`, `MJE=${f(p.mje || 0.33)}`);
         if (p.cjc) parts.push(`CJC=${f(p.cjc)}`, `VJC=${f(p.vjc || 0.75)}`, `MJC=${f(p.mjc || 0.33)}`);
         if (p.tf) parts.push(`TF=${f(p.tf)}`);
