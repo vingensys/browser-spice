@@ -614,6 +614,64 @@ class NetlistExtractor {
         ];
     }
 
+    // A 74xx / 4000 chip as a subcircuit (pins: left then right, in the order of LOGIC_ICS). Combinational chips become
+    // one truth-table B-source per output (thresholded at vcc/2, driven through ro); the D and JK flip-flop chips
+    // reuse the master-slave macromodel. Anything else (counters, shift registers, latches, three-state outputs, wide
+    // functions) returns null and the export says so instead of guessing.
+    static digitalSubckt(id, key, params, f) {
+        const spec = LOGIC_ICS[key];
+        if (!spec) return null;
+        const vcc = params.vcc === undefined ? 5 : params.vcc, ro = params.ro || 50;
+        const L = spec.left, R = spec.right;
+        // ports are positional: pin names differ only by case on some chips (A / a), which SPICE cannot tell apart
+        const pn = {}; LogicIC.pins(spec).forEach((pin, i) => { pn[pin] = `p${i}`; });
+        const pins = LogicIC.pins(spec).map(x => pn[x]);
+        const pull = L.map(pin => `Rpu_${pn[pin]} ${pn[pin]} ${LogicIC.pullsUp(spec, pin) ? "vcc" : "0"} 1meg`);
+        const head = [`.subckt ${id} ${pins.join(" ")}`, `Vsup vcc 0 DC ${f(vcc)}`, ...pull];
+        if (key === "7474" || key === "74112") {
+            const jk = key === "74112", body = [];
+            [1, 2].forEach(u => {
+                const clk = jk ? `${u}CLK_N` : `${u}CLK`, d = jk ? `${u}J` : `${u}D`, k = jk ? `${u}K` : "0";
+                const inv = (x, o) => body.push(`B${o} ${o} 0 V = ${f(vcc)}*(1-u(v(${pn[x]})-${f(vcc / 2)}))`);
+                inv(`${u}PRE_N`, `s${u}`); inv(`${u}CLR_N`, `r${u}`);
+                if (jk) inv(clk, `c${u}`);
+                body.push(`X${u} ${pn[d]} ${jk ? pn[k] : "0"} ${jk ? `c${u}` : pn[clk]} ${pn[`${u}Q`]} ${pn[`${u}QN`]} s${u} r${u} FF_${jk ? "JK" : "D"}_${String(vcc).replace(/[^0-9]/g, "_")}`);
+            });
+            return { lines: [...head, ...body, `.ends ${id}`], needs: [jk ? "JK" : "D"] };
+        }
+        if (spec.init() !== null) return null;
+        const body = [];
+        const inputsOf = (o) => {
+            // the inputs this output depends on, found by flipping each one over every other input pattern
+            const dep = new Set(), n = L.length;
+            if (n > 12) return null;
+            const rows = [];
+            for (let m = 0; m < (1 << n); m++) {
+                const v = {}; L.forEach((pin, i) => { v[pin] = (m >> i) & 1; });
+                rows.push(spec.step(null, v, v).out[o]);
+            }
+            if (rows.some(x => x === "Z" || x === undefined)) return null;
+            for (let i = 0; i < n; i++) for (let m = 0; m < (1 << n); m++) if (rows[m] !== rows[m ^ (1 << i)]) { dep.add(i); break; }
+            return { dep: [...dep], rows };
+        };
+        L.forEach((pin, i) => body.push(`Bi_${i} x${i} 0 V = u(v(${pn[pin]})-${f(vcc / 2)})`));
+        for (const o of R) {
+            const r = inputsOf(o);
+            if (!r || r.dep.length > 8) return null;
+            const trues = [], falses = [];
+            for (let m = 0; m < (1 << r.dep.length); m++) {
+                let full = 0; r.dep.forEach((d, j) => { if ((m >> j) & 1) full |= 1 << d; });
+                (r.rows[full] ? trues : falses).push(m);
+            }
+            const useFalse = falses.length < trues.length, set = useFalse ? falses : trues;
+            const term = (m) => r.dep.map((d, j) => ((m >> j) & 1 ? `v(x${d})` : `(1-v(x${d}))`)).join("*") || "1";
+            let sum = set.length ? set.map(term).join("+") : "0";
+            if (useFalse) sum = `1-(${sum})`;
+            body.push(`Bo_${pn[o]} o_${pn[o]} 0 V = ${f(vcc)}*(${sum})`, `Ro_${pn[o]} o_${pn[o]} ${pn[o]} ${f(ro)}`);
+        }
+        return { lines: [...head, ...body, `.ends ${id}`], needs: [] };
+    }
+
     static spiceName(e) {
         const clean = (s) => String(s).replace(/[^A-Za-z0-9_]/g, "_");
         const prefix = { R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", SW: "R", D: "D", Q: "Q", M: "M", OPAMP: "X", GATE: "B", "555": "X", J: "J" }[e.kind] || "X";
@@ -789,9 +847,18 @@ class NetlistExtractor {
                     lines.push(`X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")} ${n.join(" ")} ${id}`);
                     break;
                 }
-                case "DIGITAL":
-                    lines.push(`* ${e.name}: ${e.kind === "FF" ? "flip-flop" : (e.kind === "DIGITAL" ? e.ic + " logic IC" : e.kind)} has no SPICE model in this export (built-in simulator only)`);
+                case "DIGITAL": {
+                    const id = `LOGIC_${e.ic}_${String(p.vcc === undefined ? 5 : p.vcc).replace(/[^0-9]/g, "_")}`;
+                    const sub = NetlistExtractor.digitalSubckt(id, e.ic, p, f);
+                    if (!sub) { lines.push(`* ${e.name}: the ${e.ic} logic IC has no SPICE model in this export (counters, shift registers, latches, three-state or very wide functions: built-in simulator only)`); break; }
+                    for (const k of sub.needs) {
+                        const ffid = `FF_${k}_${String(p.vcc === undefined ? 5 : p.vcc).replace(/[^0-9]/g, "_")}`;
+                        thyristors.set(ffid, NetlistExtractor.flipFlopSubckt(ffid, k, p, f));
+                    }
+                    thyristors.set(id, sub.lines);
+                    lines.push(`X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")} ${n.join(" ")} ${id}`);
                     break;
+                }
                 case "555":
                     uses555 = true;
                     // pins: GND TRIG OUT RESET VCC DISCH THRES CTRL

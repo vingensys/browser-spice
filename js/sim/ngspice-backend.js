@@ -84,7 +84,7 @@ class NgspiceBackend {
 
     // Parts the exported deck cannot express (they would silently vanish from the run)
     static unsupported(info) {
-        return (info.elements || []).filter(e => ["DIGITAL"].includes(e.kind)).map(e => e.name);
+        return (info.elements || []).filter(e => e.kind === "DIGITAL" && !NetlistExtractor.digitalSubckt("x", e.ic, e.params || {}, v => v)).map(e => e.name);
     }
 
     // ngspice writes its progress and convergence chatter to the console; capture it so it
