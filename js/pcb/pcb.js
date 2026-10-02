@@ -17,27 +17,68 @@ class Pcb {
     }
 
     // ---------------------------------------------------------------- footprints
-    // pads in the part's own frame, centred on the part; pin k of the netlist element is pad k
-    static footprint(kind, nPins, ic) {
-        const row = (n, pitch, pw, ph, drill, shape = "round") => Array.from({ length: n }, (_, i) => ({ n: i + 1, x: (i - (n - 1) / 2) * pitch, y: 0, w: pw, h: ph, drill, shape: i === 0 && shape === "round" && n > 1 ? "rect" : shape }));
-        const wrap = (name, pads, pad = 1.8) => {
-            const xs = pads.map(p => p.x), ys = pads.map(p => p.y);
-            return { name, pads, w: Math.max(...xs) - Math.min(...xs) + pad + 1, h: Math.max(...ys) - Math.min(...ys) + pad + 1 };
+    // Footprints are in the part's own frame, centred on the part. A pad is { n, x, y, w, h, drill, shape, smd }: drill 0 and
+    // smd true is a surface-mount pad on the part's side only; a drilled pad is copper on both layers. pinMap[i] is the
+    // netlist pin that pad i takes (so a TO-92 transistor gets its package order E B C from the schematic's B C E);
+    // silk is a list of polylines (the part outline and a pin-1 mark) drawn on the silkscreen.
+    static PACKAGES = {
+        R: [["axial", "Axial 10.16 mm (through-hole)"], ["0805", "0805 (SMD)"], ["0603", "0603 (SMD)"], ["1206", "1206 (SMD)"]],
+        L: [["axial", "Axial 10.16 mm (through-hole)"], ["0805", "0805 (SMD)"], ["1206", "1206 (SMD)"]],
+        C: [["radial", "Radial 5.08 mm (through-hole)"], ["0805", "0805 (SMD)"], ["0603", "0603 (SMD)"], ["1206", "1206 (SMD)"]],
+        D: [["axial", "Axial 7.62 mm (through-hole)"], ["sod123", "SOD-123 (SMD)"]],
+        Q: [["to92", "TO-92 (through-hole)"], ["sot23", "SOT-23 (SMD)"]],
+        M: [["to220", "TO-220 (through-hole)"], ["sot23", "SOT-23 (SMD)"]],
+        J: [["to92", "TO-92 (through-hole)"], ["sot23", "SOT-23 (SMD)"]],
+        DIGITAL: [["dip", "DIP (through-hole)"], ["soic", "SOIC, 1.27 mm (SMD)"]]
+    };
+    static packages(kind) { return Pcb.PACKAGES[kind] || []; }
+
+    static footprint(kind, nPins, ic, pkg) {
+        const list = Pcb.PACKAGES[kind], id = list && list.some(x => x[0] === pkg) ? pkg : (list ? list[0][0] : "header");
+        const bounds = (pads, extra = 1) => {
+            const xs = pads.flatMap(p => [p.x - p.w / 2, p.x + p.w / 2]), ys = pads.flatMap(p => [p.y - p.h / 2, p.y + p.h / 2]);
+            return { w: Math.max(...xs.map(Math.abs)) * 2 + extra, h: Math.max(...ys.map(Math.abs)) * 2 + extra };
         };
-        if (kind === "R" || kind === "L") return wrap("Axial_10.16mm", row(2, 10.16, 1.8, 1.8, 0.9));
-        if (kind === "C") return wrap("Radial_5.08mm", row(2, 5.08, 1.8, 1.8, 0.9));
-        if (kind === "D") return wrap("Diode_7.62mm", row(2, 7.62, 1.8, 1.8, 0.9));
-        if (kind === "Q" || kind === "J") return wrap("TO-92", row(Math.max(nPins, 3), 2.54, 1.6, 1.6, 0.9));
-        if (kind === "M") return wrap("TO-220", row(Math.max(nPins, 3), 2.54, 2.0, 2.4, 1.1));
-        if (kind === "DIGITAL") {
-            const n = Math.max(8, nPins + (nPins % 2)), half = n / 2, pads = [];
-            for (let i = 0; i < n; i++) {
-                const left = i < half, k = left ? i : n - 1 - i;
-                pads.push({ n: i + 1, x: left ? -3.81 : 3.81, y: (k - (half - 1) / 2) * 2.54, w: 1.6, h: 1.6, drill: 0.8, shape: i === 0 ? "rect" : "round" });
-            }
-            return wrap(`DIP-${n}`, pads, 1.6);
+        const wrap = (name, pads, silk, pinMap, extra) => ({ name, pads, silk, pinMap, ...bounds(pads, extra), smd: pads.every(p => p.smd) });
+        const th = (n, pitch, pw, ph, drill) => Array.from({ length: n }, (_, i) => ({ n: i + 1, x: (i - (n - 1) / 2) * pitch, y: 0, w: pw, h: ph, drill, shape: i === 0 && n > 1 ? "rect" : "round", smd: false }));
+        const smd2 = (cx, w, h) => [{ n: 1, x: -cx, y: 0, w, h, drill: 0, shape: "rect", smd: true }, { n: 2, x: cx, y: 0, w, h, drill: 0, shape: "rect", smd: true }];
+        const box = (x1, y1, x2, y2) => [[x1, y1], [x2, y1], [x2, y2], [x1, y2], [x1, y1]];
+        // two short lines above and below the body between two pads (silk never runs over copper)
+        const between = (cx, w, h) => { const g = cx - w / 2 - 0.25; return [[[-g, -h / 2 - 0.2], [g, -h / 2 - 0.2]], [[-g, h / 2 + 0.2], [g, h / 2 + 0.2]]]; };
+        switch (id) {
+            case "axial": { const pitch = kind === "D" ? 7.62 : 10.16, pads = th(2, pitch, 1.8, 1.8, 0.9), bx = pitch / 2 - 1.6;
+                const silk = [box(-bx, -1.4, bx, 1.4)]; if (kind === "D") silk.push([[-bx + 0.8, -1.4], [-bx + 0.8, 1.4]]);
+                return wrap(kind === "D" ? "Diode_7.62mm" : "Axial_10.16mm", pads, silk, null, 1.4); }
+            case "radial": { const pads = th(2, 5.08, 1.8, 1.8, 0.9), r = 3, circ = Array.from({ length: 25 }, (_, i) => [Math.cos((i / 24) * 2 * Math.PI) * r, Math.sin((i / 24) * 2 * Math.PI) * r]);
+                return wrap("Radial_5.08mm", pads, [circ], null, 1); }
+            case "0805": return wrap("0805", smd2(1.0, 1.0, 1.4), between(1.0, 1.0, 1.25).concat(kind === "C" ? [] : []), null, 0.8);
+            case "0603": return wrap("0603", smd2(0.8, 0.8, 0.95), between(0.8, 0.8, 0.8), null, 0.8);
+            case "1206": return wrap("1206", smd2(1.5, 1.1, 1.8), between(1.5, 1.1, 1.6), null, 0.8);
+            case "sod123": { const pads = smd2(1.6, 0.9, 1.2); return wrap("SOD-123", pads, between(1.6, 0.9, 1.4).concat([[[-1.1, -0.7], [-1.1, 0.7]]]), null, 0.8); }
+            case "to92": { const pads = th(3, 2.54, 1.6, 1.6, 0.9).map(p => ({ ...p, shape: p.n === 1 ? "rect" : "round" })), r = 2.4;
+                const arc = Array.from({ length: 13 }, (_, i) => { const t = Math.PI + (i / 12) * Math.PI; return [Math.cos(t) * r, Math.sin(t) * r - 0.6]; });
+                // package order: transistor E B C (BJT: nodes B C E), JFET D S G (nodes G D S)
+                const map = kind === "J" ? [1, 2, 0] : [2, 0, 1];
+                return wrap("TO-92", pads, [arc.concat([arc[0]])], map, 1); }
+            case "to220": { const pads = th(3, 2.54, 2.0, 2.4, 1.1), t = -5.5;
+                return wrap("TO-220", pads, [box(-5, t - 4.5, 5, t), [[-5, t - 1.2], [5, t - 1.2]]], [0, 1, 2], 1); }       // G D S
+            case "sot23": { const pads = [{ n: 1, x: -0.95, y: 1.1, w: 0.8, h: 1.0, drill: 0, shape: "rect", smd: true }, { n: 2, x: 0.95, y: 1.1, w: 0.8, h: 1.0, drill: 0, shape: "rect", smd: true }, { n: 3, x: 0, y: -1.1, w: 0.8, h: 1.0, drill: 0, shape: "rect", smd: true }];
+                const map = kind === "M" ? [0, 2, 1] : (kind === "J" ? [0, 2, 1] : [0, 2, 1]);                                      // BJT B E C, MOSFET G S D, JFET G S D
+                return wrap("SOT-23", pads, [[[-1.5, -0.6], [-1.5, 0.6]], [[1.5, -0.6], [1.5, 0.6]]], map, 0.8); }
+            case "dip": {
+                const n = Math.max(8, nPins + (nPins % 2)), half = n / 2, pads = [];
+                for (let i = 0; i < n; i++) { const left = i < half, k = left ? i : n - 1 - i; pads.push({ n: i + 1, x: left ? -3.81 : 3.81, y: (k - (half - 1) / 2) * 2.54, w: 1.6, h: 1.6, drill: 0.8, shape: i === 0 ? "rect" : "round", smd: false }); }
+                const hh = (half - 1) / 2 * 2.54 + 1.4;
+                return wrap(`DIP-${n}`, pads, [[[-1.3, -hh], [-0.5, -hh], [0, -hh + 0.9], [0.5, -hh], [1.3, -hh], [1.3, hh], [-1.3, hh], [-1.3, -hh]]], null, 1); }
+            case "soic": {
+                const n = Math.max(8, nPins + (nPins % 2)), half = n / 2, pads = [];
+                for (let i = 0; i < n; i++) { const left = i < half, k = left ? i : n - 1 - i; pads.push({ n: i + 1, x: left ? -2.7 : 2.7, y: (k - (half - 1) / 2) * 1.27, w: 1.55, h: 0.6, drill: 0, shape: "rect", smd: true }); }
+                const hh = (half - 1) / 2 * 1.27 + 0.9;
+                return wrap(`SOIC-${n}`, pads, [[[-1.7, -hh], [-0.4, -hh], [0, -hh + 0.5], [0.4, -hh], [1.7, -hh], [1.7, hh], [-1.7, hh], [-1.7, -hh]]], null, 0.8); }
+            default: {
+                const pads = th(Math.max(1, nPins), 2.54, 1.8, 1.8, 1.0), w = pads.length * 2.54 / 2 + 0.4;
+                return wrap(`Header_1x${pads.length}`, pads, [box(-w, -1.5, w, 1.5)], null, 1); }
         }
-        return wrap(`Header_1x${nPins}`, row(Math.max(1, nPins), 2.54, 1.8, 1.8, 1.0));
     }
 
     // ---------------------------------------------------------------- schematic -> board
@@ -49,23 +90,39 @@ class Pcb {
         const next = [];
         let added = 0;
         for (const e of elements) {
-            if (!e.nodes || !e.nodes.length || ["SCOPE", "LOGAN", "VM", "AM"].includes(e.kind) && !e.nodes.length) continue;
-            const fp = Pcb.footprint(e.kind, e.nodes.length, e.ic);
-            const old = byRef.get(e.name);
-            const nets = fp.pads.map((_, i) => (e.nodes[i] === undefined ? "" : String(e.nodes[i])));
-            if (old) { old.fp = fp; old.kind = e.kind; old.nets = nets; next.push(old); }
-            else { next.push({ ref: e.name, kind: e.kind, fp, x: 0, y: 0, rot: 0, nets, placed: false }); added++; }
+            if (!e.nodes || !e.nodes.length) continue;
+            const old = byRef.get(e.name), part = old || { ref: e.name, x: 0, y: 0, rot: 0, placed: false, flip: false };
+            part.kind = e.kind; part.ic = e.ic; part.nodes = e.nodes.map(String);
+            Pcb.setPackage(part, part.pkg);
+            if (!old) added++;
+            next.push(part);
         }
         const removed = pcb.parts.length - (next.length - added);
         pcb.parts = next;
         return { added, removed };
     }
 
+    // (re)build a part's footprint and the nets on its pads; an unknown package falls back to the kind's default
+    static setPackage(part, pkg) {
+        const nodes = part.nodes || [];
+        part.pkg = pkg;
+        part.fp = Pcb.footprint(part.kind, nodes.length, part.ic, pkg);
+        part.nets = part.fp.pads.map((_, i) => { const k = part.fp.pinMap ? part.fp.pinMap[i] : i; return nodes[k] === undefined ? "" : String(nodes[k]); });
+        if (!Pcb.packages(part.kind).some(x => x[0] === pkg)) part.pkg = undefined;
+        if (!part.fp.smd) part.flip = false;            // only surface-mount parts can go on the back
+    }
+
     // ---------------------------------------------------------------- geometry
+    // a point of the footprint frame on the board: mirrored for a part on the back, rotated, then moved
+    static xf(part, x, y) {
+        if (part.flip) x = -x;
+        const th = (part.rot * Math.PI) / 180, c = Math.round(Math.cos(th) * 1e9) / 1e9, sn = Math.round(Math.sin(th) * 1e9) / 1e9;
+        return { x: part.x + x * c - y * sn, y: part.y + x * sn + y * c };
+    }
+
     static padWorld(part, pad) {
-        const th = (part.rot * Math.PI) / 180, c = Math.round(Math.cos(th) * 1e9) / 1e9, s = Math.round(Math.sin(th) * 1e9) / 1e9;
-        const swap = Math.abs(Math.round(part.rot / 90)) % 2 === 1;
-        return { x: part.x + pad.x * c - pad.y * s, y: part.y + pad.x * s + pad.y * c, w: swap ? pad.h : pad.w, h: swap ? pad.w : pad.h, drill: pad.drill, shape: pad.shape };
+        const swap = Math.abs(Math.round(part.rot / 90)) % 2 === 1, q = Pcb.xf(part, pad.x, pad.y);
+        return { x: q.x, y: q.y, w: swap ? pad.h : pad.w, h: swap ? pad.w : pad.h, drill: pad.drill, shape: pad.shape, smd: !!pad.smd, layers: pad.smd ? [part.flip ? "B" : "F"] : ["F", "B"] };
     }
 
     static pads(pcb) {
@@ -101,7 +158,7 @@ class Pcb {
     static connectivity(pcb) {
         const items = [];   // {kind, ref, layers, x/y or pts}
         const pads = Pcb.pads(pcb);
-        pads.forEach(p => items.push({ kind: "pad", ref: p, layers: ["F", "B"] }));
+        pads.forEach(p => items.push({ kind: "pad", ref: p, layers: p.layers }));
         pcb.tracks.forEach(t => items.push({ kind: "track", ref: t, layers: [t.layer] }));
         pcb.vias.forEach(v => items.push({ kind: "via", ref: v, layers: ["F", "B"] }));
         const parent = items.map((_, i) => i);
@@ -208,7 +265,7 @@ class Pcb {
         };
         // copper items on each layer
         const copper = [];
-        for (const p of pads) copper.push({ k: "pad", it: p, layers: ["F", "B"], net: p.net || null, label: `${p.part.ref}.${p.i + 1}` });
+        for (const p of pads) copper.push({ k: "pad", it: p, layers: p.layers, net: p.net || null, label: `${p.part.ref}.${p.i + 1}` });
         for (const t of pcb.tracks) copper.push({ k: "track", it: t, layers: [t.layer], net: netName(t, false), label: `track ${t.id} (${t.layer})` });
         for (const v of pcb.vias) copper.push({ k: "via", it: v, layers: ["F", "B"], net: netName(v, false), label: `via ${v.id}` });
         // exact gap between two pieces of copper (negative when they overlap): pads are rectangles / circles, tracks polylines
@@ -290,7 +347,7 @@ class Pcb {
             const conn = Pcb.connectivity(pcb);
             for (const g of conn) {
                 const net = g.net || `?${conn.indexOf(g)}`;
-                for (const p of g.pads) for (const l of [0, 1]) {
+                for (const p of g.pads) for (const l of p.layers.map(x => (x === "F" ? 0 : 1))) {
                     // a pad is stamped as its rectangle (corner points) so wide pads block correctly
                     const rx = p.w / 2, ry = p.h / 2;
                     for (let ox = -rx; ox <= rx + 1e-9; ox += grid / 2) for (let oy = -ry; oy <= ry + 1e-9; oy += grid / 2) stamp(l, p.x + ox, p.y + oy, 0.01, net);
@@ -316,19 +373,21 @@ class Pcb {
             const heap = [];
             const push = (n) => { heap.push(n); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p].f <= heap[i].f) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
             const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { let l = 2 * i + 1, r = l + 1, m = i; if (l < heap.length && heap[l].f < heap[m].f) m = l; if (r < heap.length && heap[r].f < heap[m].f) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
-            for (const l of [0, 1]) { const k = key(l, sx, sy); g.set(k, 0); push({ l, x: sx, y: sy, f: h(sx, sy), k }); }
+            const lay = (pd) => pd.layers.map(x => (x === "F" ? 0 : 1));
+            const endLayers = lay(line.b);
+            for (const l of lay(line.a)) { const k = key(l, sx, sy); g.set(k, 0); push({ l, x: sx, y: sy, f: h(sx, sy), k }); }
             let found = null, expanded = 0;
             const viaCost = 8;
             while (heap.length && expanded < maxExpand) {
                 const cur = pop();
                 if (closed.has(cur.k)) continue;
                 closed.add(cur.k); expanded++;
-                if (cur.x === tx && cur.y === ty) { found = cur; break; }
+                if (cur.x === tx && cur.y === ty && endLayers.includes(cur.l)) { found = cur; break; }
                 const gc = g.get(cur.k);
                 for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
                     if (!dx && !dy) continue;
                     const x = cur.x + dx, y = cur.y + dy;
-                    const endpoint = (x === tx && y === ty);
+                    const endpoint = (x === tx && y === ty && endLayers.includes(cur.l));
                     if (!free(cur.l, x, y) && !endpoint) continue;
                     if (dx && dy && (!free(cur.l, cur.x + dx, cur.y) || !free(cur.l, cur.x, cur.y + dy))) continue;   // no corner cutting
                     const k = key(cur.l, x, y), c = gc + (dx && dy ? 1.414 : 1) + (cur.from && cur.dir !== `${dx},${dy}` ? 0.15 : 0) + (cur.l === 1 ? 0.02 : 0);
@@ -376,7 +435,57 @@ class Pcb {
         return { routed, failed, total: lines.length };
     }
 
+    // ---------------------------------------------------------------- silkscreen text
+    // a 3 x 5 stroke font (columns 0..2, rows 0..4 downwards); lower case is drawn as capitals
+    static FONT = (() => {
+        const P = { 0: [[[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]]], 1: [[[0, 1], [1, 0], [1, 4]]], 2: [[[0, 0], [2, 0], [2, 2], [0, 2], [0, 4], [2, 4]]],
+            3: [[[0, 0], [2, 0], [2, 4], [0, 4]], [[0, 2], [2, 2]]], 4: [[[0, 0], [0, 2], [2, 2]], [[2, 0], [2, 4]]], 5: [[[2, 0], [0, 0], [0, 2], [2, 2], [2, 4], [0, 4]]],
+            6: [[[2, 0], [0, 0], [0, 4], [2, 4], [2, 2], [0, 2]]], 7: [[[0, 0], [2, 0], [2, 4]]], 8: [[[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]], [[0, 2], [2, 2]]], 9: [[[2, 2], [0, 2], [0, 0], [2, 0], [2, 4], [0, 4]]],
+            A: [[[0, 4], [0, 0], [2, 0], [2, 4]], [[0, 2], [2, 2]]], B: [[[0, 0], [1.5, 0], [2, 0.5], [2, 1.5], [1.5, 2], [0, 2], [0, 0]], [[1.5, 2], [2, 2.5], [2, 3.5], [1.5, 4], [0, 4], [0, 2]]],
+            C: [[[2, 0], [0, 0], [0, 4], [2, 4]]], D: [[[0, 0], [1.5, 0], [2, 0.5], [2, 3.5], [1.5, 4], [0, 4], [0, 0]]], E: [[[2, 0], [0, 0], [0, 4], [2, 4]], [[0, 2], [1.5, 2]]],
+            F: [[[2, 0], [0, 0], [0, 4]], [[0, 2], [1.5, 2]]], G: [[[2, 0], [0, 0], [0, 4], [2, 4], [2, 2], [1, 2]]], H: [[[0, 0], [0, 4]], [[2, 0], [2, 4]], [[0, 2], [2, 2]]],
+            I: [[[0, 0], [2, 0]], [[1, 0], [1, 4]], [[0, 4], [2, 4]]], J: [[[2, 0], [2, 4], [0, 4], [0, 3]]], K: [[[0, 0], [0, 4]], [[2, 0], [0, 2], [2, 4]]], L: [[[0, 0], [0, 4], [2, 4]]],
+            M: [[[0, 4], [0, 0], [1, 2], [2, 0], [2, 4]]], N: [[[0, 4], [0, 0], [2, 4], [2, 0]]], P: [[[0, 4], [0, 0], [2, 0], [2, 2], [0, 2]]], Q: [[[0, 0], [2, 0], [2, 4], [0, 4], [0, 0]], [[1, 3], [2, 4]]],
+            R: [[[0, 4], [0, 0], [2, 0], [2, 2], [0, 2]], [[1, 2], [2, 4]]], T: [[[0, 0], [2, 0]], [[1, 0], [1, 4]]], U: [[[0, 0], [0, 4], [2, 4], [2, 0]]], V: [[[0, 0], [1, 4], [2, 0]]],
+            W: [[[0, 0], [0, 4], [1, 2], [2, 4], [2, 0]]], X: [[[0, 0], [2, 4]], [[2, 0], [0, 4]]], Y: [[[0, 0], [1, 2], [2, 0]], [[1, 2], [1, 4]]], Z: [[[0, 0], [2, 0], [0, 4], [2, 4]]],
+            "-": [[[0, 2], [2, 2]]], "_": [[[0, 4], [2, 4]]], ".": [[[1, 3.9], [1, 4]]], "+": [[[0, 2], [2, 2]], [[1, 1], [1, 3]]], "/": [[[0, 4], [2, 0]]] };
+        P.O = P[0]; P.S = P[5];
+        return P;
+    })();
+
+    // polylines (board coordinates) for a string, its left end at (x, y) = the middle of the text, `h` mm tall;
+    // mirror writes it reversed, as it must read through the board from the back
+    static text(str, x, y, h, mirror = false) {
+        const u = h / 4, adv = 3 * u, s = String(str).toUpperCase(), total = s.length * adv - u, out = [];
+        [...s].forEach((ch, i) => {
+            for (const line of Pcb.FONT[ch] || (ch === " " ? [] : Pcb.FONT["-"])) {
+                out.push(line.map(([cx, cy]) => { const px = i * adv + cx * u - total / 2; return [x + (mirror ? -px : px), y + (cy - 2) * u]; }));
+            }
+        });
+        return out;
+    }
+
+    // silkscreen polylines of one side: part outlines, a pin-1 mark and the reference
+    static silk(pcb, side) {
+        const out = [];
+        for (const part of pcb.parts) {
+            if (!part.fp.silk || (part.fp.smd ? (part.flip ? "B" : "F") : "F") !== side) continue;
+            for (const line of part.fp.silk) out.push(line.map(([x, y]) => { const q = Pcb.xf(part, x, y); return [q.x, q.y]; }));
+            // pin 1: a small square just beyond the first pad
+            const p1 = part.fp.pads[0];
+            if (p1) {
+                const q = Pcb.xf(part, p1.x, p1.y - Math.max(p1.w, p1.h) / 2 - 0.55);
+                out.push([[q.x - 0.2, q.y - 0.2], [q.x + 0.2, q.y - 0.2], [q.x + 0.2, q.y + 0.2], [q.x - 0.2, q.y + 0.2], [q.x - 0.2, q.y - 0.2]]);
+            }
+            const swapH = Math.abs(Math.round(part.rot / 90)) % 2 === 1, hh = swapH ? part.fp.w : part.fp.h;
+            out.push(...Pcb.text(part.ref, part.x, part.y - hh / 2 - 1.1, 1.0, side === "B"));
+        }
+        return out;
+    }
+
     // ---------------------------------------------------------------- Gerber / Excellon
+    // layer: "F" / "B" copper, "SilkF" / "SilkB", "MaskF" / "MaskB" (pad openings, 0.1 mm larger), "PasteF" (SMD pads on the
+    // top), "Edge"
     static gerber(pcb, layer) {
         const f = (v) => Math.round(v * 1e6);       // 4.6 format in mm
         const out = ["G04 Browser SPICE*", "%FSLAX46Y46*%", "%MOMM*%", "%LPD*%"];
@@ -385,29 +494,28 @@ class Pcb {
         const body = [];
         const Y = (y) => pcb.outline.h - y;         // gerber's y is up
         const at = (x, y) => `X${f(x)}Y${f(Y(y))}`;
+        const side = layer.endsWith("B") && layer !== "Edge" ? "B" : "F";
+        const padAp = (p, grow) => aperture(p.shape === "round" ? `C,${(p.w + grow).toFixed(4)}` : `R,${(p.w + grow).toFixed(4)}X${(p.h + grow).toFixed(4)}`);
+        const groups = new Map();
+        const add = (a, c) => { if (!groups.has(a)) groups.set(a, []); groups.get(a).push(c); };
+        const draw = (a, pts) => add(a, [`${at(pts[0][0], pts[0][1])}D02*`, ...pts.slice(1).map(p => `${at(p[0], p[1])}D01*`)].join("\n"));
         if (layer === "F" || layer === "B") {
-            const flash = [];
-            for (const p of Pcb.pads(pcb)) {
-                const a = aperture(p.shape === "round" ? `C,${p.w.toFixed(4)}` : `R,${p.w.toFixed(4)}X${p.h.toFixed(4)}`);
-                flash.push([a, `${at(p.x, p.y)}D03*`]);
-            }
-            for (const v of pcb.vias) flash.push([aperture(`C,${v.d.toFixed(4)}`), `${at(v.x, v.y)}D03*`]);
-            const draws = [];
-            for (const t of pcb.tracks) if (t.layer === layer) {
-                const a = aperture(`C,${t.w.toFixed(4)}`);
-                const cmds = [`${at(t.pts[0][0], t.pts[0][1])}D02*`];
-                for (const p of t.pts.slice(1)) cmds.push(`${at(p[0], p[1])}D01*`);
-                draws.push([a, cmds.join("\n")]);
-            }
-            const groups = new Map();
-            for (const [a, c] of [...flash, ...draws]) { if (!groups.has(a)) groups.set(a, []); groups.get(a).push(c); }
-            body.push("G01*");
-            for (const [a, cs] of groups) body.push(`D${a}*`, ...cs);
+            for (const p of Pcb.pads(pcb)) if (p.layers.includes(layer)) add(padAp(p, 0), `${at(p.x, p.y)}D03*`);
+            for (const v of pcb.vias) add(aperture(`C,${v.d.toFixed(4)}`), `${at(v.x, v.y)}D03*`);
+            for (const t of pcb.tracks) if (t.layer === layer) draw(aperture(`C,${t.w.toFixed(4)}`), t.pts);
+        } else if (layer === "MaskF" || layer === "MaskB") {
+            for (const p of Pcb.pads(pcb)) if (p.layers.includes(side)) add(padAp(p, 0.1), `${at(p.x, p.y)}D03*`);     // vias stay covered (tented)
+        } else if (layer === "PasteF") {
+            for (const p of Pcb.pads(pcb)) if (p.smd && p.layers.includes("F")) add(padAp(p, 0), `${at(p.x, p.y)}D03*`);
+        } else if (layer === "SilkF" || layer === "SilkB") {
+            const a = aperture("C,0.1500");
+            for (const line of Pcb.silk(pcb, side)) draw(a, line);
         } else if (layer === "Edge") {
-            const a = aperture("C,0.1000");
-            const { w, h } = pcb.outline;
-            body.push("G01*", `D${a}*`, `${at(0, 0)}D02*`, `${at(w, 0)}D01*`, `${at(w, h)}D01*`, `${at(0, h)}D01*`, `${at(0, 0)}D01*`);
+            const a = aperture("C,0.1000"), { w, h } = pcb.outline;
+            draw(a, [[0, 0], [w, 0], [w, h], [0, h], [0, 0]]);
         }
+        body.push("G01*");
+        for (const [a, cs] of groups) body.push(`D${a}*`, ...cs);
         for (const [def, n] of ap) out.push(`%ADD${n}${def.startsWith("C") ? "C" : "R"},${def.slice(2)}*%`);
         out.push(...body, "M02*");
         return out.join("\n") + "\n";
@@ -426,10 +534,14 @@ class Pcb {
     }
 
     static files(pcb, name = "board") {
-        return [
+        const files = [
             [`${name}-F_Cu.gtl`, Pcb.gerber(pcb, "F")], [`${name}-B_Cu.gbl`, Pcb.gerber(pcb, "B")],
-            [`${name}-Edge_Cuts.gm1`, Pcb.gerber(pcb, "Edge")], [`${name}.drl`, Pcb.excellon(pcb)]
+            [`${name}-Edge_Cuts.gm1`, Pcb.gerber(pcb, "Edge")], [`${name}.drl`, Pcb.excellon(pcb)],
+            [`${name}-F_Silkscreen.gto`, Pcb.gerber(pcb, "SilkF")], [`${name}-B_Silkscreen.gbo`, Pcb.gerber(pcb, "SilkB")],
+            [`${name}-F_Mask.gts`, Pcb.gerber(pcb, "MaskF")], [`${name}-B_Mask.gbs`, Pcb.gerber(pcb, "MaskB")]
         ];
+        if (Pcb.pads(pcb).some(p => p.smd && p.layers.includes("F"))) files.push([`${name}-F_Paste.gtp`, Pcb.gerber(pcb, "PasteF")]);
+        return files;
     }
 
     // a store-only ZIP (no compression library needed)

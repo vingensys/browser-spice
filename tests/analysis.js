@@ -1066,6 +1066,19 @@ window.analysisTests = async function () {
         editor.pcb.tracks.push({ id: 9999, layer: "F", w: 0.3, pts: [[fp.x, fp.y], [other.x, other.y]] });
         pcbView.runDrc();
         ok("Check rules lists a short from a track laid across two nets", pcbView.issues.some(i => i.type === "short"), pcbView.issues.length);
+        // footprint list and Flip side for a selected part
+        pcbView.act("unroute");
+        const rpart = editor.pcb.parts.find(q => q.kind === "R");
+        pcbView.sel = { kind: "part", ref: rpart }; pcbView.draw();
+        const pkgSel = pcbView.root.querySelector("#pcbPkg");
+        ok("the Footprint list shows the choices for the selected part", !pkgSel.disabled && pkgSel.options.length === 4, pkgSel.options.length);
+        pkgSel.value = "0805"; pkgSel.dispatchEvent(new Event("change"));
+        ok("choosing 0805 swaps the part to surface-mount pads", rpart.fp.name === "0805" && rpart.fp.smd && rpart.pkg === "0805");
+        pcbView.act("flip");
+        ok("Flip side moves it to the back", rpart.flip === true && Pcb.pads(editor.pcb).filter(q => q.part === rpart).every(q => q.layers.join() === "B"));
+        pcbView.act("route"); pcbView.runDrc();
+        ok("the mixed board still routes and passes the rule check", pcbView.issues.length === 0, JSON.stringify(pcbView.issues.slice(0, 2)));
+        pcbView.act("undo"); pcbView.act("undo");
         pcbView.close();
         ok("Esc / close hides the overlay", pcbView.root.classList.contains("hidden"));
         editor.resetSheets();

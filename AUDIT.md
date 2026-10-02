@@ -51,7 +51,7 @@ against Proteus / ngspice, **P3** polish.
 | --- | --- | --- |
 | No KiCad, Eagle, Altium import / export; no PDF schematic export, KiCad schematic (`.kicad_sch`) and netlist (`.net`) import is done for simulatable parts (R C L D Q M V I, power symbols, labels); Eagle / Altium import is not (BOM CSV, PNG, SVG, KiCad netlist and an HTML report that prints to PDF are done) | P2 | Roadmap section 2. |
 | File format is undocumented JSON with no migration path | P2 | `browser-spice/1`. |
-| ~~No PCB layout~~ | P2 | **MVP done**: View > PCB Layout. Through-hole style footprints (axial, radial, TO-92, TO-220, DIP, headers) from the netlist, auto-place, ratsnest, manual and automatic routing on F.Cu / B.Cu with vias, DRC (clearance, shorts, edge, width, unrouted), Gerber RS-274X + Excellon in a ZIP. Missing: SMD and a footprint library, silkscreen, copper pours, push-and-shove, 3D, back-annotation. Gerbers are written to the standard but were not opened in a CAM viewer here. |
+| ~~No PCB layout~~ | P2 | **MVP done**: View > PCB Layout. Footprints (through-hole axial / radial / TO-92 / TO-220 / DIP / headers and SMD 0603 / 0805 / 1206 / SOD-123 / SOT-23 / SOIC, with package pin order, back-side placement) from the netlist, auto-place, ratsnest, manual and automatic routing on F.Cu / B.Cu with vias, DRC (clearance, shorts, edge, width, unrouted), Gerber RS-274X (copper, silkscreen, mask, paste, edge) + Excellon in a ZIP. Missing: user footprints / a footprint library, copper pours, push-and-shove, 3D, back-annotation. Gerbers are written to the standard but were not opened in a CAM viewer here. |
 
 ## 5. UI
 | Gap | Pri | Notes |

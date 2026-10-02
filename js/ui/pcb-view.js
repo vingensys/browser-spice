@@ -34,6 +34,8 @@ class PcbView {
                 <button class="tb-btn txt" data-tool="route" title="Route a track (T)">Route</button>
                 <button class="tb-btn txt" data-a="layer" title="Active copper layer (F)">Layer: <span id="pcbLayer">F.Cu</span></button>
                 <button class="tb-btn txt" data-a="rotate" title="Rotate the selected part (R)">Rotate</button>
+                <button class="tb-btn txt" data-a="flip" title="Move the selected surface-mount part to the other side of the board (X)">Flip side</button>
+                <label title="Footprint of the selected part">Footprint <select id="pcbPkg" disabled></select></label>
                 <button class="tb-btn txt" data-a="delete" title="Delete the selected track or via (Del)">Delete</button>
                 <button class="tb-btn txt" data-a="undo" title="Undo (Ctrl+Z)">Undo</button>
                 <span class="sep"></span>
@@ -147,6 +149,7 @@ class PcbView {
             }
             case "unroute": this.snapshot(); p.tracks = []; p.vias = []; this.issues = []; this.renderIssues(); this.say("Routing cleared."); this.changed(); break;
             case "layer": this.layer = this.layer === "F" ? "B" : "F"; this.fields(); if (this.draft && this.draft.pts.length < 2) this.draft.layer = this.layer; this.draw(); break;
+            case "flip": if (this.sel && this.sel.kind === "part" && this.sel.ref.fp.smd) { this.snapshot(); this.sel.ref.flip = !this.sel.ref.flip; this.say(`${this.sel.ref.ref} is now on the ${this.sel.ref.flip ? "back" : "front"}; tracks that ended on its pads need routing again.`); this.changed(); } else this.say("Select a surface-mount part to flip it to the other side.", true); break;
             case "rotate": if (this.sel && this.sel.kind === "part") { this.snapshot(); this.sel.ref.rot = (this.sel.ref.rot + 90) % 360; this.changed(); } break;
             case "delete":
                 if (this.sel && this.sel.kind === "track") { this.snapshot(); p.tracks = p.tracks.filter(t => t !== this.sel.ref); this.sel = null; this.changed(); }
@@ -216,6 +219,13 @@ class PcbView {
         const num = (id, fn) => this.root.querySelector(id).addEventListener("change", (e) => { const v = Number(e.target.value); if (isFinite(v) && v > 0) { this.snapshot(); fn(v); this.changed(); } });
         num("#pcbW", v => { this.pcb.outline.w = v; }); num("#pcbH", v => { this.pcb.outline.h = v; });
         num("#pcbTrack", v => { this.pcb.rules.track = v; }); num("#pcbClr", v => { this.pcb.rules.clearance = v; });
+        this.root.querySelector("#pcbPkg").addEventListener("change", (e) => {
+            if (!this.sel || this.sel.kind !== "part") return;
+            this.snapshot();
+            Pcb.setPackage(this.sel.ref, e.target.value);
+            this.say(`${this.sel.ref.ref} is now ${this.sel.ref.fp.name}; its pads moved, so route it again.`);
+            this.changed();
+        });
         window.addEventListener("resize", () => { if (this.isOpen) { this.resize(); this.draw(); } });
         cv.addEventListener("contextmenu", (e) => e.preventDefault());
         cv.addEventListener("wheel", (e) => {
@@ -342,16 +352,30 @@ class PcbView {
         else if (k === "v") this.viaHere();
         else if (k === "f") this.act("layer");
         else if (k === "r") this.act("rotate");
+        else if (k === "x") this.act("flip");
         else if (k === "delete" || k === "backspace") this.act("delete");
         else return;
         e.preventDefault();
         e.stopPropagation();
     }
 
+    // the Footprint list follows the selected part
+    packageField() {
+        const el = this.root.querySelector("#pcbPkg"), part = this.sel && this.sel.kind === "part" ? this.sel.ref : null;
+        const key = part ? `${part.ref}|${part.kind}|${part.pkg || ""}` : "";
+        if (el.dataset.key === key) return;
+        el.dataset.key = key;
+        const list = part ? Pcb.packages(part.kind) : [];
+        el.innerHTML = list.map(([id, label]) => `<option value="${id}">${label}</option>`).join("");
+        el.disabled = list.length < 2;
+        if (part && list.length) el.value = part.pkg && list.some(x => x[0] === part.pkg) ? part.pkg : list[0][0];
+    }
+
     // ---------------------------------------------------------------- drawing
     draw() {
         if (!this.isOpen) return;
         this.resize();
+        this.packageField();
         const c = this.ctx, v = this.view, p = this.pcb;
         const dark = true;                       // the board is always drawn on a dark canvas, as in most PCB tools
         c.setTransform(1, 0, 0, 1, 0, 0);
@@ -380,14 +404,23 @@ class PcbView {
             const swap = (Math.round(q.rot / 90) % 2) !== 0, w = swap ? q.fp.h : q.fp.w, h = swap ? q.fp.w : q.fp.h;
             c.strokeStyle = this.sel && this.sel.ref === q ? "#ffe066" : "rgba(235,235,235,0.7)"; c.lineWidth = lw(1);
             c.strokeRect(q.x - w / 2, q.y - h / 2, w, h);
-            c.fillStyle = "rgba(235,235,235,0.9)"; c.font = `${Math.max(1.4, 11 / v.s)}px sans-serif`; c.textAlign = "center"; c.textBaseline = "middle";
-            c.fillText(`${q.ref}`, q.x, q.y - h / 2 - 1.2);
         }
+        // silkscreen (white on the front, grey-blue on the back)
+        c.lineCap = "round"; c.lineJoin = "round"; c.lineWidth = 0.15;
+        for (const side of ["B", "F"]) {
+            c.strokeStyle = side === "F" ? "rgba(245,245,245,0.9)" : "rgba(150,190,230,0.45)";
+            c.globalAlpha = side === this.layer ? 1 : 0.5;
+            for (const line of Pcb.silk(p, side)) { c.beginPath(); line.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]))); c.stroke(); }
+        }
+        c.globalAlpha = 1;
         for (const pd of Pcb.pads(p)) {
-            c.fillStyle = "#c8a84b";
+            const onActive = pd.layers.includes(this.layer);
+            c.globalAlpha = onActive ? 1 : 0.35;
+            c.fillStyle = pd.smd ? (pd.layers[0] === "F" ? "#d9877a" : "#7aa8d9") : "#c8a84b";
             if (pd.shape === "round") { c.beginPath(); c.arc(pd.x, pd.y, Math.min(pd.w, pd.h) / 2, 0, 7); c.fill(); }
             else c.fillRect(pd.x - pd.w / 2, pd.y - pd.h / 2, pd.w, pd.h);
-            c.fillStyle = "#10151c"; c.beginPath(); c.arc(pd.x, pd.y, pd.drill / 2, 0, 7); c.fill();
+            if (pd.drill) { c.fillStyle = "#10151c"; c.beginPath(); c.arc(pd.x, pd.y, pd.drill / 2, 0, 7); c.fill(); }
+            c.globalAlpha = 1;
             if (v.s > 10 && pd.net) { c.fillStyle = "#fff"; c.font = `${Math.max(0.8, 8 / v.s)}px sans-serif`; c.textAlign = "center"; c.textBaseline = "alphabetic"; c.fillText(pd.net, pd.x, pd.y - pd.h / 2 - 0.2); }
         }
         for (const via of p.vias) {
