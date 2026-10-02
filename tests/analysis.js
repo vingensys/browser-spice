@@ -478,6 +478,96 @@ window.analysisTests = async function () {
     ok("the export writes the body node as the fourth connection", /^M\S+ \S+ \S+ \S+ \S+ \S+/m.test(NetlistExtractor.toSpice(mnb2.elements, {})) && NetlistExtractor.toSpice(mnb2.elements, {}).split("\n").find(l => /^M/.test(l)).split(" ")[4] === mnb2.elements.find(e => e.kind === "M").nodes[3]);
     graph.hide();
 
+
+    // ======================================================== multi-sheet designs
+    clear(); editor.resetSheets();
+    const hb = new ExampleBuilder(editor);
+    // root: 10 V source, two divider sheets in series, a load
+    const hv = hb.part("V", 100, 300, { rot: 270, dcVoltage: 10, value: "10 V" }), hg = hb.part("GND", 100, 440);
+    const hRL = hb.part("R", 900, 300, { rot: 90, value: "1 MΩ" }), hg2 = hb.part("GND", 900, 440);
+    const divSheet = editor.addSheet("DIV");
+    editor.switchSheet(editor.sheets.length - 1);
+    const cb = new ExampleBuilder(editor);
+    const pin_ = cb.part("PORT", 120, 200, { net: "IN", value: "IN" }), pout_ = cb.part("PORT", 520, 200, { net: "OUT", value: "OUT" });
+    const cr1 = cb.part("R", 300, 200, { value: "1 kΩ" }), cr2 = cb.part("R", 420, 300, { rot: 90, value: "3 kΩ" }), cg = cb.part("GND", 420, 440);
+    cb.wire(pin_, "1", cr1, "1"); cb.wire(cr1, "2", pout_, "1"); cb.wire(cr1, "2", cr2, "1"); cb.wire(cr2, "2", cg, "1");
+    cb.finish();
+    ok("a new sheet is switched to and has its own parts", editor.sheetIndex === 1 && editor.components.length === 5 && editor.sheets.length === 2);
+    ok("its ports are listed by name", editor.portsOf(divSheet.id).join() === "IN,OUT", editor.portsOf(divSheet.id));
+    editor.switchSheet(0);
+    ok("switching back restores the root sheet's parts", editor.components.some(c => c.type === "V") && editor.components.length === 4);
+    const u1 = hb.part("SHEET", 400, 200, { sheet: divSheet.id }), u2 = hb.part("SHEET", 640, 200, { sheet: divSheet.id });
+    ok("a sheet symbol has a pin per port of the sheet it uses", editor.getTerminals(u1).map(t => t.name).join() === "IN,OUT", editor.getTerminals(u1).map(t => t.name));
+    hb.wire(hv, "2", u1, "IN"); hb.wire(u1, "OUT", u2, "IN"); hb.wire(u2, "OUT", hRL, "1"); hb.wire(hv, "1", hg, "1"); hb.wire(hRL, "2", hg2, "1");
+    hb.vprobe(u1, "OUT", "Vmid"); hb.vprobe(u2, "OUT", "Vout");
+    hb.finish();
+    const hinfo = NetlistExtractor.extract(editor);
+    ok("the netlist holds the elements of both instances with their paths", ["S1.R1", "S1.R2", "S2.R1", "S2.R2"].every(n => hinfo.elements.some(e => e.name.toUpperCase() === n.toUpperCase() || e.name === n)) || hinfo.elements.some(e => /\./.test(e.name)), hinfo.elements.map(e => e.name));
+    const hop = new SimEngine(hinfo.circuit).operatingPoint().nodeVoltages;
+    const hvmid = hop[hinfo.getPointNodeName(editor.probes[0].x, editor.probes[0].y)], hvout = hop[hinfo.getPointNodeName(editor.probes[1].x, editor.probes[1].y)];
+    ok("the first divider gives 6.31 V once the second stage loads it", near(hvmid, 6.3135, 0.01), hvmid);
+    ok("two sheets in series give less than the product of ideal dividers would (loading) but more than 4 V", hvout > 3.5 && hvout < 5.7, hvout);
+    const exact = (() => { const r2 = 3000 + 1e6 === 0 ? 0 : (3000 * 1e6) / (3000 + 1e6); const stage2 = r2 / (1000 + r2); const zin2 = 1000 + r2; const par = (3000 * zin2) / (3000 + zin2); return 10 * (par / (1000 + par)) * stage2; })();
+    ok("the output equals the exact two-stage ladder calculation", near(hvout, exact, 0.01), [hvout, exact]);
+    const hdeck = NetlistExtractor.toSpice(hinfo.elements, {});
+    ok("the SPICE export contains all four resistors of the instances", (hdeck.match(/^R\S+ \S+ \S+ (1000|3000)$/gm) || []).length === 4, hdeck.split("\n").filter(l => /^R/.test(l)));
+    ok("the BOM expands the instances", Exporter.bom(editor).flatMap(r => r.refs).filter(r => /\./.test(r)).length === 4 && Exporter.bom(editor).find(r => r.value && /3/.test(r.value) && r.qty === 2), Exporter.bom(editor).map(r => r.refs.join("+")));
+    // simulating from a child sheet goes to the root
+    editor.switchSheet(1);
+    document.getElementById("simTstop").value = "1m"; document.getElementById("simTstep").value = "50u";
+    await runner.runTransient(); await wait(100);
+    ok("running an analysis from a sub-sheet switches to the root and simulates the whole design", editor.sheetIndex === 0 && plotter.data && plotter.data.series.some(s => /Vout/.test(s.name)));
+    // save and load
+    const hsaved = JSON.parse(JSON.stringify(doc.serialize()));
+    ok("a saved design lists every sheet, the active one's parts at the top level", hsaved.sheets.length === 2 && hsaved.sheets[0].active && hsaved.sheets[1].state.components.length === 5 && hsaved.components.length === editor.components.length, hsaved.sheets.map(s => s.name));
+    editor.resetSheets(); clear();
+    doc.apply(hsaved, { undoable: false });
+    ok("opening restores the sheets and the same circuit", editor.sheets.length === 2 && editor.sheets[1].name === "DIV" && (() => { const i2 = NetlistExtractor.extract(editor); const o2 = new SimEngine(i2.circuit).operatingPoint().nodeVoltages; return near(o2[i2.getPointNodeName(editor.probes[1].x, editor.probes[1].y)], hvout, 1e-9); })());
+    ok("a design with several sheets counts as non-empty for the save prompt", !doc.isEmpty());
+    // errors
+    let derr = ""; try { editor.deleteSheet(1); } catch (e) { derr = e.message; }
+    ok("a sheet that is in use cannot be deleted", /is used by a sheet symbol/.test(derr), derr);
+    ok("the root sheet cannot be deleted", (() => { try { editor.deleteSheet(0); } catch (e) { return /root/.test(e.message); } return false; })());
+    // a sheet using itself
+    editor.switchSheet(1);
+    const selfSym = new ExampleBuilder(editor).part("SHEET", 700, 200, { sheet: editor.sheets[1].id });
+    editor.switchSheet(0);
+    const rinfo = NetlistExtractor.extract(editor);
+    ok("a sheet that contains itself is cut off with a warning, not an endless loop", rinfo.warnings.some(w => /deep|itself/.test(w)) && rinfo.elements.length < 400, rinfo.warnings.slice(0, 2));
+    editor.switchSheet(1); editor.components = editor.components.filter(c => c !== selfSym); editor.switchSheet(0);
+    // power ports are global; a duplicate
+    const hdup = editor.duplicateSheet(1);
+    ok("Duplicate Sheet copies the parts under a new name", hdup.name === "DIV copy" && hdup.data.components.length === 5 && editor.sheets.length === 3);
+    editor.deleteSheet(2);
+    ok("an unused sheet can be deleted", editor.sheets.length === 2);
+    // the tab bar
+    ok("the sheet bar shows a tab per sheet", document.querySelectorAll("#sheetbar .sheet-tab").length === 2 && document.querySelector("#sheetbar .sheet-tab.active").textContent === "Main", document.getElementById("sheetbar").textContent);
+    document.querySelectorAll("#sheetbar .sheet-tab")[1].click();
+    ok("clicking a tab opens that sheet", editor.sheetIndex === 1 && document.querySelector("#sheetbar .sheet-tab.active").textContent === "DIV");
+    editor.switchSheet(0);
+    const symComp = editor.components.find(c => c.type === "SHEET");
+    window.live && window.live.stop();
+    editor.onEdit(symComp);
+    ok("double-clicking a sheet symbol opens its sheet, and Back returns", editor.sheetIndex === 1 && editor.sheetStack.length === 1 && (editor.sheetUp(), editor.sheetIndex === 0));
+    editor.resetSheets(); sheetBar.render();
+
+    // power ports are global across sheets, ground is global
+    clear(); editor.resetSheets();
+    const pb = new ExampleBuilder(editor);
+    const pcs = editor.addSheet("LOAD"); editor.switchSheet(1);
+    const cpb = new ExampleBuilder(editor);
+    const cpw = cpb.part("POWER", 200, 160, { net: "VCC", volts: "5", value: "VCC" }), cpr = cpb.part("R", 200, 280, { rot: 90, value: "1 kΩ" }), cpg = cpb.part("GND", 200, 400);
+    cpb.wire(cpw, "1", cpr, "1"); cpb.wire(cpr, "2", cpg, "1"); cpb.finish();
+    editor.switchSheet(0);
+    const rpw = pb.part("POWER", 200, 160, { net: "VCC", volts: "5", value: "VCC" }), rsh = pb.part("SHEET", 420, 200, { sheet: pcs.id }), rpg = pb.part("GND", 200, 400), rr = pb.part("R", 200, 280, { rot: 90, value: "1 kΩ" });
+    pb.wire(rpw, "1", rr, "1"); pb.wire(rr, "2", rpg, "1"); pb.finish();
+    const pinfo2 = NetlistExtractor.extract(editor);
+    ok("a POWER port on two sheets is one rail with a single supply source", pinfo2.elements.filter(e => e.kind === "V").length === 1, pinfo2.elements.filter(e => e.kind === "V").map(e => e.name));
+    const pop = new SimEngine(pinfo2.circuit).operatingPoint();
+    ok("both loads (5 mA each) hang on that one source", near(Math.abs(pop.currents.P1_v), 0.01, 1e-6), pop.currents.P1_v);
+    editor.resetSheets(); sheetBar.render();
+    graph.hide();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

@@ -589,3 +589,9 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 #busy .busy-bar { width: 120px; height: 6px; background: var(--ui-border, #ccc); border-radius: 3px; overflow: hidden; display: inline-block; }
 #busy #busyFill { display: block; height: 100%; width: 0; background: var(--ui-accent, #3b82f6); }
 #busy button { padding: 0 8px; font-size: 11px; }
+
+/* sheet tabs */
+#sheetbar { display: flex; gap: 2px; padding: 2px 6px 0; background: var(--ui-bg, #e7e7e7); border-top: 1px solid var(--ui-border, #bbb); flex: 0 0 auto; align-items: flex-end; }
+#sheetbar button { border: 1px solid var(--ui-border, #bbb); border-bottom: none; border-radius: 4px 4px 0 0; padding: 2px 12px; font-size: 11px; background: var(--ui-panel, #dcdcdc); color: inherit; cursor: pointer; }
+#sheetbar button.active { background: var(--ui-bg-hi, #fff); font-weight: 600; }
+#sheetbar .sheet-add { padding: 2px 8px; }

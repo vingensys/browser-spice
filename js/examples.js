@@ -473,6 +473,7 @@ function loadExampleById(editor, id) {
 
     editor.saveState();
     editor.setTool("select");
+    editor.resetSheets(); if (typeof sheetBar !== "undefined" && sheetBar) sheetBar.render();
     editor.components = [];
     editor.wires = [];
     editor.probes = [];

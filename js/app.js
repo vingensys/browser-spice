@@ -19,12 +19,14 @@
     const pane = new DevicePane(editor, { list: $("devicelist"), title: $("devtitle"), preview: $("devpreview") });
     const overview = new Overview($("overview"), editor);
     const status = new StatusBar($("statusbar"), editor);
+    SheetHub.editor = editor;
+    const sheetBar = new SheetBar($("sheetbar"), editor, runner);
     const doc = new DocumentStore(editor, runner);
     doc.onChange(() => status.setDocument(doc));
     const opOverlay = new OpOverlay(editor, runner, live, doc);
 
     // the console and the tests reach these through the window
-    Object.assign(window, { editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc, opOverlay });
+    Object.assign(window, { sheetBar, editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc, opOverlay });
 
     // an analysis run brings its tab to the front
     for (const [method, kind] of [["runDC", "dc"], ["runAC", "ac"], ["runNoise", "noise"], ["runTransient", "tran"], ["runSweep", "sweep"]]) {
@@ -85,7 +87,8 @@
         doc.confirmDiscard(() => {
             live.stop();
             editor.saveState();
-            editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+            editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1; editor.measures = []; editor.params = [];
+            editor.resetSheets(); sheetBar.render();
             editor.clearSelection(); editor.resetView(); afterLoad();
             doc.discardAutosave();
             doc.markSaved(null);
@@ -164,6 +167,12 @@
         runner.refreshSweepSources();
         Dialog.open({ title: "Simulation Settings", content: $("settings-form"), buttons: [{ label: "OK", primary: true }] });
     } });
+    C("sheet.add", "Add Sheet…", { run: () => sheetBar.add() });
+    C("sheet.rename", "Rename Sheet…", { run: () => sheetBar.rename(editor.sheetIndex) });
+    C("sheet.duplicate", "Duplicate Sheet", { run: () => sheetBar.duplicate(editor.sheetIndex) });
+    C("sheet.delete", "Delete Sheet", { enabled: () => editor.sheets.length > 1 && editor.sheetIndex > 0, run: () => sheetBar.remove(editor.sheetIndex) });
+    C("sheet.up", "Back to Parent Sheet", { keys: "Ctrl+Backspace", enabled: () => editor.sheets.length > 1, run: () => editor.sheetUp() });
+    C("sheet.next", "Next Sheet", { keys: "Ctrl+PageDown", enabled: () => editor.sheets.length > 1, run: () => { editor.sheetStack = []; editor.switchSheet((editor.sheetIndex + 1) % editor.sheets.length); } });
     C("design.params", "Parameters…", { run: () => ParamsDialog.open(editor, runner) });
     C("design.sweep", "Parametric Sweep…", { run: () => StudyDialog.openSweep() });
     C("design.montecarlo", "Monte Carlo…", { run: () => StudyDialog.openMonteCarlo() });
@@ -230,7 +239,7 @@
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
-        { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", "design.sweep", "design.montecarlo", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
+        { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
@@ -308,6 +317,7 @@
         if (!comp) return;
         if (comp.type === "SCOPE") { ScopeWindow.open(editor, live, comp); return; }
         if (comp.type === "LOGAN") { LogicWindow.open(editor, live, comp); return; }
+        if (comp.type === "SHEET") { if (!editor.openChild(comp)) runner.toast("Choose the sheet this symbol uses in its properties first.", "info"); return; }
         if (comp.type === "SW") {
             editor.saveState();
             comp.closed = !comp.closed;

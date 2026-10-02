@@ -21,6 +21,9 @@ class SchematicEditor {
         this.titleBlock = SchematicEditor.defaultTitleBlock();
         this.measures = [];
         this.params = [];
+        this.sheets = [{ id: 1, name: "Main", data: null, history: [], future: [] }];
+        this.sheetIndex = 0;
+        this.sheetStack = [];
 
         this.selection = [];
         this.selectedWire = null;
@@ -600,7 +603,7 @@ class SchematicEditor {
 
     // the part to measure the current of: the part clicked, or the nearer end of the wire clicked
     findCurrentProbeTarget(x, y) {
-        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "NODEIC", "POWER", "NETLABEL"].includes(c.type);
+        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "NODEIC", "POWER", "NETLABEL", "PORT"].includes(c.type);
         const direct = this.findComponent(x, y);
         if (ok(direct)) return direct;
         const hit = this.findWireNearest(x, y, 12);

@@ -41,6 +41,7 @@ class SchematicImporter {
 
         editor.saveState();
         editor.setTool("select");
+        editor.resetSheets();
         editor.components = [];
         editor.wires = [];
         editor.probes = [];

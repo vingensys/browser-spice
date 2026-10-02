@@ -104,10 +104,10 @@ class NetlistExtractor {
         // net labels / power ports with the same name are one net (no wire needed)
         const labelled = new Map();
         for (const comp of editor.components) {
-            if (comp.type !== "NETLABEL" && comp.type !== "POWER") continue;
+            if (comp.type !== "NETLABEL" && comp.type !== "POWER" && comp.type !== "PORT") continue;
             const key = terminalNodeKeys.get(`${comp.id}:1`);
             if (!key) continue;
-            const name = String(comp.net || (comp.type === "POWER" ? "VCC" : "NET")).trim().toUpperCase();
+            const name = String(comp.net || (comp.type === "POWER" ? "VCC" : comp.type === "PORT" ? "PORT" : "NET")).trim().toUpperCase();
             if (labelled.has(name)) ds.union(labelled.get(name), key); else labelled.set(name, key);
         }
 
@@ -462,8 +462,9 @@ class NetlistExtractor {
     static extractNow(editor) {
         const nets = NetlistExtractor.nets(editor);
         const { els, warnings } = NetlistExtractor.elements(editor, nets);
+        if (typeof Hierarchy !== "undefined") Hierarchy.expand(editor, nets, els, warnings);
 
-        if (!nets.hasGround) {
+        if (!nets.hasGround && !els.childGround) {
             throw new Error("There is no ground in this schematic. Add a GND symbol and wire it to the circuit.");
         }
         if (!els.length) throw new Error("The schematic has no components to simulate.");

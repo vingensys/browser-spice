@@ -47,12 +47,21 @@ class SimRunner {
 
     // build the netlist, warn about suspicious wiring
     prepare() {
+        this.rootSheet();
         this.rejectImpossible();
         const info = NetlistExtractor.extract(this.editor);
         if (info.warnings.length) {
             this.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}${info.warnings.length > 3 ? " …" : ""}`, "warn");
         }
         return info;
+    }
+
+    // the design is simulated from its first sheet: go there (the probes and settings live on it)
+    rootSheet() {
+        if (this.editor.sheetIndex !== 0) {
+            this.editor.ensureRootSheet();
+            this.toast(`Simulating the whole design from the first sheet (${this.editor.sheets[0].name}).`, "info");
+        }
     }
 
     // a loop of ideal voltage sources has no solution: say so in plain words instead of a singular-matrix error

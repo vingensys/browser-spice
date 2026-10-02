@@ -39,6 +39,7 @@ class DocumentStore {
             titleBlock: ed.titleBlock,
             measures: ed.measures,
             params: ed.params,
+            sheets: ed.sheetsForSave((c) => this.strip(c)),
             subckts: SubcktLibrary.used(ed),
             nextId: ed.nextId,
             view: { zoom: ed.zoom, panX: ed.panX, panY: ed.panY },
@@ -49,10 +50,10 @@ class DocumentStore {
     // what counts as an edit: the design and the run settings, not the view
     signature() {
         const s = this.serialize();
-        return JSON.stringify([s.components, s.wires, s.probes, s.titleBlock, s.measures, s.params, s.settings]);
+        return JSON.stringify([s.components, s.wires, s.probes, s.titleBlock, s.measures, s.params, s.sheets, s.settings]);
     }
 
-    isEmpty() { return !this.editor.components.length && !this.editor.wires.length && !this.editor.probes.length; }
+    isEmpty() { return !this.editor.allComponents().length && !this.editor.wires.length && !this.editor.probes.length && this.editor.sheets.length < 2; }
     get dirty() { return this.savedSig !== this.signature(); }
 
     markSaved(name = this.name) {
@@ -98,9 +99,11 @@ class DocumentStore {
         ed.measures = Array.isArray(state.measures) ? state.measures.filter(m => m && typeof m === "object" && m.fn && m.sig) : [];
         const v = state.view || { zoom: 1, panX: state.panX || 0, panY: state.panY || 0 };
         ed.zoom = v.zoom || 1; ed.panX = v.panX || 0; ed.panY = v.panY || 0;
+        ed.loadSheets(state.sheets);
         ed.clearSelection();
         ed.refreshWires();
         ed.draw();
+        if (typeof ed.onSheetChange === "function") ed.onSheetChange();
         if (state.settings) this.applySettings(state.settings);
         return { parts: comps.length, notes };
     }

@@ -2,7 +2,7 @@
 
 const Exporter = {
     // ---- bill of materials ------------------------------------------------------------------------------------------
-    NOT_PARTS: ["GND", "TEXT", "NODEIC"],
+    NOT_PARTS: ["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET"],
 
     typeName(comp) {
         if (!Exporter.names) {
@@ -28,13 +28,13 @@ const Exporter = {
     // [{ refs: ["R1","R2"], qty, value, part, tol }] grouped by part type + value, sorted by reference
     bom(editor) {
         const groups = new Map();
-        for (const c of editor.components) {
+        for (const { comp: c, ref } of Hierarchy.flatComponents(editor)) {
             if (Exporter.NOT_PARTS.includes(c.type)) continue;
             const part = Exporter.typeName(c), value = Exporter.describe(c);
             const tol = ["R", "C", "L", "POT", "RHEO"].includes(c.type) && c.tol ? `${c.tol}%` : "";
             const key = [c.type, part, value, tol].join("|");
             if (!groups.has(key)) groups.set(key, { refs: [], value, part, tol, type: c.type });
-            groups.get(key).refs.push(c.name);
+            groups.get(key).refs.push(ref);
         }
         const nat = (a, b) => a.localeCompare(b, undefined, { numeric: true });
         const rows = [...groups.values()];

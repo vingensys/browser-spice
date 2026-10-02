@@ -123,7 +123,7 @@ class SubcktLibrary {
     // the definitions a design uses (embedded in its file)
     static used(editor) {
         const out = new Map();
-        for (const c of editor.components) {
+        for (const c of (editor.allComponents ? editor.allComponents() : editor.components)) {
             if (!/^SUB:/.test(c.type)) continue;
             const d = SubcktLibrary.defs.get(c.type.slice(4).toLowerCase());
             if (d) out.set(d.name.toLowerCase(), { name: d.name, ports: d.ports, text: d.text, models: d.models });

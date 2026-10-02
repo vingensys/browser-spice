@@ -97,7 +97,7 @@ class ErcChecker {
             if (isSource && el.nodes[0] === el.nodes[1]) {
                 add("err", "vshort", `${el.comp.name}: both terminals are on net ${label(el.nodes[0])}, a short circuit across the source.`, [compRef(el.comp)]);
                 seenShort.add(el.comp);
-            } else if (distinct.size === 1 && !seenShort.has(el.comp) && !["POWER", "NETLABEL"].includes(el.comp.type)) {
+            } else if (distinct.size === 1 && !seenShort.has(el.comp) && !["POWER", "NETLABEL", "PORT"].includes(el.comp.type)) {
                 add("warn", "shorted", `${el.comp.name}: all its pins are on net ${label(nodes[0])}, so it does nothing.`, [compRef(el.comp)]);
                 seenShort.add(el.comp);
             }

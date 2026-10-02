@@ -57,6 +57,7 @@ class LiveSim {
 
     build() {
         const ed = this.editor;
+        this.runner.rootSheet();
         this.runner.rejectImpossible();
         const info = NetlistExtractor.extract(ed);
         if (info.warnings.length) this.runner.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}`, "warn");
