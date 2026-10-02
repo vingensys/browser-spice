@@ -7,9 +7,14 @@
     "postinstall": "node scripts/vendor-ngspice.mjs",
     "vendor": "node scripts/vendor-ngspice.mjs",
     "serve": "node scripts/serve.mjs",
-    "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/ngspice-wasm.test.js && node tests/plot.test.js && node tests/logic.test.js"
+    "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/ngspice-wasm.test.js && node tests/plot.test.js && node tests/logic.test.js",
+    "test:browser": "node tests/run-browser.mjs",
+    "test:all": "npm test && npm run test:browser"
   },
   "dependencies": {
     "eecircuit-engine": "1.8.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.12.0"
   }
 }

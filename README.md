@@ -104,7 +104,9 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 ## Tests
 
 ```bash
-npm test             # engine, ngspice cross-check (needs ngspice on PATH), ngspice-WASM adapter
+npm test             # engine, ngspice cross-check (needs ngspice on PATH), ngspice-WASM adapter, graph and logic maths
+npm run test:browser # every browser suite in headless Chrome against the real app (CHROME_PATH if needed)
+npm run test:all     # both
 SPARSE=1 npm test    # the same with the sparse solver forced on for every circuit
 ```
 
@@ -134,3 +136,7 @@ ngspice remains the reference. Known approximations: the built-in 555 and its ng
 within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay (the export models the same lag); MOSFETs are level 1.
 
 See [AUDIT.md](AUDIT.md) for the list of known shortcomings.
+
+## Continuous integration
+
+`.github/workflows/ci.yml` runs `npm test` (with and without the sparse solver, ngspice installed for the cross-check) and `npm run test:browser` (headless Chrome) on every push and pull request.

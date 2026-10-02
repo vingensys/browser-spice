@@ -62,7 +62,7 @@ against Proteus / ngspice, **P3** polish.
 | No in-app help beyond the shortcuts list and About | P3 | |
 
 ## 6. Engineering
-- Tests are run by hand; there is no CI. (P2)
+- ~~Tests are run by hand; there is no CI.~~ **Done**: GitHub Actions runs the node and the headless-Chrome suites on every push.
 - The ngspice WebAssembly engine cannot be interrupted, so a malformed deck freezes the page. Invalid values are now
   refused before sending, but a pathological circuit can still hang it. (P2)
 - Large circuits: the sparse solver is fast (about 2 ms per step at 1,100 unknowns), but the editor's router and
