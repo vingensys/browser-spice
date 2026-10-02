@@ -666,6 +666,20 @@ window.analysisTests = async function () {
     ok("a bad override is reported, not silently ignored", NetlistExtractor.extract(editor).warnings.some(w => /not name=value/.test(w)));
     editor.resetSheets(); sheetBar.render(); editor.params = [];
 
+
+    // ======================================================== SVG and KiCad exports
+    clear(); editor.resetSheets(); loadExampleById(editor, "ce-amp");
+    const svgText = Exporter.renderSvg(editor), png1 = Exporter.renderImage(editor, 1);
+    const sdoc = new DOMParser().parseFromString(svgText, "image/svg+xml");
+    ok("the SVG is well-formed XML with the same size as the 1x picture", !sdoc.querySelector("parsererror") && sdoc.documentElement.getAttribute("width") === String(png1.width) && sdoc.documentElement.getAttribute("height") === String(png1.height), [sdoc.documentElement.getAttribute("width"), png1.width]);
+    ok("it holds the drawing as vector paths and text", sdoc.querySelectorAll("path").length > 40 && sdoc.querySelectorAll("text").length > 8, [sdoc.querySelectorAll("path").length, sdoc.querySelectorAll("text").length]);
+    ok("part labels are real text (R1, Q1) and colours are kept", [...sdoc.querySelectorAll("text")].some(t => /R1/.test(t.textContent)) && /stroke="#[0-9a-f]{3,6}"/i.test(svgText) && !/NaN|undefined/.test(svgText), svgText.slice(0, 200));
+    ok("exporting leaves the editor's drawing context alone", editor.ctx === editor.canvas.getContext("2d") && !editor.exporting);
+    const net = Exporter.kicadNetlist(editor);
+    ok("the KiCad netlist lists every part and net with balanced parentheses", /^\(export \(version D\)/.test(net) && (net.match(/\(comp /g) || []).length === editor.components.filter(c => !["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET"].includes(c.type)).length && (net.match(/\(/g) || []).length === (net.match(/\)/g) || []).length, net.slice(0, 300));
+    ok("every pin of every part appears in exactly one net", (() => { const pins = (net.match(/\(node /g) || []).length; const expected = editor.components.filter(c => !["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET"].includes(c.type)).reduce((n, c) => n + editor.getTerminals(c).filter(t => NetlistExtractor.nets(editor).terminalNode(c, t.name) !== null).length, 0); return pins === expected; })());
+    ok("the ground net is called GND", /\(name "GND"\)/.test(net));
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };
