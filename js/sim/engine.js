@@ -155,6 +155,24 @@ class SimEngine {
         return { ok: false, x: ctx.x, iters: maxIter };
     }
 
+    // Is this set of node levels a DC solution? Pin the nodes to the levels (through a stiff conductance), solve every other node
+    // (internal ones included), and report the largest current the pins have to supply: near zero means the levels are a solution
+    // of these equations too. Used to tell nodes whose level is not determined (held by almost nothing: any level within the
+    // current tolerance works) from a real disagreement between two solvers. levels: { nodeName: volts }
+    pinnedCurrents(levels, xStart = null) {
+        const c = this.c, ctx = this.makeCtx("op"), G = 1e3;
+        ctx.nodeIC = Object.entries(levels).map(([n, v]) => [c.node(n), v]).filter(([i]) => i >= 0);
+        if (!xStart) { try { xStart = this.operatingPoint().x; } catch (e) { xStart = null; } }       // start from the circuit's own solution
+        let x = xStart ? Float64Array.from(xStart) : new Float64Array(c.size);
+        for (const [i, v] of ctx.nodeIC) x[i] = v;
+        let r = this.newton(ctx, x, 200);
+        if (!r.ok) { ctx.gmin = 1e-9; r = this.newton(ctx, x, 200); ctx.gmin = this.opt.gmin; if (r.ok) r = this.newton(ctx, r.x, 200); }
+        if (!r.ok) return { ok: false, worst: Infinity };
+        let worst = 0;
+        for (const [i, v] of ctx.nodeIC) worst = Math.max(worst, Math.abs(G * (v - r.x[i])));
+        return { ok: true, worst };
+    }
+
     snapshot(x) {
         const c = this.c;
         const nodeVoltages = { "0": 0 };

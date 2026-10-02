@@ -252,6 +252,16 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
         const r = await call("pcb_check", { board_id: "zzz" });
         if (!/no board "zzz"/.test(r.error)) throw new Error(JSON.stringify(r));
     });
+    if (!spawnSync("ngspice", ["-v"]).error) {
+        await test("compare_with_ngspice recognises an undetermined floating level (both solutions valid) and flags a real disagreement", async () => {
+            // a node held only by two back-to-back diodes: its level is whatever each solver lands on
+            const flo = await call("compare_with_ngspice", { netlist: "f\nV1 a 0 10\nD1 m a DM\nD2 0 m DM\nC1 m 0 1n\n.model DM D(IS=1e-14)\n.op\n.end" });
+            const op = flo.operatingPoint;
+            if (op.worst_deviation_percent_of_full_scale > 0.5 && op.ngspice_levels_solve_the_builtin_equations !== true) throw new Error(JSON.stringify(op));
+            const ok = await call("compare_with_ngspice", { netlist: "d\nV1 a 0 5\nR1 a b 1k\nR2 b 0 1k\n.op\n.end" });
+            if (ok.operatingPoint.worst_deviation_percent_of_full_scale > 0.01 || "ngspice_levels_solve_the_builtin_equations" in ok.operatingPoint) throw new Error("no flag expected when the two agree: " + JSON.stringify(ok.operatingPoint));
+        });
+    }
     server.stdin.end();
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);

@@ -1251,6 +1251,17 @@ test("a transformer bridge rectifier whose diodes have no capacitance still runs
     }
 });
 
+test("pinnedCurrents tells a valid DC level from a wrong one (and a floating node's any level is valid)", () => {
+    const eng = (deck) => new SimEngine(SpiceParser.build(SpiceParser.parse(deck)).circuit);
+    const div = eng("x\nV1 a 0 5\nR1 a b 1k\nR2 b 0 1k\n.end");
+    if (div.pinnedCurrents({ b: 2.5 }).worst > 1e-9) throw new Error("the right level should need no current");
+    if (!(div.pinnedCurrents({ b: 3.5 }).worst > 1e-3)) throw new Error("a wrong level should need milliamps");
+    // two diodes back to back around a node: its level is set by leakage only, so a range of levels is a solution
+    const flo = eng("x\nV1 a 0 10\nD1 m a DM\nD2 0 m DM\n.model DM D(IS=1e-14)\n.end");
+    const lv = [3, 5, 7].map(v => flo.pinnedCurrents({ m: v }).worst);
+    if (lv.some(w => w > 1e-9)) throw new Error("leakage-only node: " + lv);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

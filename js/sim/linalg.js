@@ -43,6 +43,13 @@ class DenseSystem {
         this.add(j, i, -g);
     }
 
+    // A x (the equations' left-hand side at x); with the right-hand side b this gives the residual of x
+    mulVec(x) {
+        const n = this.n, y = new Float64Array(n);
+        for (let i = 0; i < n; i++) { let a = 0; for (let j = 0; j < n; j++) a += this.A[i * n + j] * x[j]; y[i] = a; }
+        return y;
+    }
+
     solve() {
         const n = this.n;
         const M = Float64Array.from(this.A);
@@ -117,6 +124,12 @@ class SparseSystem {
         this.add(j, j, g);
         this.add(i, j, -g);
         this.add(j, i, -g);
+    }
+
+    mulVec(x) {
+        const y = new Float64Array(this.n);
+        for (let i = 0; i < this.n; i++) { let a = 0; for (const [j, v] of this.rows[i]) a += v * x[j]; y[i] = a; }
+        return y;
     }
 
     // Newton iterations re-solve the same circuit structure over and over, so the pivot order

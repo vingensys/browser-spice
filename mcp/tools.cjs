@@ -239,10 +239,21 @@ function compareNgspice(args) {
     const text = run.stdout + run.stderr, ng = {};
     for (const m of text.matchAll(/^v\(([^)]+)\)\s*=\s*(\S+)/gm)) if (!(m[1] in ng)) ng[m[1]] = parseFloat(m[2]);
     const res = { nodes: nodes.length };
-    const op = engine.operatingPoint().nodeVoltages;
+    const opSol = engine.operatingPoint(), op = opSol.nodeVoltages;
     const span = Math.max(1, ...nodes.map(n => Math.abs(ng[n] || 0)));
     const dev = nodes.filter(n => n in ng).map(n => ({ node: n, builtin: round(op[n]), ngspice: round(ng[n]) }));
     res.operatingPoint = { worst_deviation_percent_of_full_scale: round(100 * Math.max(0, ...dev.map(d => Math.abs(d.builtin - d.ngspice) / span)), 4), nodes: dev.slice(0, 20) };
+    // Is ngspice's operating point also a solution of the built-in equations? Where nodes are held by almost nothing (a floating
+    // transformer secondary, a node behind series capacitors) any level within the current tolerance is a solution, and two
+    // solvers legitimately differ; the residual current left at ngspice's levels tells that apart from a real disagreement.
+    if (res.operatingPoint.worst_deviation_percent_of_full_scale > 0.5) {
+        const levels = {};
+        for (const d of dev) if (Math.abs(d.builtin - d.ngspice) / span > 0.005) levels[d.node] = d.ngspice;       // only the nodes the two disagree about
+        const pin = engine.pinnedCurrents(levels, opSol.x), worstRes = pin.worst;
+        res.operatingPoint.ngspice_levels_solve_the_builtin_equations = worstRes <= 1e-9;
+        res.operatingPoint.largest_current_needed_to_hold_ngspice_levels_amps = Number(worstRes.toExponential(2));
+        res.operatingPoint.note = worstRes <= 1e-9 ? "The two operating points differ, but ngspice's values also satisfy the built-in equations (holding them takes under a nanoamp): some node is held by almost nothing, so its level is not determined and both are valid." : "The two operating points differ and ngspice's values do not satisfy the built-in equations: a real disagreement.";
+    }
     const read = (file, k) => fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim().split("\n").map(l => l.trim().split(/\s+/).map(Number)).filter(r => r.every(Number.isFinite)) : null;
     const t0 = Number(args.after) > 0 ? Number(args.after) : 0;          // ignore the start-up before this time (seconds) in the transient comparison
     const rows = tr && (read(`${tmp}/t.txt`) || []).filter(x => x[0] >= t0);
