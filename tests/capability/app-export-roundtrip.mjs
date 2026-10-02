@@ -28,11 +28,11 @@ for (const [id, [body, tran, expectOp]] of Object.entries(D)) {
     const worst = Math.max(...Object.entries(expectOp).map(([n, v]) => Math.abs((s.json.nodeVoltages[n] ?? 1e9) - v)));
     row(worst < 5e-3, `${id}: MCP operating point equals the one the web app showed (worst node difference ${worst.toExponential(1)} V)`);
   }
-  const n = await call("compare_with_ngspice", { netlist: deck });
+  const n = await call("compare_with_ngspice", { netlist: deck, ngspice_method: id === "psu" ? "gear" : "trap" });   // the supply needs ngspice's damped integration (see AUDIT: its trapezoidal rule rings on the floating secondary)
   if (n.err) { row(false, `${id}: ngspice comparison failed: ${n.text.slice(0, 120)}`); continue; }
   const t = n.json.transient;
-  const floating = id === "psu";   // floating rectifier / transformer nodes: leakage picks the DC state and the kick spikes shift in time (see tests/engines.js); the waveform means still agree
-  row((floating || n.json.operatingPoint.worst_deviation_percent_of_full_scale < 0.5) && t && t.worst_mean_deviation_percent_of_range < 1.5, `${id}: native ngspice agrees${floating ? " on the waveform averages (floating nodes: OP and edge timing differ by design)" : ""} (OP ${n.json.operatingPoint.worst_deviation_percent_of_full_scale}% of full scale; transient mean ${t && t.worst_mean_deviation_percent_of_range}%, rms ${t && t.worst_rms_deviation_percent_of_range}% of range at ${t && t.at_node})`);
+  const floating = id === "psu";   // floating secondary nodes: any level within the current tolerance is a DC solution, so only the waveforms are compared
+  row((floating || n.json.operatingPoint.worst_deviation_percent_of_full_scale < 0.5) && t && t.worst_mean_deviation_percent_of_range < 1.5 && (!floating || t.worst_rms_deviation_percent_of_range < 2), `${id}: native ngspice agrees${floating ? " on the waveforms with Gear integration, rms below 2% (the floating-node OP is not compared)" : ""} (OP ${n.json.operatingPoint.worst_deviation_percent_of_full_scale}% of full scale; transient mean ${t && t.worst_mean_deviation_percent_of_range}%, rms ${t && t.worst_rms_deviation_percent_of_range}% of range at ${t && t.at_node})`);
 }
 console.log(`\n${pass} passed, ${fail} failed`);
 srv.stdin.end();

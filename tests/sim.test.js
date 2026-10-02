@@ -1239,6 +1239,18 @@ test(".nodeset picks the state of a bistable circuit without forcing it", () => 
     if (!(lo.a < 0.5 && lo.b > 4.5)) throw new Error("a low: " + JSON.stringify(lo));
 });
 
+test("a transformer bridge rectifier whose diodes have no capacitance still runs (floating secondary between conductions)", () => {
+    // the secondary nodes are held only by diode leakage while the bridge is off; with no junction capacitance Newton used
+    // to cycle there at any step size ("time step too small"). A femtofarad on such a junction keeps the equation well posed.
+    const deck = (card) => `psu\nV1 1 0 SIN(0 36 50 0 0 0)\nRP 1 p 0.5\nRS 2 s 0.5\nLP p 0 5\nLS s 3 1.25\nK1 LP LS 0.999\nD1 2 4 DM\nD2 3 4 DM\nD3 0 2 DM\nD4 0 3 DM\nC1 4 0 1m\nR1 4 0 100\n.model DM D(${card})\n.end`;
+    for (const card of ["IS=7.69e-11 N=1.45 RS=0.0342", "IS=7.69e-11 N=1.45 RS=0.0342 CJO=0 TT=0", "IS=1e-14"]) {
+        const { circuit } = SpiceParser.build(SpiceParser.parse(deck(card)));
+        const r = new SimEngine(circuit).transient({ tStop: 0.06, tStep: 50e-6, uic: false });
+        const v4 = r.nodeHistories["4"], peak = Math.max(...v4.slice(-200));
+        if (!(peak > 15 && peak < 20)) throw new Error(`${card}: rail peak ${peak}`);
+    }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

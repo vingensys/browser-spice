@@ -20,7 +20,7 @@ window.engineTests = async function () {
             const info = NetlistExtractor.extract(editor);
             const mine = new SimEngine(info.circuit);
             const opMine = mine.operatingPoint();
-            const opNg = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(info.elements, { analysis: ".op" })), info);
+            const opNg = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(info.elements, { analysis: ".op", options: opts.exportOptions })), info);
             let worstOp = 0;
             const span = Math.max(1, ...Object.values(opNg.nodeVoltages).map(Math.abs));
             for (const [n, v] of Object.entries(opNg.nodeVoltages)) {
@@ -32,7 +32,7 @@ window.engineTests = async function () {
                 const uic = opts.uic !== false;
                 const rMine = new SimEngine(NetlistExtractor.extract(editor).circuit).transient({ tStop: tran.tStop, tStep: tran.tStep, uic });
                 const rNg = NgspiceBackend.toTransient(await NgspiceBackend.run(
-                    NetlistExtractor.toSpice(info.elements, { analysis: `.tran ${tran.tStep} ${tran.tStop}${uic ? " uic" : ""}` })), info);
+                    NetlistExtractor.toSpice(info.elements, { analysis: `.tran ${tran.tStep} ${tran.tStop}${uic ? " uic" : ""}`, options: opts.exportOptions })), info);
                 for (const n of Object.keys(rNg.nodeHistories)) {
                     if (!rMine.nodeHistories[n]) continue; // ngspice-internal subcircuit nodes
                     const ys = rNg.nodeHistories[n];
@@ -55,7 +55,7 @@ window.engineTests = async function () {
         "ce-amp": { opts: { uic: false } },                              // bias circuit: start from the operating point
         "inverting-opamp": { opts: { uic: false } },
         "555-astable": { tol: { op: 0.05, tran: 0.6 }, opts: { skipOp: true } }, // bistable: no unique DC state; periods differ ~1-2 %
-        "psu": { tol: { op: 0.05, tran: 0.2 }, opts: { skipOp: true } }, // floating rectifier nodes: leakage sets the DC state; kick spikes are timing sensitive
+        "psu": { tol: { op: 0.05, tran: 0.02 }, opts: { skipOp: true, exportOptions: { method: "gear" } } }, // floating rectifier nodes: any level within the current tolerance is a solution, so the OP is skipped; ngspice runs Gear because its default trapezoidal rule rings on those nodes at this step (see AUDIT)
         "jfet-amp": { opts: { uic: false } },                            // bias circuit: start from the operating point
         "scr-lamp": { tol: { op: 0.05, tran: 0.06 }, opts: { skipOp: true } }, // behavioural latch vs the exact switching instant
         "ripple-counter": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },   // master-slave macromodel vs the exact-edge flip-flop

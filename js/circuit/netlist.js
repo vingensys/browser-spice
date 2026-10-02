@@ -941,7 +941,9 @@ class NetlistExtractor {
         if (nodeset && Object.keys(nodeset).length) lines.push("", `.nodeset ${Object.entries(nodeset).map(([n, v]) => `v(${n})=${f(v)}`).join(" ")}`);
         if (options) {
             const o = [["reltol", options.reltol, 1e-3], ["abstol", options.abstol, 1e-12], ["vntol", options.vntol, 1e-6], ["gmin", options.gmin, 1e-12], ["itl1", options.maxIter, 100]].filter(([, v, d]) => Number.isFinite(v) && v !== d);
-            if (o.length) lines.push("", `.options ${o.map(([k, v]) => `${k}=${f(v)}`).join(" ")}`);
+            // backward Euler is ngspice's first-order Gear; "gear" is its second-order default Gear; trapezoidal is its default
+            const m = options.method === "be" ? ["method=gear", "maxord=1"] : (options.method === "gear" ? ["method=gear"] : []);
+            if (o.length || m.length) lines.push("", `.options ${[...o.map(([k, v]) => `${k}=${f(v)}`), ...m].join(" ")}`);
         }
 
         // initial conditions only mean something for a "start from 0" (UIC) run

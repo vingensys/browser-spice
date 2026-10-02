@@ -558,6 +558,10 @@ class Diode extends NonlinearElement {
         super.bind(circuit);
         // internal anode node when there is series resistance
         this.ai = this.p.rs > 0 ? circuit.internalNode(`${this.name}#a`) : this.n[0];
+        // a junction with no capacitance of its own gets a femtofarad, as simulators with a cmin option do: a node held only by
+        // diode leakage (a floating transformer secondary between conductions) is otherwise a flat, exponential equation on
+        // which Newton can cycle at any step size
+        if (!(this.p.cjo > 0) && !(this.p.tt > 0)) circuit.add(new Capacitor(`${this.name}.cmin`, [this.p.rs > 0 ? `${this.name}#a` : this.nodeNames[0], this.nodeNames[1]], { c: 1e-15 }));
     }
 
     beginSolve(ctx) {

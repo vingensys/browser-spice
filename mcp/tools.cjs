@@ -233,6 +233,7 @@ function compareNgspice(args) {
     if (tr) ctl.push(`tran ${tr.tStep} ${tr.tStop}${tr.uic ? " uic" : ""}`, `wrdata ${tmp}/t.txt ${nodes.map(n => `v(${n})`).join(" ")}`);
     if (ac) ctl.push(`ac ${ac.mode} ${ac.points} ${ac.fStart} ${ac.fStop}`, `wrdata ${tmp}/a.txt ${nodes.map(n => `vm(${n})`).join(" ")}`);
     ctl.push("quit", ".endc", ".end");
+    if (args.ngspice_method === "gear") body += "\n.options method=gear";
     fs.writeFileSync(`${tmp}/d.cir`, `${body}\n${ctl.join("\n")}\n`);
     const run = spawnSync("ngspice", ["-b", `${tmp}/d.cir`], { encoding: "utf8", timeout: 120000 });
     const text = run.stdout + run.stderr, ng = {};
@@ -293,7 +294,7 @@ const TOOLS = [
     },
     {
         name: "compare_with_ngspice", description: "Cross-check the deck against native ngspice (if installed): operating point, and transient when the deck has a .tran card. Returns the worst deviations.",
-        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST } },
+        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, ngspice_method: { type: "string", enum: ["trap", "gear"], description: "Integration method ngspice uses (default trap). Its trapezoidal rule rings on nodes that only diode leakage holds (a floating transformer secondary between rectifier conductions) when the step is coarse; gear damps that, so use gear to compare such circuits." } } },
         run: compareNgspice
     },
     {
