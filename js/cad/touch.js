@@ -80,7 +80,7 @@ class TouchInput {
     // would be closed by that mousedown, so they are swallowed for a moment
     guardCompatMouse() {
         if (this.compatGuard) return;
-        this.compatGuard = (ev) => { if (this.ignoreCompatUntil && performance.now() < this.ignoreCompatUntil) { ev.stopImmediatePropagation(); ev.preventDefault(); } };
+        this.compatGuard = (ev) => { if (ev.isTrusted && this.ignoreCompatUntil && performance.now() < this.ignoreCompatUntil) { ev.stopImmediatePropagation(); ev.preventDefault(); } };
         for (const t of ["mousedown", "mouseup", "click"]) document.addEventListener(t, this.compatGuard, true);
     }
 
