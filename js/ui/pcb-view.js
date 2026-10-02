@@ -35,7 +35,7 @@ class PcbView {
                 <span class="sep"></span>
                 <button class="tb-btn txt" data-tool="select" title="Select and move (S)">Select</button>
                 <button class="tb-btn txt" data-tool="route" title="Route a track (T)">Route</button>
-                <label title="Push-and-shove: tracks of other nets are pushed out of the way of the track you lay, instead of being violated (never moves pads, vias or track ends on pads; refuses a move that cannot work)"><input type="checkbox" id="pcbShove" checked> Shove</label>
+                <label title="Push-and-shove: tracks of other nets are pushed out of the way of the track you lay, instead of being violated (vias and the track ends on them move along; pads, the board edge and track ends on pads never move; a move that cannot work is refused)"><input type="checkbox" id="pcbShove" checked> Shove</label>
                 <button class="tb-btn txt" data-a="layer" title="Active copper layer (F)">Layer: <span id="pcbLayer">F.Cu</span></button>
                 <button class="tb-btn txt" data-a="rotate" title="Rotate the selected part (R)">Rotate</button>
                 <button class="tb-btn txt" data-a="flip" title="Move the selected surface-mount part to the other side of the board (X)">Flip side</button>
@@ -434,11 +434,20 @@ class PcbView {
     viaHere() {
         if (!this.draft || this.draft.pts.length < 1) return;
         const R = this.pcb.rules, last = this.draft.pts[this.draft.pts.length - 1], other = this.draft.layer === "F" ? "B" : "F";
+        const via = { id: 0, x: last[0], y: last[1], d: R.via, drill: R.viaDrill };
+        let shoved = null;
+        if (this.shoving) {
+            // the via is copper too: it pushes tracks (both layers) and other vias out of its way
+            shoved = Pcb.shoveVia(this.pcb, this.draft.layer, this.draft.pts, R.track, this.draft.net, via);
+            if (!shoved.ok) { this.say(`Blocked: ${shoved.reason}`, true); return; }
+        }
         this.snapshot();
+        if (shoved && (shoved.changes.length || shoved.vias.length)) { Pcb.applyShove(this.pcb, shoved); this.say(`Pushed ${shoved.changes.length} track(s) and ${shoved.vias.length} via(s) out of the way.`); }
         if (this.draft.pts.length >= 2) this.pcb.tracks.push({ id: this.pcb.nextId++, layer: this.draft.layer, w: R.track, pts: this.draft.pts });
-        this.pcb.vias.push({ id: this.pcb.nextId++, x: last[0], y: last[1], d: R.via, drill: R.viaDrill });
+        via.id = this.pcb.nextId++;
+        this.pcb.vias.push(via);
         this.layer = other;
-        this.draft = { layer: other, pts: [[last[0], last[1]]] };
+        this.draft = { layer: other, pts: [[last[0], last[1]]], net: this.draft.net };
         this.fields();
         this.changed();
     }

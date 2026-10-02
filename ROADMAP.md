@@ -39,7 +39,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 ### 4. PCB layout (the "other half" of Proteus)
 - **Done (MVP)**: View > PCB Layout: footprints from the netlist, board outline, auto-place, ratsnest, manual routing on two layers with vias, a grid autorouter, a design-rule check and Gerber / Excellon ZIP export.
 - Also done: SMD footprints, back-side placement, silkscreen, mask and paste layers.
-- Also done: push-and-shove routing (tracks; vias are fixed), user-defined footprints (editor and KiCad import) and copper pours.
+- Also done: push-and-shove routing (tracks and vias), user-defined footprints (editor and KiCad import) and copper pours.
 - Not done: whole footprint-library import, / planes, differential pairs, length tuning, 3D view, back-annotation to the schematic.
 
 ### 5. Product

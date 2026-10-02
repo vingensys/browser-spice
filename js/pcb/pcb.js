@@ -745,43 +745,94 @@ class Pcb {
     }
 
     // ---------------------------------------------------------------- push-and-shove
-    // Lays a new segment of a track and pushes the tracks of other nets on the same layer out of its way instead of
-    // violating the clearance. shove(pcb, layer, draft, w, net) -> { ok, changes: [{ track, pts }], reason }
-    //   draft = the polyline being routed (its last segment is the one being laid; the earlier ones are already placed),
-    //   net   = its net (null when unknown). Tracks of the same net are not moved. Pads, vias and the board edge are fixed;
-    //   an end of a track that sits on a pad or via, or joins another track, stays where it is (the track pivots about it).
-    // The result is checked with the rule check: if anything new would be violated the whole move is refused (ok false) and
-    // nothing changes. Nothing is applied here; Pcb.applyShove writes the changes.
-    static shove(pcb, layer, draft, w, net, { maxPush = 60 } = {}) {
-        const R = pcb.rules, clr = R.clearance, last = [draft[draft.length - 2], draft[draft.length - 1]];
-        if (!last[0] || !last[1] || Math.hypot(last[1][0] - last[0][0], last[1][1] - last[0][1]) < 1e-6) return { ok: true, changes: [] };
+    // Lays a new segment of a track (or drops a via) and pushes the copper of other nets out of its way instead of violating
+    // the clearance: tracks on the same layer, and vias together with the track ends attached to them (on both layers).
+    //   shove(pcb, layer, draft, w, net)   draft = the polyline being routed (its last segment is the one being laid, the
+    //                                      earlier ones are already placed), net = its net (null when unknown)
+    //   shoveVia(pcb, layer, draft, w, net, via)   the same for dropping `via` at the end of the draft
+    // -> { ok, changes: [{ track, pts }], vias: [{ via, x, y }], reason }
+    // Pads, the board edge and track ends sitting on pads or junctions are fixed (a pushed track pivots about its ends); a via
+    // under a pad, or touched in the middle of a track, is fixed too. The result is checked with the rule check: if anything
+    // new would be violated the whole move is refused (ok false) and nothing changes. Nothing is applied here;
+    // Pcb.applyShove writes the changes.
+    static shove(pcb, layer, draft, w, net, opts) {
+        const last = [draft[draft.length - 2], draft[draft.length - 1]];
+        if (!last[0] || !last[1] || Math.hypot(last[1][0] - last[0][0], last[1][1] - last[0][1]) < 1e-6) return { ok: true, changes: [], vias: [] };
+        return Pcb.shoveCore(pcb, [{ layer, pts: last, w, net }], { layer, w, pts: draft }, null, net, opts);
+    }
+
+    static shoveVia(pcb, layer, draft, w, net, via, opts) {
+        const pt = [via.x, via.y];
+        return Pcb.shoveCore(pcb, ["F", "B"].map(l => ({ layer: l, pts: [pt, pt], w: via.d, net, round: true })), draft && draft.length >= 2 ? { layer, w, pts: draft } : null, via, net, opts);
+    }
+
+    static shoveCore(pcb, starters, candTrack, candVia, net, { maxPush = 80 } = {}) {
+        const R = pcb.rules, clr = R.clearance;
         const conn = Pcb.connectivity(pcb, false), netOf = new Map();
-        conn.forEach(g => g.tracks.forEach(t => netOf.set(t, g.net)));
+        conn.forEach(g => { g.tracks.forEach(t => netOf.set(t, g.net)); g.vias.forEach(v => netOf.set(v, g.net)); });
         const pads = Pcb.pads(pcb);
-        const sameNet = (n) => net !== null && net !== undefined && n !== null && n !== undefined && String(n) === String(net);
-        // which track ends cannot move: on a pad, a via, or touching another track of the layer
+        const sameNet = (a, b) => a !== null && a !== undefined && b !== null && b !== undefined && String(a) === String(b);
+        const onPad = (x, y, layer) => pads.some(p => (layer === undefined || p.layers.includes(layer)) && Math.abs(x - p.x) <= p.w / 2 + 0.02 && Math.abs(y - p.y) <= p.h / 2 + 0.02);
+        const ptSeg = (q, o, k) => Pcb.segDist(q[0], q[1], o.pts[k][0], o.pts[k][1], o.pts[k + 1][0], o.pts[k + 1][1]);
+        // a via can move when it is not on a pad and every track that touches it ends on it (a track passing by would be cut)
+        const viaMovable = (v) => {
+            if (onPad(v.x, v.y)) return false;
+            for (const t of pcb.tracks) for (let k = 0; k + 1 < t.pts.length; k++) {
+                if (Pcb.segDist(v.x, v.y, t.pts[k][0], t.pts[k][1], t.pts[k + 1][0], t.pts[k + 1][1]) > v.d / 2 + t.w / 2 + 0.02) continue;
+                const e0 = t.pts[0], e1 = t.pts[t.pts.length - 1], tol = v.d / 2 + 0.02;
+                if (Math.hypot(e0[0] - v.x, e0[1] - v.y) > tol && Math.hypot(e1[0] - v.x, e1[1] - v.y) > tol) return false;
+            }
+            return true;
+        };
+        // the ends of a track that cannot move: on a pad, on a via that cannot move, or touching another track
+        const viaAt = (q) => pcb.vias.find(v => Math.hypot(q[0] - v.x, q[1] - v.y) <= v.d / 2 + 0.02);
         const anchored = (t, i) => {
             const q = t.pts[i];
-            for (const p of pads) if (p.layers.includes(layer) && Math.abs(q[0] - p.x) <= p.w / 2 + 0.02 && Math.abs(q[1] - p.y) <= p.h / 2 + 0.02) return true;
-            for (const v of pcb.vias) if (Math.hypot(q[0] - v.x, q[1] - v.y) <= v.d / 2 + 0.02) return true;
-            for (const o of pcb.tracks) if (o !== t && o.layer === layer) for (let k = 0; k + 1 < o.pts.length; k++) if (Pcb.segDist(q[0], q[1], o.pts[k][0], o.pts[k][1], o.pts[k + 1][0], o.pts[k + 1][1]) <= o.w / 2 + 0.02) return true;
+            if (onPad(q[0], q[1], t.layer)) return true;
+            const v = viaAt(q);
+            if (v) return true;            // pivots about the via; the via itself is pushed when something comes near (see below)
+            for (const o of pcb.tracks) if (o !== t && o.layer === t.layer) for (let k = 0; k + 1 < o.pts.length; k++) if (ptSeg(q, o, k) <= o.w / 2 + 0.02) return true;
             return false;
         };
-        // working copies of the tracks that may move
         const work = new Map();
-        for (const t of pcb.tracks) if (t.layer === layer && !sameNet(netOf.get(t))) work.set(t, { pts: t.pts.map(q => [q[0], q[1]]), fixed: new Set([...(anchored(t, 0) ? [0] : []), ...(anchored(t, t.pts.length - 1) ? ["end"] : [])]), moved: false, by: [] });
-        const pusherOf = (pts, pw, pnet, self) => ({ pts, w: pw, net: pnet, self });
-        const queue = [pusherOf(last, w, net, null)];
+        for (const t of pcb.tracks) work.set(t, { pts: t.pts.map(q => [q[0], q[1]]), fixed: new Set([...(anchored(t, 0) ? [0] : []), ...(anchored(t, t.pts.length - 1) ? ["end"] : [])]), moved: false, by: [] });
+        const vw = new Map(pcb.vias.map(v => [v, { x: v.x, y: v.y, moved: false, movable: viaMovable(v) }]));
+        const queue = starters.map(st => ({ ...st, self: null }));
         let steps = 0, blocked = null;
         const segDistP = (P, a, b) => { let best = Infinity; for (let k = 0; k + 1 < P.length; k++) best = Math.min(best, Pcb.segSegDist(P[k], P[k + 1], a, b)); return best; };
         const ptDistP = (P, x, y) => { let best = Infinity, q = null; for (let k = 0; k + 1 < P.length; k++) { const a = P[k], b = P[k + 1], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; let t = l2 ? ((x - a[0]) * dx + (y - a[1]) * dy) / l2 : 0; t = Math.max(0, Math.min(1, t)); const px = a[0] + t * dx, py = a[1] + t * dy, d = Math.hypot(x - px, y - py); if (d < best) { best = d; q = [px, py]; } } return { d: best, q }; };
         const crosses = (P, a, b) => { const o = (p, q, r) => (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]); for (let k = 0; k + 1 < P.length; k++) { const c = P[k], d = P[k + 1]; if (o(a, b, c) * o(a, b, d) < 0 && o(c, d, a) * o(c, d, b) < 0) return true; } return false; };
+        const awayFrom = (P, x, y, D) => {                // the point at distance D from the pusher, in the direction away from it
+            const { q } = ptDistP(P.pts, x, y);
+            let dx = x - q[0], dy = y - q[1], dl = Math.hypot(dx, dy);
+            if (dl < 1e-9) {
+                const a = P.pts[0], b = P.pts[1], nx = -(b[1] - a[1]), ny = b[0] - a[0], nl = Math.hypot(nx, ny);
+                if (nl > 1e-9) { dx = nx / nl; dy = ny / nl; } else { dx = 1; dy = 0; }
+                dl = 1;
+            }
+            return [q[0] + (dx / dl) * (D + 0.01), q[1] + (dy / dl) * (D + 0.01)];
+        };
+        const tolOf = (v) => v.d / 2 + 0.02;
         while (queue.length && !blocked && steps++ < maxPush) {
             const P = queue.shift();
+            // ---- vias in the way: push them, and the track ends attached to them, together
+            for (const [v, st] of vw) {
+                if (blocked) break;
+                if (sameNet(netOf.get(v), P.net)) continue;
+                const Dv = P.w / 2 + v.d / 2 + clr + 0.02;
+                if (ptDistP(P.pts, st.x, st.y).d >= Dv - 1e-6) continue;
+                if (!st.movable) { blocked = `a via is in the way and cannot move (it is on a pad or crossed by a track)`; break; }
+                const to = awayFrom(P, st.x, st.y, Dv);
+                const old = [st.x, st.y];
+                st.x = to[0]; st.y = to[1]; st.moved = true;
+                for (const [t, wk] of work) for (const i of [0, wk.pts.length - 1]) if (Math.hypot(wk.pts[i][0] - old[0], wk.pts[i][1] - old[1]) <= tolOf(v)) { wk.pts[i] = [to[0], to[1]]; wk.moved = true; wk.follow = true; }
+                for (const l of ["F", "B"]) queue.push({ layer: l, pts: [[st.x, st.y], [st.x, st.y]], w: v.d, net: netOf.get(v), self: v, round: true });
+                for (const [t, wk] of work) if (wk.follow) { wk.follow = false; queue.push({ layer: t.layer, pts: wk.pts, w: t.w, net: netOf.get(t), self: t }); }
+            }
             for (const [t, wk] of work) {
-                if (t === P.self || blocked) continue;
+                if (t === P.self || blocked || t.layer !== P.layer) continue;
                 const tNet = netOf.get(t);
-                if (P.net !== null && P.net !== undefined && tNet !== null && tNet !== undefined && String(tNet) === String(P.net)) continue;
+                if (sameNet(tNet, P.net)) continue;
                 const D = P.w / 2 + t.w / 2 + clr + 0.02;
                 let changed = false;
                 wk.by.push({ pts: P.pts, D });
@@ -790,7 +841,7 @@ class Pcb {
                     // segments of T that are too close; a crossing cannot be pushed aside
                     const bad = [];
                     for (let j = 0; j + 1 < pts.length; j++) {
-                        if (crosses(P.pts, pts[j], pts[j + 1])) { blocked = `track ${t.id} crosses the new track; push-and-shove cannot move it across`; break; }
+                        if (crosses(P.pts, pts[j], pts[j + 1])) { blocked = `track ${t.id} crosses the new copper; push-and-shove cannot move it across`; break; }
                         if (segDistP(P.pts, pts[j], pts[j + 1]) < D - 1e-6) bad.push(j);
                     }
                     if (blocked || !bad.length) break;
@@ -825,17 +876,11 @@ class Pcb {
                     // push every vertex that is inside the zone
                     let movedAny = false;
                     for (let i = 0; i < pts.length; i++) {
-                        const { d, q } = ptDistP(P.pts, pts[i][0], pts[i][1]);
+                        const { d } = ptDistP(P.pts, pts[i][0], pts[i][1]);
                         if (d >= D - 1e-6) continue;
                         const isEnd = i === pts.length - 1, fixed = (i === 0 && wk.fixed.has(0)) || (isEnd && wk.fixed.has("end"));
-                        if (fixed) { blocked = `an end of track ${t.id} is fixed on a pad or via and sits inside the keep-out of the new track`; break; }
-                        let dx = pts[i][0] - q[0], dy = pts[i][1] - q[1], dl = Math.hypot(dx, dy);
-                        if (dl < 1e-9) {                                      // exactly on the pusher: step to the side the track's neighbour lies on
-                            const nb = pts[i + 1] || pts[i - 1], seg = P.pts[0], sg = P.pts[1], nx = -(sg[1] - seg[1]), ny = sg[0] - seg[0], nl = Math.hypot(nx, ny) || 1;
-                            const sgn = ((nb[0] - q[0]) * nx + (nb[1] - q[1]) * ny) >= 0 ? 1 : -1;
-                            dx = (nx / nl) * sgn; dy = (ny / nl) * sgn; dl = 1;
-                        }
-                        pts[i] = [q[0] + (dx / dl) * (D + 0.01), q[1] + (dy / dl) * (D + 0.01)];
+                        if (fixed) { blocked = `an end of track ${t.id} is fixed on a pad, via or junction and sits inside the keep-out of the new copper`; break; }
+                        pts[i] = awayFrom(P, pts[i][0], pts[i][1], D);
                         movedAny = true;
                     }
                     if (blocked) break;
@@ -843,7 +888,7 @@ class Pcb {
                     else break;
                 }
                 if (blocked) break;
-                if (changed) queue.push(pusherOf(wk.pts, t.w, tNet, t));          // what it now touches has to move too
+                if (changed) queue.push({ layer: t.layer, pts: wk.pts, w: t.w, net: tNet, self: t });          // what it now touches has to move too
             }
         }
         // tidy: drop vertices that are not needed to stay clear of what pushed the track
@@ -858,22 +903,28 @@ class Pcb {
                 }
             }
         }
-        if (!blocked && queue.length) blocked = "the pushed tracks keep pushing each other (too crowded)";
-        if (blocked) return { ok: false, reason: blocked, changes: [] };
+        if (!blocked && queue.length) blocked = "the pushed copper keeps pushing each other (too crowded)";
+        if (blocked) return { ok: false, reason: blocked, changes: [], vias: [] };
         const changes = [...work].filter(([, wk]) => wk.moved).map(([t, wk]) => ({ track: t, pts: wk.pts }));
+        const viaMoves = [...vw].filter(([, st]) => st.moved).map(([v, st]) => ({ via: v, x: st.x, y: st.y }));
         // validate with the rule check: nothing new may be violated
-        const trial = (list) => ({ ...pcb, zones: [], tracks: list });
-        const cand = { id: -1, layer, w, pts: draft.map(q => [q[0], q[1]]) };
+        const trial = (tracks, vias) => ({ ...pcb, zones: [], tracks, vias });
+        const candT = candTrack ? { id: -1, layer: candTrack.layer, w: candTrack.w, pts: candTrack.pts.map(q => [q[0], q[1]]) } : null;
+        const candV = candVia ? { id: -2, x: candVia.x, y: candVia.y, d: candVia.d, drill: candVia.drill } : null;
         const key = (i) => `${i.type}|${[...(i.ids || [i.msg])].sort().join("|")}`;
-        const before = new Set(Pcb.drc(trial(draft.length >= 3 ? pcb.tracks.concat([{ ...cand, pts: draft.slice(0, -1) }]) : pcb.tracks), { zones: false }).filter(i => i.type !== "unrouted").map(key));
-        const moved = new Map(changes.map(c => [c.track, c.pts]));
-        const after = Pcb.drc(trial(pcb.tracks.map(t => (moved.has(t) ? { ...t, pts: moved.get(t) } : t)).concat([cand])), { zones: false }).filter(i => i.type !== "unrouted");
+        const earlier = candT && candT.pts.length >= 3 && !candVia ? [{ ...candT, pts: candT.pts.slice(0, -1) }] : (candT && candVia ? [candT] : []);
+        const before = new Set(Pcb.drc(trial(pcb.tracks.concat(earlier), pcb.vias), { zones: false }).filter(i => i.type !== "unrouted").map(key));
+        const mt = new Map(changes.map(c => [c.track, c.pts])), mv = new Map(viaMoves.map(c => [c.via, c]));
+        const after = Pcb.drc(trial(pcb.tracks.map(t => (mt.has(t) ? { ...t, pts: mt.get(t) } : t)).concat(candT ? [candT] : []), pcb.vias.map(v => (mv.has(v) ? { ...v, x: mv.get(v).x, y: mv.get(v).y } : v)).concat(candV ? [candV] : [])), { zones: false }).filter(i => i.type !== "unrouted");
         const fresh = after.filter(i => !before.has(key(i)));
-        if (fresh.length) return { ok: false, reason: `would violate the rules: ${fresh[0].msg}`, changes: [] };
-        return { ok: true, changes };
+        if (fresh.length) return { ok: false, reason: `would violate the rules: ${fresh[0].msg}`, changes: [], vias: [] };
+        return { ok: true, changes, vias: viaMoves };
     }
 
-    static applyShove(pcb, result) { for (const c of result.changes) c.track.pts = c.pts.map(q => [q[0], q[1]]); }
+    static applyShove(pcb, result) {
+        for (const c of result.changes) c.track.pts = c.pts.map(q => [q[0], q[1]]);
+        for (const m of result.vias || []) { m.via.x = m.x; m.via.y = m.y; }
+    }
 
     // ---------------------------------------------------------------- Gerber / Excellon
     // layer: "F" / "B" copper, "SilkF" / "SilkB", "MaskF" / "MaskB" (pad openings, 0.1 mm larger), "PasteF" (SMD pads on the

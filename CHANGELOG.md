@@ -16,7 +16,7 @@ Interop and layout
 - SPICE export of combinational logic ICs and the 7474 / 74112 flip-flops; KiCad schematic (`.kicad_sch`) and netlist (`.net`) import.
 - Buses (wires, entries, vector ports and sheet pins, vector pins on logic ICs).
 - Touch input (pinch, pan, long press, double tap, touch toolbar).
-- PCB layout MVP: footprints, auto-place, ratsnest, manual and automatic routing, DRC, Gerber / Excellon ZIP.
+- PCB layout: footprints (through-hole, SMD, user-defined, KiCad `.kicad_mod` import), auto-place, ratsnest, manual / automatic / push-and-shove routing, copper pours, silkscreen, mask, paste, DRC, Gerber / Excellon ZIP.
 
 Study tools
 - Parametric sweeps over several parameters, corners, Monte Carlo with yield, sensitivity ranking.

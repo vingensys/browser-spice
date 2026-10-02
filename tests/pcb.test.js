@@ -266,4 +266,60 @@ for (const seed of [5, 9]) {
     b7.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 0.8], [40, 0.8]] });
     check("pushing a track into the board edge margin is refused", !Pcb.shove(b7, "F", [[10, 6], [10, 0.9], [30, 0.9]], 0.3, "1").ok);
 }
+// ---- push-and-shove with vias
+{
+    const board = (items) => {
+        const b = Pcb.blank(60, 40);
+        b.parts = items.map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; });
+        return b;
+    };
+    const mk = () => {
+        const b = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 12, 30]]);
+        b.vias.push({ id: 5, x: 22, y: 20, d: 0.8, drill: 0.4 });
+        b.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [22, 20]] }, { id: 2, layer: "B", w: 0.3, pts: [[22, 20], [40, 20]] });
+        return b;
+    };
+    const clean = (b) => Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge", "unrouted"].includes(i.type));
+    const b = mk();
+    check("the starting board is clean and routed", clean(b).length === 0, JSON.stringify(clean(b)));
+    // net 1 goes along y = 20.5 on the front, 0.5 from the via centre (the via needs 0.77)
+    const draft = [[12, 30], [12, 20.5], [32, 20.5]];
+    const r = Pcb.shove(b, "F", draft, 0.3, "1");
+    check("a track laid against a via pushes the via aside", r.ok && r.vias.length === 1 && r.vias[0].via === b.vias[0], r.reason);
+    const v = r.vias[0];
+    check("the via ends up clear of the new track (0.77 mm centre to track)", v && Math.abs(v.y - 20.5) >= 0.77 - 0.01 && v.y < 20, v && v.y);
+    check("both tracks that end on the via follow it, on both layers", r.changes.length >= 2 && r.changes.every(c => { const e = [c.pts[0], c.pts[c.pts.length - 1]]; return e.some(q => Math.abs(q[0] - v.x) < 1e-9 && Math.abs(q[1] - v.y) < 1e-9); }), r.changes.map(c => c.pts));
+    check("their other ends stay on the pads", r.changes.every(c => c.pts.some(q => (q[0] === 5 || q[0] === 40) && q[1] === 20)));
+    Pcb.applyShove(b, r);
+    b.tracks.push({ id: 9, layer: "F", w: 0.3, pts: draft });
+    const after = clean(b).filter(i => i.type !== "unrouted");
+    check("after applying, no clearance or short and the net stays connected (no airwire for net 2)", after.length === 0 && Pcb.ratsnest(b).every(l => l.net !== "2"), JSON.stringify(after.slice(0, 2)));
+    // a via on a pad cannot move
+    const b2 = board([["A", "2", 5, 20], ["C", "1", 12, 30]]);
+    b2.vias.push({ id: 5, x: 5, y: 20, d: 0.8, drill: 0.4 });
+    const r2 = Pcb.shove(b2, "F", [[12, 30], [12, 20.9], [3, 20.9]], 0.3, "1");
+    check("a via sitting on a pad is fixed, so the move is refused", !r2.ok, r2);
+    // a track passing under a via (touching it mid-track) pins it
+    const b3 = mk(); b3.tracks.push({ id: 3, layer: "B", w: 0.3, pts: [[18, 20.2], [26, 20.2]] });
+    check("a via with a track running past it is not pushed (that track would be cut)", !Pcb.shove(b3, "F", draft, 0.3, "1").ok || Pcb.shove(b3, "F", draft, 0.3, "1").vias.length === 0);
+    // the same-net via is left alone
+    const b4 = mk(); const r4 = Pcb.shove(b4, "F", [[12, 30], [12, 20.5], [32, 20.5]], 0.3, "2");
+    check("a via of the track's own net is not moved", r4.vias.length === 0);
+    // dropping a via pushes tracks on both layers
+    const b5 = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 12, 30]]);
+    b5.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] }, { id: 2, layer: "B", w: 0.3, pts: [[5, 21], [40, 21]] });
+    // the second track is net 3 on its own pads
+    b5.parts.push(...[["E", "3", 5, 21], ["F", "3", 40, 21]].map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b5.footprints); return part; }));
+    b5.tracks[1].pts = [[5, 21], [40, 21]];
+    const newVia = { x: 22, y: 20.6, d: 0.8, drill: 0.4 };
+    const rv = Pcb.shoveVia(b5, "F", [[12, 30], [12, 20.6], [22, 20.6]], 0.3, "1", newVia);
+    check("dropping a via pushes the tracks it lands on, on both layers (or says why not)", rv.ok ? rv.changes.length >= 1 : /pad|fixed|violate|cross/.test(rv.reason), rv.reason || rv.changes.length);
+    // cascade: a pushed via pushes the next via
+    const b6 = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["E", "3", 5, 26], ["F", "3", 40, 26], ["C", "1", 12, 36]]);
+    b6.vias.push({ id: 5, x: 22, y: 20, d: 0.8, drill: 0.4 }, { id: 6, x: 22, y: 21.2, d: 0.8, drill: 0.4 });
+    b6.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [22, 20]] }, { id: 2, layer: "B", w: 0.3, pts: [[22, 20], [40, 20]] }, { id: 3, layer: "F", w: 0.3, pts: [[5, 26], [14, 26], [22, 21.2]] }, { id: 4, layer: "B", w: 0.3, pts: [[22, 21.2], [30, 26], [40, 26]] });
+    const r6 = Pcb.shove(b6, "F", [[10, 19.5], [32, 19.5]], 0.3, "1");
+    check("a pushed via pushes its neighbouring via in turn (or the move is refused for a stated reason)", r6.ok ? r6.vias.length === 2 : /fixed|violate|cross|crowded|cannot/.test(r6.reason), r6.reason || r6.vias.length);
+    if (r6.ok) { Pcb.applyShove(b6, r6); b6.tracks.push({ id: 9, layer: "F", w: 0.3, pts: [[10, 19.5], [32, 19.5]] }); const i6 = clean(b6).filter(i => i.type !== "unrouted"); check("and that cascade ends clean", i6.length === 0, JSON.stringify(i6.slice(0, 2))); }
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

@@ -1106,7 +1106,22 @@ window.analysisTests = async function () {
             click(10, 28); click(10, 20.25, { shiftKey: true }); click(30, 20.25, { shiftKey: true });
             pcbView.key({ key: "Enter", target: sc, preventDefault() {}, stopPropagation() {} });
             ok("with Shove off nothing is pushed and the rule check reports the violation", b.tracks.find(t => t.id === 31).pts.length === 2 && Pcb.drc(b, { zones: false }).some(i => i.type === "clearance" || i.type === "short"));
+            // vias: dropping one with V pushes copper aside, and a pushed via drags its tracks
+            pcbView.act("unroute");
+            b.footprints = {};
+            b.parts.push(...[["E", "3", 5, 22], ["F", "3", 40, 22]].map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; }));
+            b.vias.push({ id: 41, x: 22, y: 22, d: 0.8, drill: 0.4 });
+            b.tracks.push({ id: 42, layer: "F", w: 0.3, pts: [[5, 22], [22, 22]] }, { id: 43, layer: "B", w: 0.3, pts: [[22, 22], [40, 22]] });
             pcbView.root.querySelector("#pcbShove").checked = true;
+            pcbView.setTool("route");
+            click(10, 28); click(10, 22.5, { shiftKey: true }); click(30, 22.5, { shiftKey: true });
+            const vv = b.vias.find(q => q.id === 41), f42 = b.tracks.find(t => t.id === 42), b43 = b.tracks.find(t => t.id === 43);
+            ok("a track laid past a via pushes the via and the tracks that end on it", Math.abs(vv.y - 22.5) >= 0.77 - 0.01 && f42.pts[f42.pts.length - 1][0] === vv.x && f42.pts[f42.pts.length - 1][1] === vv.y && b43.pts[0][0] === vv.x && b43.pts[0][1] === vv.y, JSON.stringify([vv, f42.pts, b43.pts]));
+            pcbView.key({ key: "v", target: sc, preventDefault() {}, stopPropagation() {} });
+            ok("V drops a via at the end of the draft and carries on on the other layer", b.vias.length === 2 && pcbView.draft && pcbView.draft.layer === "B" && pcbView.draft.net === "1", pcbView.draft);
+            pcbView.key({ key: "Escape", target: sc, preventDefault() {}, stopPropagation() {} });
+            const drcV = Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
+            ok("the board with the pushed via has no clearance violation", drcV.length === 0, JSON.stringify(drcV.slice(0, 2)));
             pcbView.setTool("select");
             editor.pcb = null;
         }
