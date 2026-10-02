@@ -45,7 +45,7 @@ function create(args) {
     const warnings = [];
     let text = args.kicad || args.netlist;
     if (!text) throw new Error("give netlist (a SPICE deck) or kicad (the text of a .kicad_sch or KiCad .net)");
-    if (args.kicad || KicadImporter.isKicad(text)) { const k = KicadImporter.toSpice(text); text = k.deck; warnings.push(...k.warnings); }
+    if (args.kicad || KicadImporter.isKicad(text)) { const k = KicadImporter.toSpice(text, args.kicad_sheets || {}); text = k.deck; warnings.push(...k.warnings); }
     const { elements, title } = boardElements(text, warnings);
     if (!elements.length) throw new Error("the deck has no parts to put on a board");
     if (elements.length > 400) throw new Error("at most 400 parts");
@@ -213,7 +213,7 @@ const TOOLS = [
     {
         name: "pcb_create",
         description: "Start a PCB from a circuit: a SPICE deck (netlist) or a KiCad schematic / netlist text (kicad). Every part gets a footprint (R/L/C axial or radial, TO-92, TO-220, DIP, headers; choose SMD sizes with packages), the parts are placed in rows grouped by shared nets, and the nets are known from the circuit. Returns a board_id for the other pcb_* tools plus the parts with their pads' nets.",
-        inputSchema: { type: "object", properties: { netlist: { type: "string", description: "A SPICE deck. Pin order follows the schematic: transistors E/B/C as in the package, MOSFETs G/D/S." }, kicad: { type: "string", description: "Text of a .kicad_sch or KiCad .net instead of a deck." }, width: { type: "number", description: "Board width in mm (default: fitted to the parts)." }, height: { type: "number" }, packages: { type: "object", description: 'Footprint per reference, e.g. {"R1": "0805", "Q1": "sot23", "U1": "soic"}. R/L/C: axial|radial|0603|0805|1206; D: axial|sod123; Q/J: to92|sot23; M: to220|sot23; DIGITAL: dip|soic.' }, track_width: { type: "number" }, clearance: { type: "number" }, auto_place: { type: "boolean", description: "Default true." } } },
+        inputSchema: { type: "object", properties: { netlist: { type: "string", description: "A SPICE deck. Pin order follows the schematic: transistors E/B/C as in the package, MOSFETs G/D/S." }, kicad: { type: "string", description: "Text of a .kicad_sch or KiCad .net instead of a deck." }, kicad_sheets: { type: "object", description: "The other sheets of a hierarchical KiCad design as { \"sub.kicad_sch\": text } (matched by the sheet file names in the main sheet)." }, width: { type: "number", description: "Board width in mm (default: fitted to the parts)." }, height: { type: "number" }, packages: { type: "object", description: 'Footprint per reference, e.g. {"R1": "0805", "Q1": "sot23", "U1": "soic"}. R/L/C: axial|radial|0603|0805|1206; D: axial|sod123; Q/J: to92|sot23; M: to220|sot23; DIGITAL: dip|soic.' }, track_width: { type: "number" }, clearance: { type: "number" }, auto_place: { type: "boolean", description: "Default true." } } },
         run: create
     },
     {

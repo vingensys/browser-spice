@@ -26,5 +26,19 @@ for (const [f, kind] of Object.entries(files)) {
     if (kind === "lib") row(r.warnings.length > 0, `${name}: parts with unavailable library models are reported`, "");
 }
 if (!fetched) console.log("(no files fetched: nothing checked)");
+// a hierarchical design: the main sheet and its two sub-sheets, imported together
+try {
+    const names = ["mainsheet", "subsheet1", "subsheet2"], files = {};
+    for (const n of names) files[n + ".kicad_sch"] = await (await fetch(base + "subsheets/" + n + ".kicad_sch")).text();
+    const rootName = E.KicadImporter.pickRoot(files);
+    row(rootName === "mainsheet.kicad_sch", `subsheets: the top of the hierarchy is found (${rootName})`);
+    const r = E.KicadImporter.toSpice(files[rootName], files);
+    const d = E.SpiceParser.parse(r.deck), { circuit } = E.SpiceParser.build(d);
+    let ok = true, err = "";
+    try { new E.SimEngine(circuit).operatingPoint(); } catch (e) { ok = false; err = e.message; }
+    row(ok && r.warnings.length === 0 && (r.deck.match(/^[RC]\d/gm) || []).length >= 12, `subsheets: all three sheets are flattened (${(r.deck.match(/^[RCV]\d/gm) || []).length} parts, ${r.warnings.length} notes) and the circuit solves`, err + r.warnings.join("; "));
+    const alone = E.KicadImporter.toSpice(files[rootName]);
+    row(alone.warnings.length === 2 && /was not provided/.test(alone.warnings[0]), "subsheets: the main sheet alone says which files are missing", alone.warnings.join("; "));
+} catch (e) { console.log("SKIP  subsheets (no network)"); }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -52,82 +52,99 @@ class KicadImporter {
     static num(x) { return Number(typeof x === "string" ? x : KicadImporter.str(x)); }
 
     // ---------------------------------------------------------------- schematic -> components with pin nets
-    static fromSchematic(root, warnings) {
+    // files: { "sub.kicad_sch": text, ... } the other sheets of a hierarchical design (matched by the sheet's file name)
+    static fromSchematic(root, warnings, files = {}) {
         const K = KicadImporter, { kids, kid, str } = K;
         if (K.head(root) !== "kicad_sch") throw new Error("This is not a KiCad schematic.");
-        const libs = new Map();
-        for (const s of kids(kid(root, "lib_symbols") || [], "symbol")) {
-            const id = str(s[1]);
-            const pins = [];
-            for (const sub of kids(s, "symbol")) for (const p of kids(sub, "pin")) pins.push(K.libPin(p));
-            for (const p of kids(s, "pin")) pins.push(K.libPin(p));
-            libs.set(id, { pins, power: !!kid(s, "power") });
-        }
-
-        // union-find over points and names
+        // union-find over points and names, shared by every sheet instance (points are prefixed with the instance path)
         const parent = new Map();
         const find = (a) => { if (!parent.has(a)) parent.set(a, a); while (parent.get(a) !== a) { parent.set(a, parent.get(parent.get(a))); a = parent.get(a); } return a; };
         const union = (a, b) => { a = find(a); b = find(b); if (a !== b) parent.set(a, b); };
-        const key = (x, y) => `${Math.round(x * 100)},${Math.round(y * 100)}`;
+        const key = (prefix, x, y) => `${prefix}${Math.round(x * 100)},${Math.round(y * 100)}`;
         const xy = (l) => { const at = kid(l, "at"); return at ? [K.num(at[1]), K.num(at[2]), K.num(at[3] || 0)] : [0, 0, 0]; };
-
-        const segs = [];
-        for (const w of kids(root, "wire")) {
-            const pts = kids(kid(w, "pts") || [], "xy").map(p => [K.num(p[1]), K.num(p[2])]);
-            for (let i = 0; i + 1 < pts.length; i++) { segs.push([pts[i], pts[i + 1]]); union(key(...pts[i]), key(...pts[i + 1])); }
-        }
-        const onSeg = (x, y) => segs.find(([a, b]) => {
-            const cx = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
-            if (Math.abs(cx) > 1e-3 * Math.hypot(b[0] - a[0], b[1] - a[1])) return false;
-            return x >= Math.min(a[0], b[0]) - 1e-3 && x <= Math.max(a[0], b[0]) + 1e-3 && y >= Math.min(a[1], b[1]) - 1e-3 && y <= Math.max(a[1], b[1]) + 1e-3;
-        });
-        // a point that meets a wire anywhere along it joins that wire (pins, labels and junctions)
-        const touch = (x, y) => { const k = key(x, y), s = onSeg(x, y); if (s) union(k, key(...s[0])); return k; };
-
-        for (const j of kids(root, "junction")) { const [x, y] = xy(j); touch(x, y); }
-
-        const names = new Map();   // point key -> net name
-        const nameAt = (k, name) => { union(k, `name:${name}`); names.set(k, name); };
-        for (const l of kids(root, "label")) { const [x, y] = xy(l); nameAt(touch(x, y), str(l[1])); }
-        for (const l of kids(root, "global_label")) { const [x, y] = xy(l); nameAt(touch(x, y), str(l[1])); }
-        for (const l of kids(root, "hierarchical_label")) { const [x, y] = xy(l); nameAt(touch(x, y), str(l[1])); }
-        if (kids(root, "sheet").length) warnings.push("hierarchical sheets are not followed: only this sheet was imported");
-
+        const names = new Map();   // point key -> net name shown
+        const nameAt = (k, shown, scope) => { union(k, `name:${scope}`); names.set(k, shown); };
         const comps = [];
-        for (const sym of kids(root, "symbol")) {
-            const libId = str(kid(sym, "lib_id")[1]), lib = libs.get(libId);
-            const props = {};
-            for (const p of kids(sym, "property")) props[str(p[1])] = str(p[2]);
-            const ref = props.Reference || "?";
-            const [sx, sy, rot] = xy(sym);
-            const mir = kid(sym, "mirror") ? str(kid(sym, "mirror")[1]) || kid(sym, "mirror")[1] : "";
-            const unit = Number(kid(sym, "unit") ? kid(sym, "unit")[1] : 1);
-            if (!lib) { warnings.push(`${ref}: symbol ${libId} has no definition in the file, skipped`); continue; }
-            const th = (rot * Math.PI) / 180, c = Math.round(Math.cos(th) * 1e6) / 1e6, s = Math.round(Math.sin(th) * 1e6) / 1e6;
-            const pinNets = [];
-            for (const p of lib.pins) {
-                if (p.unit && p.unit !== 0 && p.unit !== unit) continue;
-                let lx = p.x, ly = p.y;
-                if (mir === "x") ly = -ly;
-                if (mir === "y") lx = -lx;
-                const a = lx, b = -ly;
-                const px = sx + a * c + b * s, py = sy - a * s + b * c;
-                pinNets.push({ number: p.number, name: p.name, type: p.type, key: touch(px, py) });
+        const parsed = new Map();   // file name -> parsed tree
+        const baseName = (f) => String(f).replace(/^.*[\\/]/, "");
+        const lookup = (f) => { const b = baseName(f), k = Object.keys(files).find(n => baseName(n) === b); return k === undefined ? null : files[k]; };
+
+        const build = (root, prefix, depth, trail) => {
+            const libs = new Map();
+            for (const sy of kids(kid(root, "lib_symbols") || [], "symbol")) {
+                const id = str(sy[1]), pins = [];
+                for (const sub of kids(sy, "symbol")) for (const p of kids(sub, "pin")) pins.push(K.libPin(p));
+                for (const p of kids(sy, "pin")) pins.push(K.libPin(p));
+                libs.set(id, { pins, power: !!kid(sy, "power") });
             }
-            // a power symbol names the net its pin sits on
-            if (lib.power || /^#PWR|^#FLG/.test(ref)) {
-                if (/^#FLG/.test(ref)) continue;
-                const net = props.Value || libId.replace(/^.*:/, "");
-                for (const p of pinNets) nameAt(p.key, net);
-                continue;
+            const segs = [];
+            for (const w of kids(root, "wire")) {
+                const pts = kids(kid(w, "pts") || [], "xy").map(p => [K.num(p[1]), K.num(p[2])]);
+                for (let i = 0; i + 1 < pts.length; i++) { segs.push([pts[i], pts[i + 1]]); union(key(prefix, ...pts[i]), key(prefix, ...pts[i + 1])); }
             }
-            comps.push({ ref, value: props.Value || "", libId, props, pins: pinNets });
-        }
-        for (const nc of kids(root, "no_connect")) { /* open pins stay on their own net */ }
+            const onSeg = (x, y) => segs.find(([a, b]) => {
+                const cx = (b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0]);
+                if (Math.abs(cx) > 1e-3 * Math.hypot(b[0] - a[0], b[1] - a[1])) return false;
+                return x >= Math.min(a[0], b[0]) - 1e-3 && x <= Math.max(a[0], b[0]) + 1e-3 && y >= Math.min(a[1], b[1]) - 1e-3 && y <= Math.max(a[1], b[1]) + 1e-3;
+            });
+            // a point that meets a wire anywhere along it joins that wire (pins, labels and junctions)
+            const touch = (x, y) => { const k = key(prefix, x, y), sg = onSeg(x, y); if (sg) union(k, key(prefix, ...sg[0])); return k; };
+            for (const j of kids(root, "junction")) { const [x, y] = xy(j); touch(x, y); }
+            // local labels are scoped to the sheet instance; global labels and power symbols reach every sheet
+            for (const l of kids(root, "label")) { const [x, y] = xy(l); nameAt(touch(x, y), prefix + str(l[1]), `L:${prefix}${str(l[1])}`); }
+            for (const l of kids(root, "hierarchical_label")) { const [x, y] = xy(l); nameAt(touch(x, y), prefix + str(l[1]), `L:${prefix}${str(l[1])}`); }
+            for (const l of kids(root, "global_label")) { const [x, y] = xy(l); nameAt(touch(x, y), str(l[1]), `G:${str(l[1])}`); }
+
+            // sub-sheets: build each instance under its own prefix and join its hierarchical labels to the sheet's pins
+            for (const sh of kids(root, "sheet")) {
+                const props = {};
+                for (const p of kids(sh, "property")) props[str(p[1])] = str(p[2]);
+                const file = props.Sheetfile || props["Sheet file"], name = props.Sheetname || props["Sheet name"] || baseName(file || "sheet");
+                const pins = kids(sh, "pin").map(p => ({ name: str(p[1]), at: xy(p) }));
+                const text = file ? lookup(file) : null;
+                if (!text) { warnings.push(`sheet "${name}": the file ${file || "(none)"} was not provided, so that sheet is left out (select all the sheets' files together to import the whole design)`); continue; }
+                if (depth >= 12 || trail.includes(baseName(file))) { warnings.push(`sheet "${name}": the hierarchy loops or is too deep; skipped`); continue; }
+                if (!parsed.has(baseName(file))) parsed.set(baseName(file), K.parseSexp(text));
+                const childPrefix = `${prefix}${name}/`;
+                build(parsed.get(baseName(file)), childPrefix, depth + 1, [...trail, baseName(file)]);
+                for (const pn of pins) { const k = touch(pn.at[0], pn.at[1]); union(k, `name:L:${childPrefix}${pn.name}`); }
+            }
+
+            for (const sym of kids(root, "symbol")) {
+                const libId = str(kid(sym, "lib_id")[1]), lib = libs.get(libId);
+                const props = {};
+                for (const p of kids(sym, "property")) props[str(p[1])] = str(p[2]);
+                const ref = props.Reference || "?";
+                const [sx, sy, rot] = xy(sym);
+                const mir = kid(sym, "mirror") ? str(kid(sym, "mirror")[1]) || kid(sym, "mirror")[1] : "";
+                const unit = Number(kid(sym, "unit") ? kid(sym, "unit")[1] : 1);
+                if (!lib) { warnings.push(`${ref}: symbol ${libId} has no definition in the file, skipped`); continue; }
+                const th = (rot * Math.PI) / 180, c = Math.round(Math.cos(th) * 1e6) / 1e6, sn = Math.round(Math.sin(th) * 1e6) / 1e6;
+                const pinNets = [];
+                for (const p of lib.pins) {
+                    if (p.unit && p.unit !== 0 && p.unit !== unit) continue;
+                    let lx = p.x, ly = p.y;
+                    if (mir === "x") ly = -ly;
+                    if (mir === "y") lx = -lx;
+                    const a = lx, b = -ly;
+                    const px = sx + a * c + b * sn, py = sy - a * sn + b * c;
+                    pinNets.push({ number: p.number, name: p.name, type: p.type, key: touch(px, py) });
+                }
+                // a power symbol names the net its pin sits on (power nets are global)
+                if (lib.power || /^#PWR|^#FLG/.test(ref)) {
+                    if (/^#FLG/.test(ref)) continue;
+                    const net = props.Value || libId.replace(/^.*:/, "");
+                    for (const p of pinNets) nameAt(p.key, net, `G:${net}`);
+                    continue;
+                }
+                comps.push({ ref: prefix ? `${ref}` : ref, sheet: prefix, value: props.Value || "", libId, props, pins: pinNets });
+            }
+        };
+        build(root, "", 0, []);
 
         // net numbers / names
-        const nameOf = new Map();    // root -> name
-        for (const [k, name] of names) nameOf.set(find(k), name);
+        const nameOf = new Map();    // root -> name (a global name beats a local label)
+        for (const [k, name] of names) { const r = find(k); if (!nameOf.has(r) || !/\//.test(name)) nameOf.set(r, name); }
         let auto = 0;
         const netOf = (k) => {
             const r = find(k);
@@ -191,11 +208,11 @@ class KicadImporter {
     }
 
     // ---------------------------------------------------------------- components -> SPICE deck
-    static toSpice(text) {
+    static toSpice(text, files = {}) {
         const K = KicadImporter;
         const warnings = [];
         const root = K.parseSexp(text);
-        const comps = K.head(root) === "kicad_sch" ? K.fromSchematic(root, warnings)
+        const comps = K.head(root) === "kicad_sch" ? K.fromSchematic(root, warnings, files)
             : (K.head(root) === "export" ? K.fromNetlist(root, warnings) : null);
         if (!comps) throw new Error("This is neither a KiCad schematic (.kicad_sch) nor a KiCad netlist (.net).");
         const node = (net) => (/^(gnd|0)$/i.test(String(net).replace(/^.*\//, "")) ? "0" : (String(net).replace(/^\//, "").replace(/\+/g, "p").replace(/-/g, "m").replace(/[^A-Za-z0-9_]/g, "_") || "N0"));
@@ -326,8 +343,8 @@ class KicadImporter {
         return { deck: `* imported from KiCad\n${lines.join("\n")}\n${extraLines.join("\n")}\n.end\n`, warnings };
     }
 
-    static import(editor, text) {
-        const { deck, warnings } = KicadImporter.toSpice(text);
+    static import(editor, text, files = {}) {
+        const { deck, warnings } = KicadImporter.toSpice(text, files);
         const r = SchematicImporter.import(editor, deck);
         r.warnings = [...warnings, ...r.warnings];
         r.title = "KiCad";
@@ -335,6 +352,18 @@ class KicadImporter {
     }
 
     static GENERIC_OPAMP = [".subckt KICAD_GENERIC_OPAMP inp inn vcc vee out", "Rin inp inn 2meg", "Gm 0 a inp inn 1m", "Rp a 0 100meg", "Cp a 0 1.59155n", "Bout b 0 V=min(max(V(a),V(vee)+1.5),V(vcc)-1.5)", "Ro b out 75", ".ends KICAD_GENERIC_OPAMP"];
+
+    // of several selected sheet files, the one no other sheet refers to (the top of the hierarchy)
+    static pickRoot(files) {
+        const K = KicadImporter, names = Object.keys(files).filter(n => /\.kicad_sch$/i.test(n));
+        const base = (f) => String(f).replace(/^.*[\\/]/, "");
+        const referenced = new Set();
+        for (const n of names) {
+            try { for (const sh of K.kids(K.parseSexp(files[n]), "sheet")) for (const p of K.kids(sh, "property")) if (/^Sheet ?file$/i.test(K.str(p[1]))) referenced.add(base(K.str(p[2]))); } catch (e) { /* a broken file is reported when it is imported */ }
+        }
+        const tops = names.filter(n => !referenced.has(base(n)));
+        return (tops.length ? tops : names).sort((a, b) => files[b].length - files[a].length)[0];
+    }
 
     static isKicad(text) { return /^\s*\((kicad_sch|export)\b/.test(text); }
 }

@@ -470,13 +470,17 @@
     });
 
     $("spiceInput").addEventListener("change", (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (evt) => {
+        const list = [...e.target.files];
+        if (!list.length) return;
+        // several files at once: the sheets of one KiCad design (select them all together)
+        Promise.all(list.map(f => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res([f.name, String(r.result)]); r.onerror = () => rej(new Error("could not read " + f.name)); r.readAsText(f); }))).then((pairs) => {
+            const files = Object.fromEntries(pairs);
             try {
                 live.stop();
-                const r = KicadImporter.isKicad(evt.target.result) ? KicadImporter.import(editor, evt.target.result) : SchematicImporter.import(editor, evt.target.result);
+                let text, extra = {};
+                if (pairs.length > 1 && pairs.some(([n, t]) => KicadImporter.isKicad(t))) { const rootName = KicadImporter.pickRoot(files); text = files[rootName]; extra = files; }
+                else text = pairs[0][1];
+                const r = KicadImporter.isKicad(text) ? KicadImporter.import(editor, text, extra) : SchematicImporter.import(editor, text);
                 if (r.models || r.subckts) {
                     pane.render();
                     runner.toast(`Added ${[r.models ? `${r.models} model(s)` : "", r.subckts ? `${r.subckts} subcircuit(s)` : ""].filter(Boolean).join(" and ")}. Press P to pick them.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");
@@ -491,8 +495,7 @@
                 runner.toast("Could not import that file: " + err.message, "error");
             }
             e.target.value = "";
-        };
-        reader.readAsText(file);
+        }).catch((err) => { runner.toast(err.message, "error"); e.target.value = ""; });
     });
 
     // -------------------------------------------------------------------- device pane

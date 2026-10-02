@@ -72,7 +72,7 @@ check("a truncated file is refused", (() => { try { KicadImporter.toSpice("(kica
       ${sym("R1", "S:R", { Value: "1k" }).replace("(at 0 0 0)", "(at 30 50 0)")}
       ${sym("#PWR1", "power:GND", { Value: "GND" }).replace("(at 0 0 0)", "(at 30 60 0)")}
       ${sym("#PWR2", "power:GND", { Value: "GND" }).replace("(at 0 0 0)", "(at 10 70 0)")}
-      (wire (pts (xy 10 54.92) (xy 10 46.19) (xy 30 46.19))) (wire (pts (xy 30 53.81) (xy 30 60))) (wire (pts (xy 10 65.08) (xy 10 70))))`;
+      (wire (pts (xy 10 54.92) (xy 10 46.19) (xy 30 46.19))) (wire (pts (xy 30 53.81) (xy 30 60.19))) (wire (pts (xy 10 65.08) (xy 10 70))))`;
     const v = (type, params, value = "V") => file(sym("V1", "S:V", { Value: value, "Sim.Device": "V", "Sim.Type": type, "Sim.Params": params, "Sim.Pins": "1=+ 2=-" }).replace("(at 0 0 0)", "(at 10 60 0)"));
     const deckOf = (t) => KicadImporter.toSpice(t).deck;
     check("a PULSE source from Sim.Type / Sim.Params", /^V1 \S+ 0 PULSE\(0 3 100n 1n 1n 20n 100n\)$/m.test(deckOf(v("PULSE", "y1=0 y2=3 td=100n tr=1n tf=1n tw=20n per=100n"))), deckOf(v("PULSE", "y1=0 y2=3 td=100n tr=1n tf=1n tw=20n per=100n")));
@@ -83,5 +83,49 @@ check("a truncated file is refused", (() => { try { KicadImporter.toSpice("(kica
     check("an unsupported source type is reported by name", t.warnings.some(w => /V1.*RANDUNIFORM/.test(w)), t.warnings);
     const rawV = KicadImporter.toSpice(file(sym("V1", "S:V", { Value: "VPWL", "Sim.Device": "SPICE", "Sim.Params": 'type="V" model="pwl(0 -7 50n -7)" lib=""', "Sim.Pins": "1=1 2=2" }).replace("(at 0 0 0)", "(at 10 60 0)")));
     check("a raw SPICE source model (dev SPICE: pwl / sffm) is passed through", /^V1 \S+ 0 pwl\(0 -7 50n -7\)$/m.test(rawV.deck), rawV.deck);
+}
+// ---- hierarchical sheets
+{
+    const lib = `(lib_symbols
+      (symbol "S:R" (symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1) (name "~" (effects)) (number "1" (effects))) (pin passive line (at 0 -3.81 90) (length 1) (name "~" (effects)) (number "2" (effects)))))
+      (symbol "S:V" (symbol "V_1_1" (pin passive line (at 0 5.08 270) (length 1) (name "+" (effects)) (number "1" (effects))) (pin passive line (at 0 -5.08 90) (length 1) (name "-" (effects)) (number "2" (effects)))))
+      (symbol "power:GND" (power) (symbol "GND_1_1" (pin power_in line (at 0 0 270) (length 0) (name "GND" (effects)) (number "1" (effects))))))`;
+    const part = (id, ref, val, x, y, extra = "") => `(symbol (lib_id "${id}") (at ${x} ${y} 0) (unit 1) (property "Reference" "${ref}" (at 0 0 0)) (property "Value" "${val}" (at 0 0 0)) ${extra})`;
+    // child: a hierarchical label "in" on a wire to R2 (pin 1), R2 pin 2 to a local label "mid" and on to R3 to GND
+    const child = `(kicad_sch (version 20230121) ${lib}
+      (hierarchical_label "in" (at 10 40 0))
+      (wire (pts (xy 10 40) (xy 30 40) (xy 30 46.19)))
+      ${part("S:R", "R2", "2k", 30, 50)}
+      (wire (pts (xy 30 53.81) (xy 30 60.19)))
+      (label "mid" (at 30 56 0))
+      ${part("S:R", "R3", "3k", 30, 64)}
+      (wire (pts (xy 30 67.81) (xy 30 75)))
+      ${part("power:GND", "#PWR3", "GND", 30, 75)})`;
+    const main = `(kicad_sch (version 20230121) ${lib}
+      ${part("S:V", "V1", "5", 10, 60, '(property "Sim.Device" "V" (at 0 0 0)) (property "Sim.Type" "DC" (at 0 0 0)) (property "Sim.Params" "dc=5" (at 0 0 0)) (property "Sim.Pins" "1=+ 2=-" (at 0 0 0))')}
+      ${part("power:GND", "#PWR1", "GND", 10, 70)} (wire (pts (xy 10 65.08) (xy 10 70)))
+      ${part("S:R", "R1", "1k", 40, 40)}
+      (wire (pts (xy 10 54.92) (xy 10 30) (xy 40 30) (xy 40 36.19)))
+      (wire (pts (xy 40 43.81) (xy 60 43.81)))
+      (sheet (at 60 40) (size 20 10)
+        (property "Sheetname" "load" (at 0 0 0)) (property "Sheetfile" "load.kicad_sch" (at 0 0 0))
+        (pin "in" input (at 60 43.81 180))))`;
+    const r = KicadImporter.toSpice(main, { "load.kicad_sch": child });
+    check("a sub-sheet is followed: its parts come in, joined to the main sheet through the sheet pin", /^R1 \S+ (\S+) 1k$/m.test(r.deck) && /^R2 /m.test(r.deck) && /^R3 /m.test(r.deck), r.deck);
+    const nodeOf = (name, k) => r.deck.match(new RegExp(`^${name} (\\S+) (\\S+)`, "m"))[k];
+    check("R1's far end is R2's near end (through the pin 'in' and the hierarchical label)", nodeOf("R1", 2) === nodeOf("R2", 1), r.deck);
+    check("the sub-sheet's own net ('mid') joins R2 to R3 and its ground is the global 0", nodeOf("R2", 2) === nodeOf("R3", 1) && nodeOf("R3", 2) === "0", r.deck);
+    check("no warning when the sheet file is provided", r.warnings.length === 0, r.warnings);
+    const missing = KicadImporter.toSpice(main);
+    check("without the file the sheet is left out and the note says what to do", missing.warnings.some(w => /load\.kicad_sch was not provided/.test(w)) && !/^R2 /m.test(missing.deck), missing.warnings);
+    check("pickRoot chooses the sheet nobody refers to", KicadImporter.pickRoot({ "load.kicad_sch": child, "top.kicad_sch": main }) === "top.kicad_sch");
+    // the same sheet used twice keeps the two copies' local nets apart
+    const main2 = main.replace(/\(sheet \(at 60 40\)[\s\S]*$/, `(sheet (at 60 40) (size 20 10) (property "Sheetname" "a" (at 0 0 0)) (property "Sheetfile" "load.kicad_sch" (at 0 0 0)) (pin "in" input (at 60 43.81 180)))
+      (wire (pts (xy 60 43.81) (xy 60 43.81)))
+      (sheet (at 60 70) (size 20 10) (property "Sheetname" "b" (at 0 0 0)) (property "Sheetfile" "load.kicad_sch" (at 0 0 0)) (pin "in" input (at 60 73.81 180)))
+      (wire (pts (xy 40 43.81) (xy 45 43.81) (xy 45 73.81) (xy 60 73.81))))`);
+    const r2 = KicadImporter.toSpice(main2, { "load.kicad_sch": child });
+    const mids = [...r2.deck.matchAll(/^R[23] (\S+) (\S+)/gm)].length;
+    check("one sheet file used twice gives two separate copies (six parts, two 'mid' nets)", (r2.deck.match(/^R\d+_? /gm) || []).length >= 5 && new Set([...r2.deck.matchAll(/^R2\S* (\S+) (\S+)/gm)].map(m => m[2])).size === 2, r2.deck);
 }
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);
