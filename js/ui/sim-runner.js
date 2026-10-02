@@ -199,7 +199,8 @@ class SimRunner {
                 outs.push({ label: `${prb.label} (Node ${node})`, color: prb.color, rows });
             }
             this.plotter.plotNoise(outs, input ? input.name : null);
-            this.el("plotTitle").textContent = `Noise Analysis${input ? `, input referred to ${input.name}` : ""}`;
+            const hidden = this.plotter.data && this.plotter.data.noise ? this.plotter.data.noise.hidden : 0;
+            this.el("plotTitle").textContent = `Noise Analysis${input ? `, input referred to ${input.name}` : ""}${hidden ? ` (${hidden} noise-free node${hidden > 1 ? "s" : ""} not drawn)` : ""}`;
             this.last = { kind: "noise", info, outs };
             this.toast(`Noise analysis: ${outs[0].rows.length} frequencies, ${Object.keys(outs[0].rows[0].parts).length} noise sources, ${(performance.now() - t0).toFixed(0)} ms.`, "info");
         });

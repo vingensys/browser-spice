@@ -256,9 +256,9 @@ window.analysisTests = async function () {
     ok("Graph > Noise Analysis shows the NOISE tab", graph.kind === "noise" && !document.getElementById("noiseView").classList.contains("hidden"));
     await runner.runNoise(); await wait(100);
     const nd = plotter.data;
-    ok("the noise run plots one trace per voltage probe in dBV/√Hz on a log frequency axis", nd && nd.mode === "noise" && nd.logX && nd.series.length === editor.probes.filter(p => p.type === "V").length && /dBV/.test(nd.yLabel) && plotter.view(nd).log, nd && nd.series.length);
+    ok("the noise run plots one trace per voltage probe in dBV/√Hz on a log frequency axis", nd && nd.mode === "noise" && nd.logX && nd.series.length === editor.probes.filter(p => p.type === "V").length - 1 && nd.noise.hidden === 1 && /dBV/.test(nd.yLabel) && plotter.view(nd).log, nd && nd.series.length);
     const ninfo = NetlistExtractor.extract(editor);
-    const lastV = editor.probes.filter(p => p.type === "V").length - 1, nprobe = editor.probes.filter(p => p.type === "V")[lastV], nnode = ninfo.getPointNodeName(nprobe.x, nprobe.y);
+    const lastV = nd.series.length - 1, lastVprobe = editor.probes.filter(p => p.type === "V").length - 1, nprobe = editor.probes.filter(p => p.type === "V")[lastVprobe], nnode = ninfo.getPointNodeName(nprobe.x, nprobe.y);
     const nref = new SimEngine(ninfo.circuit).noise({ out: [nnode], input: ninfo.elements.find(e => e.kind === "V" && (e.params.acMag || 0) > 0).name, fStart: 10, fStop: 1e6, pointsPerDecade: 10 });
     ok("the plotted level is the engine's density (20 log10 of V/√Hz)", nd.xValues.length === nref.length && near(nd.series[lastV].values[5], 20 * Math.log10(nref[5].onoise), 1e-9), [nd.series[lastV].values[5], 20 * Math.log10(nref[5].onoise)]);
     ok("the tab remembers it (switching away and back)", (graph.show("ac"), graph.show("noise"), plotter.data === nd));

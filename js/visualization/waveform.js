@@ -256,11 +256,14 @@ class WaveformPlotter {
         this.draw();
     }
 
-    noiseData(outs, inputName, view = "out") {
+    noiseData(allOuts, inputName, view = "out") {
+        // a node held by an ideal source has no noise (-360 dB would flatten the plot): leave it out unless nothing else is left
+        const noisy = allOuts.filter(o => Math.max(...o.rows.map(r => r.onoise)) > 1e-15);
+        const outs = noisy.length ? noisy : allOuts;
         const inRef = view === "in" && outs.every(o => o.rows[0].inoise !== null);
         const db = (v) => 20 * Math.log10(Math.max(v, 1e-18));
         const series = outs.map((o, i) => ({ name: o.label, color: o.color || this.colors[i % this.colors.length], values: o.rows.map(r => db(inRef ? r.inoise : r.onoise)) }));
-        return { mode: "noise", logX: true, xLabel: "Frequency (Hz)", xUnit: "Hz", yLabel: `${inRef ? "Input-referred" : "Output"} noise (dBV/√Hz)`, yUnit: "dBV/√Hz", xValues: outs[0].rows.map(r => r.frequency), series, noise: { outs, view: inRef ? "in" : "out", inputName } };
+        return { mode: "noise", logX: true, xLabel: "Frequency (Hz)", xUnit: "Hz", yLabel: `${inRef ? "Input-referred" : "Output"} noise (dBV/√Hz)`, yUnit: "dBV/√Hz", xValues: outs[0].rows.map(r => r.frequency), series, noise: { outs, view: inRef ? "in" : "out", inputName, hidden: allOuts.length - outs.length } };
     }
 
     // plot data for a Bode plot from complex responses (also used by parametric sweeps, which overlay many)
