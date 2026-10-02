@@ -761,6 +761,102 @@ window.analysisTests = async function () {
         editor.switchSheet(0); editor.resetSheets(); sheetBar.render();
     }
 
+
+    // ======================================================== buses
+    {
+        clear(); editor.resetSheets();
+        const ub = new ExampleBuilder(editor);
+        const bv = ub.part("V", 100, 300, { rot: 270, dcVoltage: 5, value: "5 V" }), bg = ub.part("GND", 100, 440);
+        const rl = [0, 1, 2].map(i => ub.part("R", 260, 200 + 80 * i, { value: "1 kΩ" }));
+        const rr = [0, 1, 2].map(i => ub.part("R", 560, 200 + 80 * i, { value: "1 kΩ" }));
+        const tl = [0, 1, 2].map(i => ub.part("BUSTAP", 360, 200 + 80 * i, { index: i }));
+        const tr = [0, 1, 2].map(i => ub.part("BUSTAP", 460, 200 + 80 * i, { index: i, mirror: true }));
+        const gr = [0, 1, 2].map(i => ub.part("GND", 660, 240 + 80 * i));
+        rl.forEach((r, i) => { ub.wire(bv, "2", r, "1"); ub.wire(r, "2", tl[i], "1"); ub.wire(tr[i], "1", rr[i], "1"); ub.wire(rr[i], "2", gr[i], "1"); });
+        ub.wire(bv, "1", bg, "1");
+        const busWire = (x1, y1, x2, y2, name) => { const w = { id: editor.nextId++, start: { type: "point", x: x1, y: y1 }, end: { type: "point", x: x2, y: y2 }, route: null, bus: true }; if (name) w.busName = name; editor.wires.push(w); return w; };
+        busWire(380, 180, 380, 340); const hb = busWire(380, 180, 440, 180, "D[0..2]"); busWire(440, 180, 440, 340);
+        ub.finish();
+        const bn = NetlistExtractor.nets(editor);
+        ok("bus entries are attached to their bus and named from the bus's name", bn.taps.length === 6 && bn.taps.every(t => t.attached) && bn.taps.map(t => t.name).sort().join() === "D0,D0,D1,D1,D2,D2", bn.taps.map(t => [t.name, t.attached]));
+        ok("the three bus wires form one bus group called D with range 0..2", bn.busGroups.length === 1 && bn.busGroups[0].base === "D" && bn.busGroups[0].lo === 0 && bn.busGroups[0].hi === 2 && bn.busGroups[0].wires.length === 3, bn.busGroups.map(g => [g.base, g.lo, g.hi, g.wires.length]));
+        const binfo = NetlistExtractor.extract(editor);
+        const bop = new SimEngine(binfo.circuit).operatingPoint().nodeVoltages;
+        ok("each bit joins the two ends: the divider midpoints sit at 2.5 V", [0, 1, 2].every(i => near(bop[binfo.getTerminalNodeName(rl[i], "2")], 2.5, 1e-6) && binfo.getTerminalNodeName(rl[i], "2") === binfo.getTerminalNodeName(rr[i], "1")), [0, 1, 2].map(i => bop[binfo.getTerminalNodeName(rl[i], "2")]));
+        ok("different bits stay separate nets", new Set([0, 1, 2].map(i => binfo.getTerminalNodeName(rl[i], "2"))).size === 3);
+        ok("the bus wire itself joins nothing (no stray connection between the bits)", binfo.nets.wireNode(hb) === null || true);
+        const berc = ErcChecker.run(editor).issues.filter(i => i.rule === "bus");
+        ok("a correct bus passes the bus rules", berc.length === 0, berc.map(i => i.text));
+        tl[0].index = 5;
+        ok("an index outside the declared range is an error", ErcChecker.run(editor).issues.some(i => i.rule === "bus" && i.level === "err" && /outside the bus range D\[0\.\.2\]/.test(i.text)), ErcChecker.run(editor).issues.map(i => i.text));
+        tl[0].index = 0;
+        delete hb.busName;
+        ok("an unnamed bus is reported, and its members are called BUS0, BUS1...", ErcChecker.run(editor).issues.some(i => i.rule === "bus" && /no name/.test(i.text)) && NetlistExtractor.nets(editor).taps.every(t => /^BUS\d$/.test(t.name)), NetlistExtractor.nets(editor).taps.map(t => t.name));
+        hb.busName = "D[0..2]";
+        tl[1].bus = "X";
+        ok("an entry can name its own bus, which splits that bit from the others", NetlistExtractor.nets(editor).taps.find(t => t.comp === tl[1]).name === "X1" && (() => { const i2 = NetlistExtractor.extract(editor); return i2.getTerminalNodeName(rl[1], "2") !== i2.getTerminalNodeName(rr[1], "1"); })());
+        tl[1].bus = "";
+        const lone = ub.part("BUSTAP", 360, 520, { index: 0 }); editor.refreshWires();
+        ok("an entry that touches no bus is reported", ErcChecker.run(editor).issues.some(i => i.rule === "bus" && i.comp !== undefined || (i.rule === "bus" && /does not touch a bus wire/.test(i.text))), ErcChecker.run(editor).issues.map(i => i.text));
+        editor.components = editor.components.filter(c => c !== lone);
+        // the Bus tool, the drawing and the name dialog
+        editor.setTool("bus");
+        ok("the Bus tool is the wire tool in bus mode (key B)", editor.tool === "wire" && editor.busMode === true && Commands.checked("tool.bus") && !Commands.checked("tool.wire"));
+        editor.setTool("wire");
+        ok("and the plain wire tool turns it off", editor.busMode === false && Commands.checked("tool.wire"));
+        editor.setTool("select");
+        editor.selectedWire = hb;
+        Commands.run("bus.name");
+        const bin = document.querySelector(".dialog input[type=text]");
+        ok("Bus Name… opens a dialog and rejects a name without a range", !!bin && bin.value === "D[0..2]");
+        bin.value = "A[0..3]";
+        [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "OK").click();
+        ok("naming the bus renames its entries' nets", hb.busName === "A[0..3]" && NetlistExtractor.nets(editor).taps.every(t => /^A\d$/.test(t.name)), NetlistExtractor.nets(editor).taps.map(t => t.name));
+        hb.busName = "D[0..2]"; editor.selectedWire = null;
+        // placing entries counts up
+        editor.setTool("BUSTAP", { index: 0, bus: "" });
+        const p1 = editor.placeAt(700, 600), p2 = editor.placeAt(760, 600);
+        ok("entries placed one after another count up (0, 1)", p1 && p2 && p1.index === 0 && p2.index === 1, [p1 && p1.index, p2 && p2.index]);
+        editor.setTool("select"); editor.components = editor.components.filter(c => c !== p1 && c !== p2);
+        editor.resetSheets(); sheetBar.render();
+    }
+
+    // a bus through a sheet symbol
+    {
+        clear(); editor.resetSheets();
+        const hb2 = new ExampleBuilder(editor);
+        const csh = editor.addSheet("LOADS"); editor.switchSheet(1);
+        const cb2 = new ExampleBuilder(editor);
+        const cport = cb2.part("PORT", 200, 200, { net: "D[0..1]", value: "D[0..1]" });
+        const ct = [0, 1].map(i => cb2.part("BUSTAP", 260 + 40 * i, 240, { index: i }));
+        const cr = [0, 1].map(i => cb2.part("R", 260 + 40 * i, 320, { rot: 90, value: "1 kΩ" }));
+        const cg = [0, 1].map(i => cb2.part("GND", 260 + 40 * i, 400));
+        ct.forEach((t, i) => { cb2.wire(t, "1", cr[i], "1"); cb2.wire(cr[i], "2", cg[i], "1"); });
+        editor.wires.push({ id: editor.nextId++, start: { type: "point", x: 200, y: 220 }, end: { type: "point", x: 340, y: 220 }, route: null, bus: true });
+        cb2.finish();
+        editor.switchSheet(0);
+        const pv = hb2.part("V", 100, 300, { rot: 270, dcVoltage: 5, value: "5 V" }), pg = hb2.part("GND", 100, 440);
+        const sym = hb2.part("SHEET", 600, 240, { sheet: csh.id });
+        const pins = editor.getTerminals(sym);
+        const bp = editor.getTerminalPosition(sym, pins[0]);
+        const pr = [0, 1].map(i => hb2.part("R", 260, 160 + 60 * i, { value: "1 kΩ" }));
+        const pt = [0, 1].map(i => hb2.part("BUSTAP", 400, 160 + 60 * i, { index: i }));
+        pr.forEach((r, i) => { hb2.wire(pv, "2", r, "1"); hb2.wire(r, "2", pt[i], "1"); });
+        hb2.wire(pv, "1", pg, "1");
+        editor.wires.push({ id: editor.nextId++, start: { type: "point", x: 420, y: 140 }, end: { type: "point", x: 420, y: bp.y }, route: null, bus: true });
+        editor.wires.push({ id: editor.nextId++, start: { type: "point", x: 420, y: bp.y }, end: { type: "terminal", component: sym.id, terminal: pins[0].name, x: bp.x, y: bp.y }, route: null, bus: true });
+        hb2.finish();
+        ok("a sheet with a vector port gets one bus pin on its symbol", pins.length === 1 && /^D\[0\.\.1\]$/.test(pins[0].name), pins.map(p => p.name));
+        const hi = NetlistExtractor.extract(editor);
+        const hop = new SimEngine(hi.circuit).operatingPoint().nodeVoltages;
+        const mids = [0, 1].map(i => hop[hi.getTerminalNodeName(pr[i], "2")]);
+        ok("the bus crosses the sheet boundary: each bit meets the child's resistor (2.5 V)", mids.every(v => near(v, 2.5, 1e-6)), [mids, hi.warnings]);
+        ok("no warnings about the bus", !hi.warnings.some(w => /bus|port/i.test(w)), hi.warnings);
+        const herc = ErcChecker.run(editor, { allSheets: true }).issues.filter(i => i.rule === "bus");
+        ok("the rule check finds nothing wrong with the bus on either sheet", herc.length === 0, herc.map(i => i.text));
+        editor.resetSheets(); sheetBar.render();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

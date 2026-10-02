@@ -228,13 +228,13 @@ PartLib.add("PORT", {
     label: (c) => c.net || "PORT",
     draw(r, c) {
         const col = "#ffb86c", ctx = r.ctx, name = String(c.net || "PORT");
-        r.partLine([[0, 20], [0, 0]], col);
+        r.partLine([[0, 20], [0, 0]], BusUtil.parse(c.net) ? "#2f55d4" : col, BusUtil.parse(c.net) ? 5 : 3);
         ctx.strokeStyle = r.col(col); ctx.lineWidth = r.lw(2); ctx.fillStyle = r.col("#171b23");
         ctx.beginPath(); ctx.moveTo(-26, -8); ctx.lineTo(-16, -18); ctx.lineTo(22, -18); ctx.lineTo(22, 2); ctx.lineTo(-16, 2); ctx.closePath(); ctx.fill(); ctx.stroke();
         r.partText(name.length > 7 ? name.slice(0, 6) + "…" : name, 0, -8, { size: 10, bold: true, color: col });
     },
     rows: (p, c) => p.text("Port name", "net", c.net, "IN") +
-        `<div class="prop-note">The connection of this sheet to the sheet that uses it: the sheet symbol gets a pin with this name. On the first sheet (and for the name of a net) it works like a net label.</div>`,
+        `<div class="prop-note">The connection of this sheet to the sheet that uses it: the sheet symbol gets a pin with this name. On the first sheet (and for the name of a net) it works like a net label. A name like <b>D[0..7]</b> is a <b>bus</b> port: attach it to a bus wire; the symbol gets one bus pin and the members D0..D7 cross together.</div>`,
     netlist: () => [],
     catalog: [{ name: "HIERARCHICAL PORT", category: "Terminals", desc: "Port of this sheet: becomes a pin on the sheet symbol that uses it", props: { net: "IN", value: "IN" } }]
 });
@@ -262,7 +262,8 @@ PartLib.add("SHEET", {
         r.partText("sheet", 0, bottom - 10, { size: 8, color: "#9aa4b5" });
         const side = (names, sign) => names.forEach((pn, k) => {
             const y = top + 20 + 20 * k;
-            r.partLine([[sign * 80, y], [sign * 60, y]], col, 2);
+            const bus = !!BusUtil.parse(pn);
+            r.partLine([[sign * 80, y], [sign * 60, y]], bus ? "#2f55d4" : col, bus ? 5 : 2);
             r.partText(pn.length > 8 ? pn.slice(0, 7) + "…" : pn, sign * 54, y, { size: 9, color: "#c8d0dc", align: sign < 0 ? "left" : "right" });
         });
         side(spec.left, -1); side(spec.right, 1);

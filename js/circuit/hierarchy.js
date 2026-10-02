@@ -60,6 +60,17 @@ class Hierarchy {
         for (const pc of child.components) {
             if (pc.type !== "PORT") continue;
             const name = String(pc.net || "PORT").trim().toUpperCase();
+            const vec = BusUtil.parse(name);
+            if (vec) {                       // a bus port: member k of the child's bus joins member k of the parent's bus
+                const cbase = cnets.busBase(pc, "1"), pbase = parentNets.busBase(comp, name);
+                if (!pbase) { warnings.push(`${path}: bus port ${name} is not connected to a bus on the sheet symbol`); continue; }
+                for (let k = vec.lo; k <= vec.hi; k++) {
+                    const cid = cnets.labelNode(`${cbase || vec.base}${k}`), pid = parentNets.labelNode(`${pbase}${k}`);
+                    if (cid === null || pid === null) { if (cid !== null || pid !== null) warnings.push(`${path}: ${name} member ${k} has an entry on only one side of the sheet`); continue; }
+                    portNode.set(cid, mapParent(pid));
+                }
+                continue;
+            }
             const cid = cnets.terminalNode(pc, "1");
             if (cid === null || cid === undefined) continue;
             const pid = parentNets.terminalNode(comp, name);

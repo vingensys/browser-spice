@@ -150,7 +150,20 @@
     C("view.dark", "Dark Colours", { checked: () => Theme.name === "dark", run: () => Theme.set("dark") });
 
     C("tool.select", "Selection Mode", { icon: "select", keys: "Esc", checked: toolIs("select"), run: () => editor.setTool("select") });
-    C("tool.wire", "Wire Tool", { icon: "wire", keys: "W", checked: toolIs("wire"), run: () => editor.setTool("wire") });
+    C("tool.wire", "Wire Tool", { icon: "wire", keys: "W", checked: () => editor.tool === "wire" && !editor.busMode, run: () => editor.setTool("wire") });
+    C("tool.bus", "Bus Tool", { icon: "wire", keys: "B", checked: () => editor.tool === "wire" && !!editor.busMode, run: () => editor.setTool("bus") });
+    const nameBus = (w) => {
+        if (!w || !w.bus) return;
+        const wrap = document.createElement("div");
+        wrap.innerHTML = `<div class="form-grid"><label>Bus name</label><input type="text" value="${PropertiesPanel.esc(w.busName || "")}" placeholder="D[0..7]"></div><div class="prop-note">A name and range such as <b>D[0..7]</b>. Bus entries on this bus are then called D0, D1 … D7.</div>`;
+        Dialog.open({ title: "Bus Name", content: wrap, width: "420px", buttons: [{ label: "OK", primary: true, onClick: () => {
+            const v = wrap.querySelector("input").value.trim();
+            if (v && !BusUtil.parse(v)) { runner.toast("Use a name and range like D[0..7].", "warn"); return false; }
+            editor.saveState(); w.busName = v || undefined; editor.draw(); editor.notify();
+        } }, { label: "Cancel" }] });
+    };
+    editor.onEditBus = nameBus;
+    C("bus.name", "Bus Name…", { enabled: () => !!(editor.selectedWire && editor.selectedWire.bus), run: () => nameBus(editor.selectedWire) });
     C("tool.text", "Place Text", { icon: "text", keys: "A", checked: toolIs("TEXT"), run: () => editor.setTool("TEXT") });
     C("text.here", "Add Text Here", { run() {
         editor.saveState();
@@ -251,7 +264,7 @@
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.sidebar", "-", "view.classic", "view.dark"] },
-        { title: "Tool", items: ["tool.select", "tool.wire", "tool.text", "tool.vprobe", "tool.iprobe", "-",
+        { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
@@ -362,7 +375,7 @@
         part: ["scope.open", ["edit.properties", "Edit Properties"], "part.toggle", "edit.drag", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
             "edit.cut", "edit.copy", "-", "probe.addI"],
         multi: ["edit.cut", "edit.copy", "edit.drag", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
-        wire: ["net.highlightwire", ["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
+        wire: ["net.highlightwire", "bus.name", ["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
         pin: ["net.highlightpin", "probe.addV"],
         probe: ["probe.rename", ["edit.delete", "Delete Probe"]],
         empty: ["edit.paste", "text.here", "-", "edit.undo", "edit.redo", "-", "edit.selectall", "-", "view.zoomin", "view.zoomout", "view.fit", "-", "lib.pick", "tool.wire", ["edit.tidy", "Tidy All Wires"]]

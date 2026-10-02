@@ -62,7 +62,7 @@ class NetlistExtractor {
         const points = []; // for probe lookup: { x, y, key }
 
         for (const wire of editor.wires) {
-            if (!wire.route || wire.route.length < 2) continue;
+            if (wire.bus || !wire.route || wire.route.length < 2) continue;      // a bus wire joins no net by itself
 
             for (let i = 0; i < wire.route.length; i++) {
                 const k = vertexKey(wire, i);
@@ -85,11 +85,11 @@ class NetlistExtractor {
 
         // T-junctions: a wire end touching another wire's run joins that run
         for (const wireA of editor.wires) {
-            if (!wireA.route || wireA.route.length < 2) continue;
+            if (wireA.bus || !wireA.route || wireA.route.length < 2) continue;
             for (const pt of [wireA.route[0], wireA.route[wireA.route.length - 1]]) {
                 const keyA = getKey(pt.x, pt.y);
                 for (const wireB of editor.wires) {
-                    if (wireA === wireB || !wireB.route || wireB.route.length < 2) continue;
+                    if (wireA === wireB || wireB.bus || !wireB.route || wireB.route.length < 2) continue;
                     for (let j = 0; j < wireB.route.length - 1; j++) {
                         const a = wireB.route[j], b = wireB.route[j + 1];
                         if (editor.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) {
@@ -101,13 +101,68 @@ class NetlistExtractor {
             }
         }
 
+        // ---- buses: groups of bus wires, the bus pins and bus entries that touch them, and the name of each bus
+        const bds = new DisjointSet();
+        const busWires = editor.wires.filter(w => w.bus && w.route && w.route.length >= 2).sort((a, b) => a.id - b.id);
+        const bkey = (w, i) => ((i === 0 || i === w.route.length - 1) ? `b${getKey(w.route[i].x, w.route[i].y)}` : `bw${w.id}#${i}`);
+        for (const w of busWires) for (let i = 0; i < w.route.length; i++) { bds.makeSet(bkey(w, i)); if (i > 0) bds.union(bkey(w, i - 1), bkey(w, i)); }
+        const onBus = (x, y, key) => {
+            let touched = false;
+            for (const w of busWires) for (let j = 0; j < w.route.length - 1; j++) {
+                const a = w.route[j], b = w.route[j + 1];
+                if (editor.isPointOnSegment(x, y, a.x, a.y, b.x, b.y)) { bds.union(key, bkey(w, j)); bds.union(key, bkey(w, j + 1)); touched = true; }
+            }
+            return touched;
+        };
+        for (const wa of busWires) for (const pt of [wa.route[0], wa.route[wa.route.length - 1]]) onBus(pt.x, pt.y, `b${getKey(pt.x, pt.y)}`);
+        const attach = [];       // bus pins and bus entries
+        for (const comp of editor.components) {
+            if (comp.type === "BUSTAP") {
+                const o = editor.rotateOffset(BusUtil.TAP[0], BusUtil.TAP[1], comp.rotation, comp.mirror);
+                attach.push({ key: `a${comp.id}`, x: comp.x + o.x, y: comp.y + o.y, comp, kind: "tap" });
+            }
+            for (const term of editor.getTerminals(comp)) {
+                const info = BusUtil.pinInfo(comp, term.name);
+                if (!info) continue;
+                const pos = editor.getTerminalPosition(comp, term);
+                attach.push({ key: `a${comp.id}:${term.name}`, x: pos.x, y: pos.y, comp, pin: term.name, info, kind: "pin" });
+            }
+        }
+        for (const a of attach) { bds.makeSet(a.key); a.touches = onBus(a.x, a.y, a.key); }
+        const groupInfo = new Map();     // root -> { base, lo, hi, taps: [] }
+        const group = (root) => { if (!groupInfo.has(root)) groupInfo.set(root, { base: null, lo: null, hi: null, taps: [], wires: [] }); return groupInfo.get(root); };
+        for (const w of busWires) {
+            const g = group(bds.find(bkey(w, 0)));
+            g.wires.push(w);
+            const v = BusUtil.parse(w.busName);
+            if (v && g.base === null) Object.assign(g, { base: v.base, lo: v.lo, hi: v.hi });
+        }
+        for (const a of attach) {
+            if (a.kind !== "pin" || !a.touches) continue;
+            const g = group(bds.find(a.key));
+            if (g.base === null) Object.assign(g, { base: a.info.base, lo: a.info.lo, hi: a.info.hi });
+        }
+        const tapName = (comp) => {
+            const g = groupInfo.get(bds.find(`a${comp.id}`));
+            const base = String(comp.bus || "").trim() ? String(comp.bus).trim().toUpperCase() : (g && g.base ? g.base : "BUS");
+            return `${base}${Math.max(0, Math.round(Number(comp.index) || 0))}`;
+        };
+        const taps = [];
+        for (const a of attach) if (a.kind === "tap") {
+            const g = groupInfo.get(bds.find(a.key));
+            if (a.touches && g) g.taps.push(a.comp);
+            taps.push({ comp: a.comp, name: tapName(a.comp), attached: !!a.touches, group: g || null, x: a.x, y: a.y });
+        }
+        const busBase = (comp, pin) => { const g = groupInfo.get(bds.find(`a${comp.id}:${pin}`)); return g ? g.base : null; };
+
         // net labels / power ports with the same name are one net (no wire needed)
         const labelled = new Map();
         for (const comp of editor.components) {
-            if (comp.type !== "NETLABEL" && comp.type !== "POWER" && comp.type !== "PORT") continue;
+            if (comp.type !== "NETLABEL" && comp.type !== "POWER" && comp.type !== "PORT" && comp.type !== "BUSTAP") continue;
+            if (comp.type === "PORT" && BusUtil.parse(comp.net)) continue;       // a vector port names a bus, it is not a net
             const key = terminalNodeKeys.get(`${comp.id}:1`);
             if (!key) continue;
-            const name = String(comp.net || (comp.type === "POWER" ? "VCC" : comp.type === "PORT" ? "PORT" : "NET")).trim().toUpperCase();
+            const name = comp.type === "BUSTAP" ? tapName(comp) : String(comp.net || (comp.type === "POWER" ? "VCC" : comp.type === "PORT" ? "PORT" : "NET")).trim().toUpperCase();
             if (labelled.has(name)) ds.union(labelled.get(name), key); else labelled.set(name, key);
         }
 
@@ -165,7 +220,9 @@ class NetlistExtractor {
             }
         }
 
-        return { terminalNode, getPointNodeName, hasGround, wired, wireNode, displayName, labelled };
+        const labelNode = (name) => { const k = labelled.get(String(name).trim().toUpperCase()); return k ? nameForKey(k) : null; };
+        for (const a of attach) if (a.kind === "pin" && a.touches) wired.add(`${a.comp.id}:${a.pin}`);      // a bus pin on a bus is connected
+        return { terminalNode, getPointNodeName, hasGround, wired, wireNode, displayName, labelled, labelNode, busBase, taps, busGroups: [...groupInfo.values()] };
     }
 
     // ---- element list --------------------------------------------------------

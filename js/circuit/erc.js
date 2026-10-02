@@ -29,7 +29,8 @@ class ErcChecker {
         led: "An LED needs a current-limiting resistor",
         probe: "A probe on ground always reads zero",
         power: "Ports with the same name must agree",
-        sheet: "Every sheet must be used, and every sheet symbol must point at a sheet"
+        sheet: "Every sheet must be used, and every sheet symbol must point at a sheet",
+        bus: "Bus entries must sit on a named bus, inside its range, and bus wires only join bus pins"
     };
 
     static run(editor, opts = {}) {
@@ -41,6 +42,24 @@ class ErcChecker {
         const compRef = (c) => ({ comp: c, x: c.x, y: c.y });
         const label = (id) => nets.displayName(id);
         const real = editor.components.filter(c => !editor.isOverlay(c));
+
+        // ---- buses -------------------------------------------------------------------------------------
+        for (const t of nets.taps || []) {
+            if (!t.attached) { add("warn", "bus", `${t.comp.name}: the bus entry does not touch a bus wire.`, [compRef(t.comp)]); continue; }
+            const g = t.group, idx = Math.round(Number(t.comp.index) || 0);
+            if (g && g.lo !== null && (idx < g.lo || idx > g.hi) && !String(t.comp.bus || "").trim()) add("err", "bus", `${t.comp.name}: index ${idx} is outside the bus range ${g.base}[${g.lo}..${g.hi}].`, [compRef(t.comp)]);
+        }
+        for (const g of nets.busGroups || []) {
+            if (g.base === null && g.taps.some(c => !String(c.bus || "").trim())) add("warn", "bus", `A bus has no name, so its entries are called BUS0, BUS1 … Double-click the bus wire to name it (for example D[0..7]).`, [{ wire: g.wires[0], x: g.wires[0].route[0].x, y: g.wires[0].route[0].y }]);
+        }
+        for (const w of editor.wires) for (const end of [w.start, w.end]) {
+            if (!end || end.type !== "terminal") continue;
+            const comp = editor.components.find(c => c.id === end.component);
+            if (!comp) continue;
+            const isBusPin = !!BusUtil.pinInfo(comp, end.terminal);
+            if (w.bus && !isBusPin) add("err", "bus", `A bus wire is attached to pin ${end.terminal} of ${comp.name}, which is not a bus pin.`, [{ wire: w, x: end.x, y: end.y }]);
+            if (!w.bus && isBusPin) add("err", "bus", `A plain wire is attached to bus pin ${end.terminal} of ${comp.name}: use the Bus tool.`, [{ wire: w, x: end.x, y: end.y }]);
+        }
 
         // ---- ground ------------------------------------------------------------------------------
         if (!nets.hasGround) add("err", "ground", "There is no ground symbol on the sheet. Add a GND (or a port named GND) and wire it to the circuit.");

@@ -18,7 +18,7 @@ against Proteus / ngspice, **P3** polish.
 | Gap | Pri | Notes |
 | --- | --- | --- |
 | ~~No text annotation / title block~~ | P2 | **Done**: multi-line text notes (size, colour, bold / italic, alignment, rotation) and a title block. Still missing: lines / boxes / circles, images, hyperlinks. |
-| ~~No multi-sheet or hierarchical designs~~ | P2 | **Done**: sheets, hierarchical ports and sheet symbols, flattened netlist (see README). Per-instance parameters, rule check across sheets and probes inside sub-sheets (cross-probing) are done. Still missing: buses, instruments inside sub-sheets, part animations on sub-sheets. |
+| ~~No multi-sheet or hierarchical designs~~ | P2 | **Done**: sheets, hierarchical ports and sheet symbols, flattened netlist (see README). Per-instance parameters, rule check across sheets and probes inside sub-sheets (cross-probing) are done. Buses (bus wires, entries, bus ports through sheet symbols) are done. Still missing: instruments inside sub-sheets, part animations on sub-sheets. |
 | ~~No autosave / unsaved-changes warning~~ | P1 | **Done**: autosave to browser storage with restore, dirty tracking, Save / Don't Save / Cancel prompts. Remaining: autosave is per browser profile (no cloud), and two tabs on the same address overwrite each other's copy. |
 | ~~No net highlighting~~ | P2 | **Done** (H / right-click). Still missing: net names drawn on the wires and cross-probing with graphs. |
 | Grid and snap size are fixed (20 px = 0.1 in) | P3 | |

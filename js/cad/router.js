@@ -288,7 +288,9 @@ class SchematicRouter {
         wire.blocked = false;
 
         for (let i = 0; i < points.length - 1; i++) {
-            let leg = this.routeLeg(points[i], points[i + 1], ctx);
+            // a bus is drawn straight (horizontal then vertical): it runs behind the parts instead of detouring around them
+            const p0 = points[i], q0 = points[i + 1];
+            let leg = wire.bus ? [{ x: p0.x, y: p0.y }, ...(p0.x !== q0.x && p0.y !== q0.y ? [{ x: q0.x, y: p0.y }] : []), { x: q0.x, y: q0.y }] : this.routeLeg(points[i], points[i + 1], ctx);
             if (!leg) {
                 wire.blocked = true;
                 const p = points[i], q = points[i + 1];
@@ -467,11 +469,11 @@ class SchematicRouter {
 
         let route = null;
         let blocked = false;
-        if (wire.route && wire.route.length >= 2) {
+        if (!wire.bus && wire.route && wire.route.length >= 2) {
             route = this.repairWireRoute(wire, a, b, ctx);
         }
         if (!route) {
-            const temp = { start: wire.start, end: wire.end, anchors: [] };
+            const temp = { start: wire.start, end: wire.end, anchors: [], bus: wire.bus };
             route = this.calculateWireRoute(temp, ctx);
             blocked = !route || temp.blocked;
         }

@@ -4,7 +4,7 @@
 
 const HOTKEYS = {
     c: "C", l: "L", v: "V", i: "I", g: "GND", d: "D", q: "BJT_NPN", m: "NMOS", u: "OPAMP",
-    e: "E", s: "SW", w: "wire", a: "TEXT"
+    e: "E", s: "SW", w: "wire", b: "bus", a: "TEXT"
 };
 
 class SchematicEditor {
@@ -558,6 +558,8 @@ class SchematicEditor {
     setTool(tool, props = null) {
         this.pasteMode = false;
         this.cancelWire();
+        this.busMode = tool === "bus";               // the Bus tool is the wire tool drawing a bus
+        if (tool === "bus") tool = "wire";
         this.tool = tool;
         this.placeProps = props;
         this.placeRotation = 0;
@@ -735,6 +737,7 @@ class SchematicEditor {
         const comp = this.addComponent(this.tool, gx, gy, this.placeRotation);
         if (this.placeMirror) comp.mirror = true;
         if (this.placeProps) Object.assign(comp, JSON.parse(JSON.stringify(this.placeProps)));
+        if (comp.type === "BUSTAP" && this.placeProps) this.placeProps.index = (Number(this.placeProps.index) || 0) + 1;     // the next entry counts up
         if (comp.type === "TEXT") {            // one note at a time: place it, then type it
             this.setTool("select");
             this.selection = [comp];
@@ -1109,7 +1112,8 @@ class SchematicEditor {
         const temp = {
             start: this.formatWireEndpoint(this.wireStart),
             end: this.formatWireEndpoint(this.hoverSnap),
-            anchors: this.wireAnchors.map(p => ({ x: p.x, y: p.y }))
+            anchors: this.wireAnchors.map(p => ({ x: p.x, y: p.y })),
+            bus: !!this.busMode
         };
         this.previewRoute = this.calculateWireRoute(temp, this.buildRouteContext(null));
     }
@@ -1154,6 +1158,7 @@ class SchematicEditor {
             anchors: this.wireAnchors.map(p => ({ x: p.x, y: p.y })),
             route: null
         };
+        if (this.busMode) wire.bus = true;
         this.wires.push(wire);
         this.endWiring();
 
@@ -1180,6 +1185,8 @@ class SchematicEditor {
         if (this.tool === "select") {
             const probe = this.findProbe(pos.x, pos.y);
             if (probe) { if (typeof this.onEditProbe === "function") this.onEditProbe(probe); return; }
+            const bw = this.findWire(pos.x, pos.y);
+            if (bw && bw.bus && !this.findComponent(pos.x, pos.y) && typeof this.onEditBus === "function") { this.onEditBus(bw); return; }
         }
 
         if (this.tool === "select" && !this.findTerminal(pos.x, pos.y, 10)) {
@@ -1806,8 +1813,8 @@ class SchematicEditor {
             if (!wire.route || wire.route.length < 2) continue;
 
             const isSelected = wire === this.selectedWire;
-            ctx.strokeStyle = wire.blocked ? this.tok("wireBlocked") : (isSelected ? this.tok("wireSelected") : this.tok("wire"));
-            ctx.lineWidth = isSelected ? lw(3) : lw(2);
+            ctx.strokeStyle = wire.blocked ? this.tok("wireBlocked") : (isSelected ? this.tok("wireSelected") : (wire.bus ? "#2f55d4" : this.tok("wire")));
+            ctx.lineWidth = wire.bus ? lw(isSelected ? 7 : 5) : (isSelected ? lw(3) : lw(2));
             ctx.lineJoin = "round";
             ctx.lineCap = "round";
             ctx.setLineDash(wire.blocked ? [6, 4] : []);
@@ -1817,6 +1824,12 @@ class SchematicEditor {
             for (let i = 1; i < wire.route.length; i++) ctx.lineTo(wire.route[i].x, wire.route[i].y);
             ctx.stroke();
             ctx.setLineDash([]);
+            if (wire.bus && wire.busName) {                // the bus name beside its longest run
+                let best = null;
+                for (let i = 0; i < wire.route.length - 1; i++) { const a = wire.route[i], b = wire.route[i + 1], len = Math.hypot(b.x - a.x, b.y - a.y); if (!best || len > best.len) best = { len, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, h: Math.abs(b.y - a.y) < 1e-6 }; }
+                ctx.save(); ctx.fillStyle = "#2f55d4"; ctx.font = "bold 11px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+                ctx.fillText(wire.busName, best.x + (best.h ? 0 : 14), best.y - (best.h ? 8 : 0)); ctx.restore();
+            }
 
             if (isSelected) {
                 for (let i = 0; i < wire.route.length - 1; i++) {
@@ -1866,7 +1879,7 @@ class SchematicEditor {
 
         const ctx = this.ctx;
         ctx.strokeStyle = this.tok("preview");
-        ctx.lineWidth = 2;
+        ctx.lineWidth = this.busMode ? 5 : 2;
         ctx.lineJoin = "round";
         ctx.setLineDash([6, 4]);
 
