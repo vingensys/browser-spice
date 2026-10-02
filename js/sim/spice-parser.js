@@ -306,7 +306,7 @@ class SpiceParser {
             cjc: p.cjc || 0, vjc: p.vjc || 0.75, mjc: p.mjc || 0.33,
             tf: p.tf || 0, tr: p.tr || 0, fc: p.fc || 0.5,
             eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti, xtb: p.xtb || 0, kf: p.kf || 0, af: p.af === undefined ? 1 : p.af,
-            xtf: p.xtf || 0, vtf: p.vtf || 0, itf: p.itf || 0, irb: p.irb || 0, rbm: p.rbm === undefined ? undefined : p.rbm
+            xtf: p.xtf || 0, vtf: p.vtf || 0, itf: p.itf || 0, irb: p.irb || 0, rbm: p.rbm === undefined ? undefined : p.rbm, ptf: p.ptf || 0
         };
     }
 

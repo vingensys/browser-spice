@@ -1262,6 +1262,29 @@ test("pinnedCurrents tells a valid DC level from a wrong one (and a floating nod
     if (lv.some(w => w > 1e-9)) throw new Error("leakage-only node: " + lv);
 });
 
+test("the AC frequency grid is SPICE's: points-per-decade steps from fStart, last point not above fStop", () => {
+    const { circuit } = SpiceParser.build(SpiceParser.parse("g\nV1 a 0 DC 0 AC 1\nR1 a b 1k\nC1 b 0 1u\n.end"));
+    const f = new SimEngine(circuit).ac({ fStart: 1e6, fStop: 2e9, pointsPerDecade: 15 }).map(r => r.frequency);
+    if (f.length !== 50) throw new Error("points " + f.length);
+    if (Math.abs(f[49] / (1e6 * Math.pow(10, 49 / 15)) - 1) > 1e-9 || f[49] > 2e9) throw new Error("last " + f[49]);
+    const g = new SimEngine(circuit).ac({ fStart: 10, fStop: 1e5, pointsPerDecade: 10 }).map(r => r.frequency);
+    if (g.length !== 41 || Math.abs(g[40] / 1e5 - 1) > 1e-9) throw new Error("exact decades should include fStop: " + g.length + " " + g[40]);
+});
+
+test("BJT excess phase (PTF): the transport current lags by omega * td, td = PTF * TF * pi / 180 (AC), and the transient filter settles to DC", () => {
+    const deck = (ptf) => `p\nVCC vcc 0 DC 10\nVB b 0 DC 0.77 AC 1\nRC vcc c 470\nQ1 c b 0 QX\n.model QX NPN(IS=1e-15 BF=120 VAF=60 TF=0.4n PTF=${ptf})\n.end`;
+    const phase = (ptf, f) => { const { circuit } = SpiceParser.build(SpiceParser.parse(deck(ptf))); const v = new SimEngine(circuit).ac({ fStart: f, fStop: f, pointsPerDecade: 1 })[0].nodeVoltages.c; return Math.atan2(v.im, v.re); };
+    const f = 4e8, td = (40 * Math.PI / 180) * 0.4e-9, extra = phase(40, f) - phase(0, f);
+    // the gain is about -gm RC: with the transport current delayed by exp(-j w td) the phase moves by about -w td (radians)
+    if (Math.abs(extra - (-2 * Math.PI * f * td)) > 0.15 && Math.abs(extra - (-2 * Math.PI * f * td) + 2 * Math.PI) > 0.15 && Math.abs(extra - (-2 * Math.PI * f * td) - 2 * Math.PI) > 0.15) throw new Error(`phase change ${extra}, expected about ${-2 * Math.PI * f * td}`);
+    // transient to DC: with a constant input the delayed current equals the instantaneous one
+    const { circuit } = SpiceParser.build(SpiceParser.parse(deck(40).replace("DC 0.77 AC 1", "DC 0.77")));
+    const r = new SimEngine(circuit).transient({ tStop: 20e-9, tStep: 0.2e-9, uic: false });
+    const { circuit: c0 } = SpiceParser.build(SpiceParser.parse(deck(0).replace("DC 0.77 AC 1", "DC 0.77")));
+    const op0 = new SimEngine(c0).operatingPoint().nodeVoltages.c, endV = r.nodeHistories["c"][r.nodeHistories["c"].length - 1];
+    if (Math.abs(endV - op0) > 1e-3 * Math.abs(op0)) throw new Error(`transient ends at ${endV}, DC is ${op0}`);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

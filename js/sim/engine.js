@@ -434,12 +434,14 @@ class SimEngine {
         const n = c.nodeCount;
         const results = [];
 
+        // SPICE's grid: exactly pointsPerDecade points per decade from fStart, up to the last one not above fStop (so the
+        // frequencies are the ones ngspice reports and the two can be compared point by point)
         const decades = Math.log10(fStop / fStart);
-        const count = Math.max(1, Math.round(decades * pointsPerDecade));
+        const count = Math.max(1, Math.floor(decades * pointsPerDecade + 1e-9));
 
         for (let k = 0; k <= count; k++) {
             if (progress && k % 8 === 0) progress(k / count);
-            const f = fStart * Math.pow(10, (k / count) * decades);
+            const f = fStart * Math.pow(10, k / pointsPerDecade);
             const w = 2 * Math.PI * f;
 
             stamper.clear();

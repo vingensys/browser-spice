@@ -1,0 +1,15 @@
+BJT amplifier with excess phase (PTF) and transit time: the phase of the gain rolls off faster than the magnitude
+VCC vcc 0 DC 10
+VIN in 0 SIN(0 0.01 20meg) AC 0.01
+CIN in b 10n
+R1 vcc b 12k
+R2 b 0 2.7k
+RC vcc c 470
+RE e 0 100
+CE e 0 1u
+Q1 c b e QPH
+.model QPH NPN(IS=1e-15 BF=120 VAF=60 CJE=2p CJC=1p TF=0.4n TR=10n PTF=40)
+.op
+.ac dec 15 1meg 2g
+.tran 2n 600n
+.end

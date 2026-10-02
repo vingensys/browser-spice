@@ -100,6 +100,7 @@ function simModelCardFromParams(kind, name, p) {
         if (p.xtf) parts.push(`XTF=${f(p.xtf)}`);
         if (p.vtf) parts.push(`VTF=${f(p.vtf)}`);
         if (p.itf) parts.push(`ITF=${f(p.itf)}`);
+        if (p.ptf) parts.push(`PTF=${f(p.ptf)}`);
         if (p.tr) parts.push(`TR=${f(p.tr)}`);
         if (p.kf) parts.push(`KF=${f(p.kf)}`, `AF=${f(p.af === undefined ? 1 : p.af)}`);
         return `.model ${name} ${t}(${parts.join(" ")})`;

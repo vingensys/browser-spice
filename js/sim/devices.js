@@ -703,11 +703,14 @@ class BJT extends NonlinearElement {
         this.p = Object.assign({
             is: 1e-16, bf: 100, br: 1, nf: 1, nr: 1, vaf: 0, var: 0, ikf: 0, ikr: 0, ise: 0, ne: 1.5, isc: 0, nc: 2, rb: 0, rc: 0, re: 0,
             cje: 0, vje: 0.75, mje: 0.33, cjc: 0, vjc: 0.75, mjc: 0.33, tf: 0, tr: 0, fc: 0.5,
-            eg: 1.11, xti: 3, xtb: 0, kf: 0, af: 1, xtf: 0, vtf: 0, itf: 0, irb: 0
+            eg: 1.11, xti: 3, xtb: 0, kf: 0, af: 1, xtf: 0, vtf: 0, itf: 0, irb: 0, ptf: 0
         }, p);
         if (this.p.rbm === undefined || this.p.rbm > this.p.rb) this.p.rbm = this.p.rb;       // RBM defaults to RB (no bias dependence)
         this.p0 = this.p;
         this.qbLast = 1; this.ibLast = 0;
+        // excess phase (PTF degrees at 1 / (2 pi TF)): Weil's approximation as SPICE3 / ngspice apply it, a delay td = PTF * TF * pi / 180
+        this.td = this.p.ptf > 0 && this.p.tf > 0 ? (this.p.ptf * Math.PI / 180) * this.p.tf : 0;
+        this.exS1 = 0; this.exS2 = 0; this.exDtOld = 0; this.exLastDt = 0;
         this.setTemperature(27);
         this.vbe = 0;
         this.vbc = 0;
@@ -759,7 +762,9 @@ class BJT extends NonlinearElement {
     }
 
     // currents and derivatives for the NPN-equivalent device (Gummel-Poon, as in SPICE3 / ngspice)
-    eval(vbe, vbc) {
+    // ex: { cc, arg3 } while the excess-phase filter is active (transient): the forward transport current is cc (the filtered history)
+    // plus arg3 * the instantaneous junction current
+    eval(vbe, vbc, ex = null) {
         const { is, bf, br, vaf, var: vr, ikf, ikr, ise, isc } = this.p;
         const ef = safeExp(vbe / this.vtf), er = safeExp(vbc / this.vtr);
         const cbe = is * (ef - 1), cbc = is * (er - 1);
@@ -779,15 +784,22 @@ class BJT extends NonlinearElement {
         const qb = (q1 * (1 + root)) / 2;
         const dqbe = (q1 * dq2be) / root + (dq1be * (1 + root)) / 2, dqbc = (q1 * dq2bc) / root + (dq1bc * (1 + root)) / 2;
 
-        const ic = (cbe - cbc) / qb - cbc / br - cbcn;
+        const cex = ex ? cbe * ex.arg3 : cbe, gex = ex ? gbe * ex.arg3 : gbe, hist = ex ? ex.cc : 0;
+        const ic = hist + (cex - cbc) / qb - cbc / br - cbcn;
         const ib = cbe / bf + cben + cbc / br + cbcn;
         return {
-            ic, ib, gF: gbe, gR: gbc, qb, cbe, dqbe, dqbc,
-            dIc_dbe: (gbe - ((cbe - cbc) * dqbe) / qb) / qb,
-            dIc_dbc: (-gbc - ((cbe - cbc) * dqbc) / qb) / qb - gbc / br - gbcn,
+            ic, ib, gF: gbe, gR: gbc, qb, cbe, dqbe, dqbc, cex, hist,
+            dIc_dbe: (gex - ((cex - cbc) * dqbe) / qb) / qb,
+            dIc_dbc: (-gbc - ((cex - cbc) * dqbc) / qb) / qb - gbc / br - gbcn,
             dIb_dbe: gbe / bf + gben,
             dIb_dbc: gbc / br + gbcn
         };
+    }
+
+    // the history part of the delayed transport current for a step of dt, and the weight of the present junction current
+    excessPhase(dt) {
+        const a1 = dt / this.td, a2 = 3 * a1, a3 = a2 * a1, denom = 1 + a3 + a2, dtOld = this.exDtOld > 0 ? this.exDtOld : dt;
+        return { cc: (this.exS1 * (1 + dt / dtOld + a2) - this.exS2 * dt / dtOld) / denom, arg3: a3 / denom, dt };
     }
 
     // B-E and B-C stored charge (NPN-equivalent coordinates), capacitance dQ/dV and, for B-E, the transcapacitance
@@ -848,7 +860,8 @@ class BJT extends NonlinearElement {
         this.vbe = vbe;
         this.vbc = vbc;
 
-        const m = this.eval(vbe, vbc);
+        const ex = this.td > 0 && ctx.mode === "tran" ? this.excessPhase(ctx.dt) : null;
+        const m = this.eval(vbe, vbc, ex);
         this.ic = p * m.ic;
         this.ib = p * m.ib;
         this.qbLast = m.qb; this.ibLast = m.ib;
@@ -915,6 +928,12 @@ class BJT extends NonlinearElement {
         if (rp.rc > 0) ac.addY(this.n[1], this.nn[1], 1 / rp.rc, 0);
         if (rp.re > 0) ac.addY(this.n[2], this.nn[2], 1 / rp.re, 0);
         this.stampACJacobian(ac);
+        if (this.td > 0) {
+            // only the forward transport (dIc / dVbe) is delayed: rotate it by exp(-j omega td), as ngspice does with gm + go
+            const [b1, c1, e1] = this.nn, mm = this.eval(this.vbe, this.vbc), a = mm.dIc_dbe, th = omega * this.td;
+            const dRe = a * (Math.cos(th) - 1), dIm = -a * Math.sin(th);
+            ac.add(c1, b1, dRe, dIm); ac.add(c1, e1, -dRe, -dIm); ac.add(e1, b1, -dRe, -dIm); ac.add(e1, e1, dRe, dIm);
+        }
         if (!this.hasCaps) return;
         const [b, c, e] = this.nn;
         const m = this.eval(this.vbe, this.vbc);
@@ -936,13 +955,19 @@ class BJT extends NonlinearElement {
     initState(ctx) {
         if (!this.hasCaps) return;
         const [vbe, vbc] = this.npnVoltages(ctx);
-        const ch = this.charges(vbe, vbc, this.eval(vbe, vbc));
+        const m0 = this.eval(vbe, vbc);
+        if (this.td > 0) { this.exS1 = this.exS2 = m0.cbe / m0.qb; this.exDtOld = 0; }
+        const ch = this.charges(vbe, vbc, m0);
         this.cs.forEach((st, i) => { st.qPrev = ch[i].q; st.iPrev = 0; });
     }
 
     accept(ctx) {
         if (!this.hasCaps) return;
         const [vbe, vbc] = this.npnVoltages(ctx);
+        if (this.td > 0 && ctx.dt > 0) {
+            const ex = this.excessPhase(ctx.dt), mx = this.eval(vbe, vbc, ex);
+            this.exS2 = this.exS1; this.exS1 = ex.cc + mx.cex / mx.qb; this.exDtOld = ctx.dt;
+        }
         const ch = this.charges(vbe, vbc, this.eval(vbe, vbc));
         this.cs.forEach((st, i) => {
             st.iPrev = st.kk * (ch[i].q - st.qPrev) - (st.trap ? st.iPrev : 0);

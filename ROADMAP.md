@@ -25,7 +25,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 ## Next, in order
 
 ### 1. Simulation depth
-- MOSFET levels 2 / 3 and BSIM, BJT `PTF` excess phase, `.sens` on the engine, `.nodeset`, `.options` parsing.
+- MOSFET levels 2 / 3 and BSIM, `.sens` on the engine, `.nodeset`, `.options` parsing.
 - Digital: memories, microcontroller model, mixed-signal timing, propagation-delay options; export of logic ICs / SCR to SPICE.
 - Faster: compile the circuit to typed arrays, WebAssembly sparse LU for very large circuits.
 
