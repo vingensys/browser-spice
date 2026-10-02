@@ -64,6 +64,25 @@ try {
         console.log(`${result.failed ? "FAIL" : "ok  "} ${name.padEnd(12)} ${result.total - result.failed}/${result.total}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
         for (const f of result.failures || []) console.log(`       - ${f.name}${f.extra !== undefined ? ` ${JSON.stringify(f.extra).slice(0, 300)}` : ""}${f.error ? ` ${f.error}` : ""}`);
     }
+    // offline: a visited copy of the app keeps working without a network (service worker)
+    {
+        total += 1;
+        let ok = false, detail = "";
+        try {
+            await page.goto(`http://localhost:${port}/`, { waitUntil: "load" });
+            await page.waitForFunction("navigator.serviceWorker && navigator.serviceWorker.controller || navigator.serviceWorker.ready.then(() => true)", { timeout: 15000 });
+            await page.evaluate("navigator.serviceWorker.ready.then(() => new Promise(r => setTimeout(r, 1500)))");
+            const cached = await page.evaluate("caches.keys().then(async k => k.length ? (await (await caches.open(k[0])).keys()).length : 0)");
+            await page.setOfflineMode(true);
+            await page.reload({ waitUntil: "load" });
+            await page.waitForFunction("!!window.editor && !!window.doc", { timeout: 20000 });
+            ok = cached > 40;
+            detail = `${cached} files cached`;
+            await page.setOfflineMode(false);
+        } catch (e) { detail = String(e.message || e); }
+        console.log(`${ok ? "ok  " : "FAIL"} offline      ${ok ? 1 : 0}/1  (${detail})`);
+        if (!ok) failed += 1;
+    }
     if (pageErrors.length) { console.log("uncaught page errors:"); pageErrors.slice(0, 5).forEach(e => console.log("  " + e)); failed += 1; }
 } finally {
     await browser.close();

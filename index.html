@@ -5,6 +5,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Browser SPICE - Schematic Capture & Simulation</title>
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icon.svg" type="image/svg+xml">
+    <meta name="theme-color" content="#2b6cb0">
     <script>document.write('<link rel="stylesheet" href="css/app.css?b=' + Date.now() + '">');</script>
 </head>
 
@@ -85,6 +88,7 @@
 
     <!-- scripts are listed in js/scripts.json and loaded in order by boot.js (always fresh, never stale from the browser cache) -->
     <script src="js/boot.js"></script>
+    <script>if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => { }));</script>
 </body>
 
 </html>

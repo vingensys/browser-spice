@@ -1,7 +1,7 @@
 // Application bootstrap: builds the ISIS-style shell, defines every command once, and
 // connects the editor, simulator, graph window and live simulation to it.
 
-(() => {
+(async () => {
     const $ = (id) => document.getElementById(id);
 
     Theme.restore();
@@ -111,6 +111,9 @@
     }) });
     C("file.bom", "Bill of Materials…", { run: () => Exporter.openBom(editor) });
     C("file.image", "Export Schematic Image (PNG)…", { run: () => Exporter.savePng(editor) });
+    C("file.share", "Share as Link…", { run: () => Share.open(editor, runner) });
+    C("file.report", "Export Report (HTML)…", { run: async () => { const html = await Report.build(editor, runner, plotter, doc); download("report.html", html, "text/html"); } });
+    C("palette.open", "Command Palette…", { keys: "Ctrl+K", global: true, run: () => Palette.open() });
     C("file.print", "Print…", { run: () => window.print() });
 
     C("edit.undo", "Undo", { icon: "undo", keys: "Ctrl+Z", enabled: () => editor.historyStack.length > 0, run: () => editor.undo() });
@@ -232,7 +235,7 @@
     }));
 
     new Menubar($("menubar"), [
-        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
+        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.text", "tool.vprobe", "tool.iprobe", "-",
@@ -243,7 +246,7 @@
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
-        { title: "Help", items: ["help.keys", "help.about"] }
+        { title: "Help", items: ["palette.open", "help.keys", "help.about"] }
     ]);
 
     new Toolbar($("toolbar"), [
@@ -509,8 +512,19 @@
 
     // ------------------------------------------------------------------- autosave / restore
 
-    const restored = doc.restore();
+    const shared = Share.fromLocation();
+    const restored = shared ? null : doc.restore();
     doc.start();
+    if (shared) {
+        try {
+            const state = await Share.decode(shared);
+            doc.apply(state, { undoable: false });
+            editor.fitView(); afterLoad();
+            doc.name = null; doc.markSaved(null);
+            history.replaceState(null, "", location.pathname + location.search);
+            runner.toast("Opened a shared design. It is yours to change; Save Design keeps a copy.", "info");
+        } catch (e) { console.error(e); runner.toast("This share link could not be opened (it may be damaged or cut short).", "error"); }
+    }
     if (restored) {
         editor.fitView();          // the saved pan / zoom belongs to another window size
         afterLoad();

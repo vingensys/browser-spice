@@ -595,3 +595,11 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 #sheetbar button { border: 1px solid var(--ui-border, #bbb); border-bottom: none; border-radius: 4px 4px 0 0; padding: 2px 12px; font-size: 11px; background: var(--ui-panel, #dcdcdc); color: inherit; cursor: pointer; }
 #sheetbar button.active { background: var(--ui-bg-hi, #fff); font-weight: 600; }
 #sheetbar .sheet-add { padding: 2px 8px; }
+
+/* command palette */
+.palette-input { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 14px; }
+.palette-list { margin-top: 6px; max-height: 340px; overflow: auto; }
+.palette-row { display: flex; justify-content: space-between; padding: 4px 8px; border-radius: 3px; cursor: pointer; }
+.palette-row.sel, .palette-row:hover { background: var(--ui-accent, #3b82f6); color: #fff; }
+.palette-row.off { opacity: 0.45; cursor: default; }
+.palette-row kbd { font-size: 11px; opacity: 0.8; }

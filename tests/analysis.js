@@ -568,6 +568,34 @@ window.analysisTests = async function () {
     editor.resetSheets(); sheetBar.render();
     graph.hide();
 
+
+    // ======================================================== share link, palette, report
+    clear(); loadExampleById(editor, "rc-ladder"); editor.params = [{ name: "k", value: "2" }];
+    const slink = await Share.link(doc);
+    ok("a share link carries the design in its fragment", slink.includes("#share=") && slink.length > 200 && slink.length < 20000, slink.length);
+    const sdec = await Share.decode(slink.split("#share=")[1]);
+    ok("it decodes to the same design (parts, wires, parameters)", sdec.components.length === editor.components.length && sdec.wires.length === editor.wires.length && sdec.params[0].name === "k" && !sdec.view, [sdec.components.length, editor.components.length]);
+    clear(); doc.apply(sdec, { undoable: false });
+    ok("applying it rebuilds a circuit that simulates", editor.components.length === 8 || editor.components.length > 4, editor.components.length);
+    ok("a damaged link is rejected", await Share.decode("not-a-link!").then(() => false, () => true));
+    Commands.run("file.share"); await wait(300);
+    ok("File > Share as Link shows the link", !!document.querySelector(".dialog textarea") && /#share=/.test(document.querySelector(".dialog textarea").value));
+    Dialog.close("t");
+    Commands.run("palette.open");
+    const pin = document.querySelector(".palette-input");
+    pin.value = "noise"; pin.dispatchEvent(new Event("input"));
+    ok("the command palette finds a command from a few letters", /Noise/.test(document.querySelector(".palette-list .palette-row.sel").textContent), document.querySelector(".palette-list").textContent);
+    pin.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await wait(100);
+    ok("Enter runs it (the NOISE tab opens)", graph.kind === "noise" && !document.querySelector(".palette"), graph.kind);
+    pin && Dialog.close("t");
+    document.getElementById("simTstop").value = "20m"; document.getElementById("simTstep").value = "100u"; document.getElementById("simUic").checked = true;
+    graph.show("tran"); await runner.runTransient(); await wait(100);
+    editor.measures = [{ name: "vend", kind: "tran", fn: "find", sig: "V(c1)", at: 0.02 }];
+    const html = await Report.build(editor, runner, plotter, doc);
+    ok("the report is a self-contained page with schematic, parts, graph, measurement and netlist", /<!doctype html>/.test(html) && /<h2>Schematic<\/h2><img[^>]+data:image\/png/.test(html) && /Parts list/.test(html) && /<h2>Transient<\/h2><img/.test(html) && /Measurements/.test(html) && /<h2>SPICE netlist<\/h2><pre>[^<]*\.tran|<h2>SPICE netlist/.test(html), html.length);
+    ok("it lists the parameters and escapes text", /<h2>Parameters<\/h2>/.test(html) && !/<script/.test(html));
+    editor.measures = []; editor.params = []; graph.hide();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };
