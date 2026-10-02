@@ -56,10 +56,10 @@ against Proteus / ngspice, **P3** polish.
 ## 5. UI
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| Not usable on a phone-width screen; panes do not collapse | P3 | |
-| Dialogs do not trap focus; limited keyboard / screen-reader support | P3 | Menus have keyboard navigation; dialogs only Esc / Enter. |
+| ~~Not usable on a phone-width screen~~ | P3 | **Improved**: View > Sidebar hides the left pane (it starts hidden below 760 px), the toolbar scrolls and dialogs fit. Touch drawing is still mouse-oriented. |
+| ~~Dialogs do not trap focus~~ | P3 | **Done**: dialogs have a role and label, trap Tab and return focus; icon buttons get names. The schematic canvas itself is not screen-reader accessible. |
 | No customisable shortcuts, no localisation | P3 | |
-| No in-app help beyond the shortcuts list and About | P3 | |
+| ~~No in-app help~~ | P3 | **Done**: Help > Getting Started, the command palette (Ctrl+K). |
 
 ## 6. Engineering
 - ~~Tests are run by hand; there is no CI.~~ **Done**: GitHub Actions runs the node and the headless-Chrome suites on every push.

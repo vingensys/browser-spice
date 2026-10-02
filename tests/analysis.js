@@ -613,6 +613,21 @@ window.analysisTests = async function () {
     ok("it ranks the parts in a table with bars", document.querySelectorAll(".se-out tbody tr").length === 3 && document.querySelectorAll(".se-bar").length === 3, document.querySelector(".se-out") && document.querySelector(".se-out").textContent.slice(0, 100));
     Dialog.close("t");
 
+
+    // ======================================================== accessibility and layout
+    Commands.run("help.start");
+    const dlg = document.querySelector(".dialog");
+    ok("dialogs announce themselves (role, modal, label) and Getting Started opens", dlg && dlg.getAttribute("role") === "dialog" && dlg.getAttribute("aria-modal") === "true" && dlg.getAttribute("aria-labelledby") && /Getting Started/.test(dlg.textContent));
+    const btns = [...dlg.querySelectorAll("button")]; btns[btns.length - 1].focus();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    ok("Tab from the last control wraps to the first, so focus cannot leave the dialog", dlg.contains(document.activeElement) && document.activeElement === btns[0], document.activeElement && document.activeElement.textContent);
+    Dialog.close("t");
+    ok("icon buttons carry an accessible name", [...document.querySelectorAll("button[title]")].filter(b => !b.textContent.trim()).every(b => b.getAttribute("aria-label")));
+    Commands.run("view.sidebar");
+    ok("View > Sidebar hides the left pane and gives the room to the sheet", document.body.classList.contains("nosidebar") && getComputedStyle(document.getElementById("leftpane")).display === "none");
+    Commands.run("view.sidebar");
+    ok("and shows it again", !document.body.classList.contains("nosidebar") && getComputedStyle(document.getElementById("leftpane")).display !== "none");
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

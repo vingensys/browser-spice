@@ -27,6 +27,15 @@ const Dialog = {
         document.addEventListener("keydown", (e) => {
             if (!Dialog.current) return;
             if (e.key === "Escape") { e.preventDefault(); Dialog.close("cancel"); }
+            if (e.key === "Tab") {            // keep keyboard focus inside the dialog
+                const items = [...Dialog.current.box.querySelectorAll("button, input, select, textarea, [tabindex]:not([tabindex='-1'])")].filter(el => !el.disabled && el.offsetParent !== null);
+                if (items.length) {
+                    const first = items[0], last = items[items.length - 1];
+                    if (!Dialog.current.box.contains(document.activeElement)) { first.focus(); e.preventDefault(); }
+                    else if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+                    else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+                }
+            }
             if (e.key === "Enter" && e.target.tagName !== "TEXTAREA" && e.target.tagName !== "SELECT") {
                 const primary = Dialog.current.buttons.find(b => b.primary);
                 if (primary) { e.preventDefault(); Dialog.press(primary); }
@@ -44,7 +53,11 @@ const Dialog = {
         box.innerHTML = `<div class="dialog-title"><span></span><button title="Close">✕</button></div>
             <div class="dialog-body"></div><div class="dialog-foot"></div>`;
         box.querySelector(".dialog-title span").textContent = title;
+        box.querySelector(".dialog-title span").id = "dialog-title-text";
+        box.setAttribute("role", "dialog"); box.setAttribute("aria-modal", "true"); box.setAttribute("aria-labelledby", "dialog-title-text");
+        box.querySelector(".dialog-title button").setAttribute("aria-label", "Close");
         box.querySelector(".dialog-title button").onclick = () => Dialog.close("cancel");
+        Dialog.returnFocus = document.activeElement;
 
         const body = box.querySelector(".dialog-body");
         let home = null;
@@ -83,6 +96,8 @@ const Dialog = {
         Dialog.layer.classList.remove("open");
         if (cur.home && cur.home.parent) cur.home.parent.insertBefore(cur.content, cur.home.next);
         Dialog.layer.innerHTML = "";
+        const back = Dialog.returnFocus; Dialog.returnFocus = null;
+        if (back && back.focus && document.contains(back) && reason !== "replaced") { try { back.focus(); } catch (e) { /* element gone */ } }
         if (cur.onClose) cur.onClose(reason);
     },
 

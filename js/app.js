@@ -20,6 +20,7 @@
     const overview = new Overview($("overview"), editor);
     const status = new StatusBar($("statusbar"), editor);
     SheetHub.editor = editor;
+    if (window.innerWidth < 760) document.body.classList.add("nosidebar");
     const sheetBar = new SheetBar($("sheetbar"), editor, runner);
     const doc = new DocumentStore(editor, runner);
     doc.onChange(() => status.setDocument(doc));
@@ -157,6 +158,7 @@
         editor.onEdit(c);
     } });
     C("design.ercnext", "Next ERC Issue", { keys: "F4", global: true, enabled: () => !!(ErcDialog.last && ErcDialog.last.issues.length), run: () => ErcDialog.next(editor) });
+    C("view.sidebar", "Sidebar", { checked: () => !document.body.classList.contains("nosidebar"), run: () => { document.body.classList.toggle("nosidebar"); editor.resize(); editor.draw(); } });
     C("view.op", "Show Operating Point", { icon: "", checked: () => opOverlay.on, run: () => opOverlay.toggle() });
     C("net.highlight", "Highlight Net", { keys: "H", run: () => editor.toggleHighlightAt(editor.mouseInside ? editor.mouse.x : undefined, editor.mouseInside ? editor.mouse.y : undefined) });
     C("net.highlightpin", "Highlight Net", { run: () => { if (editor.contextPin) editor.highlightNet(editor.contextPin); } });
@@ -200,6 +202,14 @@
     C("lib.remove", "Remove Selected Device from List", { run: () => pane.removeSelected() });
     C("lib.reset", "Forget Imported Models", { run() { SimModelLibrary.clear(); SubcktLibrary.clear(); runner.toast("Imported models will be gone after you reload the page.", "info"); } });
 
+    C("help.start", "Getting Started", { run: () => Dialog.open({ title: "Getting Started", width: "600px", buttons: [{ label: "Open an example", onClick: () => { setTimeout(() => Commands.run("palette.open"), 0); } }, { label: "Close", primary: true }], content: `<div style="line-height:1.55">
+        <ol style="padding-left:1.2em;margin:0">
+        <li><b>Place parts</b>: press <kbd>P</kbd> to pick devices (resistors, sources, transistors, op-amps, logic, instruments), click the sheet to drop one, <kbd>R</kbd> rotates.</li>
+        <li><b>Wire them</b>: press <kbd>W</kbd> or just drag from a pin. Add a <b>Ground</b> symbol: every circuit needs one.</li>
+        <li><b>Run</b>: <kbd>F12</kbd> plays the circuit live; the Graph menu runs transient, AC, noise, DC sweep, operating point. Put <b>probes</b> (Tool menu) where you want to see signals.</li>
+        <li><b>Go further</b>: Design &gt; Parametric Sweep / Monte Carlo / Sensitivity, Graph &gt; Measurements, several sheets with hierarchy, subcircuits from SPICE files.</li>
+        <li><b>Bring and share</b>: File &gt; Import a SPICE netlist or model library, Export SPICE / BOM / picture / report, or Share as Link.</li></ol>
+        <p style="margin-bottom:0">Stuck? Press <kbd>Ctrl+K</kbd> and type what you want to do. File &gt; Examples has ready circuits to open and change.</p></div>` }) });
     C("help.keys", "Keyboard & Mouse", { icon: "help", run: () => ShortcutsDialog.open() });
     C("help.about", "About Browser SPICE", { run: () => AboutDialog.open() });
 
@@ -238,7 +248,7 @@
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
-        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "-", "view.classic", "view.dark"] },
+        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.sidebar", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
@@ -247,7 +257,7 @@
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
-        { title: "Help", items: ["palette.open", "help.keys", "help.about"] }
+        { title: "Help", items: ["help.start", "palette.open", "help.keys", "help.about"] }
     ]);
 
     new Toolbar($("toolbar"), [
@@ -513,6 +523,9 @@
 
     // ------------------------------------------------------------------- autosave / restore
 
+    // icon-only buttons need an accessible name: use their tooltip
+    const nameButtons = () => document.querySelectorAll("button[title]").forEach(b => { if (!b.getAttribute("aria-label") && !b.textContent.trim()) b.setAttribute("aria-label", b.title); });
+    nameButtons(); new MutationObserver(nameButtons).observe(document.getElementById("app"), { childList: true, subtree: true });
     const shared = Share.fromLocation();
     const restored = shared ? null : doc.restore();
     doc.start();
