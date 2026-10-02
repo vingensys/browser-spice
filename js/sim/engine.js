@@ -211,6 +211,65 @@ class SimEngine {
         return Object.assign({ x: r.x, method, iterations: r.iters }, this.snapshot(r.x));
     }
 
+    // ---------------------------------------------------------------- noise
+
+    // Small-signal noise at the output node pair `out` ([plus, minus]) from fStart to fStop. One adjoint solve per
+    // frequency gives the transfer from every noise current source to the output, so the cost does not grow with the
+    // number of noisy parts. `input` names the source the result is referred to (its gain from input to output).
+    // Returns [{ frequency, onoise (V/sqrt(Hz)), inoise, gain, parts: { "R1 thermal": V^2/Hz, ... } }].
+    noise({ out, input = null, fStart = 10, fStop = 1e6, pointsPerDecade = 10, progress = null } = {}) {
+        const c = this.c;
+        this.operatingPoint();
+        const kT = SIM.K * (273.15 + this.opt.temp);
+        const sources = [];
+        for (const el of c.elements) {
+            if (el.name.includes(".")) continue;
+            for (const s of el.noiseSources(kT)) if (s.psd > 0) sources.push({ ...s, name: `${el.name} ${s.label}` });
+        }
+        const idx = (name) => { const i = c.nodeIndex.get(String(name)); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
+        const [op, om] = [idx(out[0]), out.length > 1 ? idx(out[1]) : -1];
+        if (op < 0 && om < 0) throw new Error("The noise output must be a node other than ground.");
+        const src = input ? c.elements.find(e => e.name === input && (e instanceof VoltageSource || e instanceof CurrentSource)) : null;
+        const stamper = new ComplexStamper(c.size);
+        stamper.transpose = true;
+        // the AC stimulus of the sources must not enter the adjoint right-hand side
+        const savedAc = c.elements.map(e => [e, e.acActive, e._acFallback, e.acMag]);
+        for (const e of c.elements) if (e instanceof VoltageSource) { e.acActive = false; e._acFallback = false; } else if (e instanceof CurrentSource) e.acMag = 0;
+        try { return this.noiseSweep(stamper, { sources, op, om, src, fStart, fStop, pointsPerDecade, progress }); }
+        finally { for (const [e, a, f, m] of savedAc) { e.acActive = a; e._acFallback = f; e.acMag = m; } }
+    }
+
+    noiseSweep(stamper, { sources, op, om, src, fStart, fStop, pointsPerDecade, progress }) {
+        const c = this.c;
+        const n = c.nodeCount, results = [];
+        const decades = Math.log10(fStop / fStart), count = Math.max(1, Math.round(decades * pointsPerDecade));
+        for (let k = 0; k <= count; k++) {
+            if (progress && k % 4 === 0) progress(k / count);
+            const f = fStart * Math.pow(10, (k / count) * decades), w = 2 * Math.PI * f;
+            stamper.clear();
+            for (let i = 0; i < n; i++) stamper.add(i, i, this.opt.gmin, 0);
+            for (const el of c.elements) el.stampAC(stamper, w);
+            stamper.rhs(op, 1, 0); stamper.rhs(om, -1, 0);
+            let sol;
+            try { sol = stamper.solve(); }
+            catch (e) { if (e instanceof SingularMatrixError) throw new Error(`Noise matrix is singular near ${this.describeIndex(e.index % c.size)}.`); throw e; }
+            const W = (i) => (i < 0 ? [0, 0] : [sol.re[i], sol.im[i]]);
+            const parts = {};
+            let total = 0;
+            for (const s of sources) {
+                const [pr, pi] = W(s.p), [mr, mi] = W(s.n);
+                const hr = pr - mr, hi = pi - mi, p = (hr * hr + hi * hi) * s.psd;
+                parts[s.name] = p; total += p;
+            }
+            // transfer from the chosen input source to the output: the adjoint solution read at the source
+            let gain = 0;
+            if (src instanceof VoltageSource) gain = Math.hypot(...W(src.br));
+            else if (src instanceof CurrentSource) { const [pr, pi] = W(src.n[0]), [mr, mi] = W(src.n[1]); gain = Math.hypot(pr - mr, pi - mi); }
+            results.push({ frequency: f, onoise: Math.sqrt(total), inoise: src && gain > 0 ? Math.sqrt(total) / gain : null, gain: src ? gain : null, parts });
+        }
+        return results;
+    }
+
     // ------------------------------------------------------------------ DC sweep
 
     // Sweep an independent source and record the node voltages at each point.

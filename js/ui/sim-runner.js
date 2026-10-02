@@ -87,6 +87,7 @@ class SimRunner {
         if (kind === "op") return engine.operatingPoint({ uic: !!args.uic, nodeIC: args.nodeIC || null });
         if (kind === "tran") return engine.transient({ tStop: args.tStop, tStep: args.tStep, uic: args.uic, method: "trap", nodeIC: args.nodeIC });
         if (kind === "ac") return engine.ac({ fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 20 });
+        if (kind === "noise") return engine.noise({ out: args.out, input: args.input, fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 10 });
         return engine.dcSweep(args.source, args.start, args.stop, args.step);
     }
 
@@ -174,6 +175,30 @@ class SimRunner {
             this.el("plotTitle").textContent = `AC Frequency Sweep (Bode Plot)${label}`;
             this.last = { kind: "ac", info, results };
             if (!this.editor.probes.length) this.toast("Add a voltage probe to see the response.", "info");
+        });
+    }
+
+    // Output and input-referred noise at every voltage probe, between the AC sweep's start and stop frequencies
+    runNoise() {
+        return this.guard(async () => {
+            const info = this.prepare();
+            const s = this.settings();
+            const probes = this.editor.probes.filter(p => p.type === "V" && p.graph !== false);
+            if (!probes.length) throw new Error("Add a voltage probe at the node whose noise you want to see.");
+            const sources = info.elements.filter(e => e.kind === "V" || e.kind === "I");
+            const input = sources.find(e => (e.params.acMag || 0) > 0) || sources.find(e => e.kind === "V");
+            const t0 = performance.now();
+            const outs = [];
+            for (const prb of probes) {
+                const node = info.getPointNodeName(prb.x, prb.y) || "0";
+                if (node === "0") throw new Error(`${prb.label} is on ground: put the probe on the node whose noise you want.`);
+                const rows = await this.solve(info, "noise", { out: [node], input: input ? input.name : null, fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 10 }, "Noise");
+                outs.push({ label: `${prb.label} (Node ${node})`, color: prb.color, rows });
+            }
+            this.plotter.plotNoise(outs, input ? input.name : null);
+            this.el("plotTitle").textContent = `Noise Analysis${input ? `, input referred to ${input.name}` : ""}`;
+            this.last = { kind: "noise", info, outs };
+            this.toast(`Noise analysis: ${outs[0].rows.length} frequencies, ${Object.keys(outs[0].rows[0].parts).length} noise sources, ${(performance.now() - t0).toFixed(0)} ms.`, "info");
         });
     }
 

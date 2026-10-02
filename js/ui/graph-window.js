@@ -10,7 +10,7 @@ class GraphWindow {
         this.kind = "tran";
 
         this.tabs = [
-            ["live", "LIVE"], ["tran", "ANALOGUE"], ["fft", "SPECTRUM"], ["ac", "FREQUENCY"], ["sweep", "DC SWEEP"], ["step", "STUDY"], ["dc", "OPERATING POINT"]
+            ["live", "LIVE"], ["tran", "ANALOGUE"], ["fft", "SPECTRUM"], ["ac", "FREQUENCY"], ["noise", "NOISE"], ["sweep", "DC SWEEP"], ["step", "STUDY"], ["dc", "OPERATING POINT"]
         ];
         root.innerHTML = `
             <div id="graph-resize"></div>
@@ -19,6 +19,9 @@ class GraphWindow {
                 <span class="grow"></span>
                 <select id="acScale" class="hidden" title="Frequency response display">
                     <option value="db">Gain dB + phase</option><option value="linear">Linear magnitude</option>
+                </select>
+                <select id="noiseView" class="hidden" title="Noise density shown">
+                    <option value="out">Output noise</option><option value="in">Input-referred</option>
                 </select>
                 <span id="fftTools" class="hidden" style="display:none;gap:6px;align-items:center">
                     <select id="fftWindow" title="Window function">${Object.entries(Spectrum.WINDOWS).map(([k, w]) => `<option value="${k}" ${k === "hann" ? "selected" : ""}>${w.label}</option>`).join("")}</select>
@@ -54,11 +57,12 @@ class GraphWindow {
         });
 
         root.querySelector("#acScale").onchange = (e) => plotter.setACScale(e.target.value);
+        root.querySelector("#noiseView").onchange = (e) => { if (plotter.noiseSource) { const [outs, name] = plotter.noiseSource; plotter.plotNoise(outs, name, e.target.value); plotter.cache.noise = plotter.data; } };
         for (const id of ["fftWindow", "fftScale", "fftSpan", "fftAxis"]) root.querySelector("#" + id).onchange = () => { if (this.kind === "fft") this.showSpectrum(); };
 
         // remember the data of each tab, so switching tabs shows each one's last result; note what the spectrum can use
         plotter.cache = {};
-        for (const [method, kind] of [["plotTransient", "tran"], ["plotAC", "ac"], ["plotSweep", "sweep"]]) {
+        for (const [method, kind] of [["plotTransient", "tran"], ["plotAC", "ac"], ["plotSweep", "sweep"], ["plotNoise", "noise"]]) {
             const original = plotter[method].bind(plotter);
             plotter[method] = (...args) => { original(...args); plotter.cache[kind] = plotter.data; if (kind === "tran") this.timeKind = "tran"; };
         }
@@ -137,6 +141,32 @@ class GraphWindow {
         }
         const lo = both ? Math.min(a, b) : view.inv(view.vmin), hi = both ? Math.max(a, b) : view.inv(view.vmax);
         const scope = both ? "between the cursors" : "in the visible range";
+        if (d.noise) {
+            const fx = (v) => Units.formatSI(v, "V/√Hz"), inRef = d.noise.view === "in", noiseSeries = [];
+            d.series.forEach((sr, i) => {
+                const o = d.noise.outs[i], rows = o.rows, rows_ = [];
+                const dens = (k) => (inRef ? rows[k].inoise : rows[k].onoise);
+                const at = (x) => { const k = rows.reduce((b, r, j) => (Math.abs(Math.log(r.frequency / x)) < Math.abs(Math.log(rows[b].frequency / x)) ? j : b), 0); return dens(k); };
+                if (a !== null) rows_.push(["Spot at A", fx(at(a))]);
+                if (b !== null) rows_.push(["Spot at B", fx(at(b))]);
+                // integrated noise over the cursors / visible range, and who contributes
+                let power = 0, ipower = 0; const parts = {};
+                for (let k = 1; k < rows.length; k++) {
+                    if (rows[k].frequency < lo || rows[k - 1].frequency > hi) continue;
+                    const df = Math.min(rows[k].frequency, hi) - Math.max(rows[k - 1].frequency, lo);
+                    if (!(df > 0)) continue;
+                    power += 0.5 * (rows[k].onoise ** 2 + rows[k - 1].onoise ** 2) * df;
+                    if (rows[k].inoise !== null) ipower += 0.5 * (rows[k].inoise ** 2 + rows[k - 1].inoise ** 2) * df;
+                    for (const name of Object.keys(rows[k].parts)) parts[name] = (parts[name] || 0) + 0.5 * (rows[k].parts[name] + rows[k - 1].parts[name]) * df;
+                }
+                rows_.push([`Output noise ${scope}`, Units.formatSI(Math.sqrt(power), "V rms")]);
+                if (ipower > 0) rows_.push([`Input-referred ${scope}`, Units.formatSI(Math.sqrt(ipower), "V rms")]);
+                const total = Object.values(parts).reduce((s, v) => s + v, 0) || 1;
+                Object.entries(parts).sort((p, q) => q[1] - p[1]).slice(0, 5).forEach(([name, v]) => rows_.push([name, `${(100 * v / total).toFixed(1)} %`]));
+                noiseSeries.push({ name: sr.name, color: sr.color, rows: rows_ });
+            });
+            return { header, series: noiseSeries, scope, hasCursors: a !== null || b !== null };
+        }
         if (d.study && d.study.kind === "montecarlo") {
             const st = d.study.stats, f = (v) => Number(v.toPrecision(5)).toString();
             const rows = [["Runs", `${st.n} of ${st.runs} measured, ${st.parts} varying part${st.parts === 1 ? "" : "s"}`], ["Mean", f(st.mean)], ["Std deviation", f(st.std)], ["Min / max", `${f(st.min)} / ${f(st.max)}`], ["Median", f(st.median)], ["±3σ", `${f(st.mean - 3 * st.std)} … ${f(st.mean + 3 * st.std)}`]];
@@ -299,6 +329,7 @@ class GraphWindow {
         this.tabsEl.querySelectorAll(".graph-tab").forEach(t => t.classList.toggle("active", t.dataset.id === kind));
         this.root.querySelector("#dcResults").classList.toggle("hidden", kind !== "dc");
         this.root.querySelector("#acScale").classList.toggle("hidden", kind !== "ac");
+        this.root.querySelector("#noiseView").classList.toggle("hidden", kind !== "noise");
         this.root.querySelector("#fftTools").style.display = kind === "fft" ? "inline-flex" : "none";
         this.root.querySelector("#graph-sim").style.visibility = kind === "live" ? "hidden" : "visible";
         this.editor.resize();
@@ -365,7 +396,7 @@ class GraphWindow {
         if (this.kind === "fft") { this.showSpectrum(); return; }
         this.show(this.kind === "live" ? "tran" : this.kind);
         if (this.kind === "step") { if (window.StudyDialog) StudyDialog.rerun(); return; }
-        const run = { tran: "runTransient", ac: "runAC", sweep: "runSweep", dc: "runDC" }[this.kind];
+        const run = { tran: "runTransient", ac: "runAC", noise: "runNoise", sweep: "runSweep", dc: "runDC" }[this.kind];
         if (run) this.runner[run]();
     }
 

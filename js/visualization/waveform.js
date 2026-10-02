@@ -246,6 +246,23 @@ class WaveformPlotter {
         this.draw();
     }
 
+    // Noise spectra: outs = [{ label, color, rows: [{ frequency, onoise, inoise, gain, parts }] }]. `view` picks output or
+    // input-referred density; the values are plotted in dBV/sqrt(Hz) (0 dB = 1 V/sqrt(Hz)).
+    plotNoise(outs, inputName, view = "out") {
+        if (!outs || !outs.length) { this.data = null; this.draw(); return; }
+        this.clearCursors();
+        this.noiseSource = [outs, inputName];
+        this.data = this.noiseData(outs, inputName, view);
+        this.draw();
+    }
+
+    noiseData(outs, inputName, view = "out") {
+        const inRef = view === "in" && outs.every(o => o.rows[0].inoise !== null);
+        const db = (v) => 20 * Math.log10(Math.max(v, 1e-18));
+        const series = outs.map((o, i) => ({ name: o.label, color: o.color || this.colors[i % this.colors.length], values: o.rows.map(r => db(inRef ? r.inoise : r.onoise)) }));
+        return { mode: "noise", logX: true, xLabel: "Frequency (Hz)", xUnit: "Hz", yLabel: `${inRef ? "Input-referred" : "Output"} noise (dBV/√Hz)`, yUnit: "dBV/√Hz", xValues: outs[0].rows.map(r => r.frequency), series, noise: { outs, view: inRef ? "in" : "out", inputName } };
+    }
+
     // plot data for a Bode plot from complex responses (also used by parametric sweeps, which overlay many)
     // phasors: [{ label, color?, z: Complex[] }]
     acData(freqPoints, phasors) {

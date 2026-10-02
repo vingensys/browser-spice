@@ -234,6 +234,7 @@ class ComplexStamper {
 
     add(i, j, re, im = 0) {
         if (i < 0 || j < 0) return;
+        if (this.transpose) { const t = i; i = j; j = t; }       // build the transposed matrix (adjoint analyses)
         const n = this.n;
         this.sys.add(i, j, re);
         this.sys.add(n + i, n + j, re);

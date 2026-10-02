@@ -1090,6 +1090,48 @@ test("SPICE decks: B cards parse (V= and I=, spaces around =), and inside a subc
     if (!bad.warnings.some(w => /unknown function/.test(w))) throw new Error("a bad expression should warn: " + bad.warnings);
 });
 
+
+console.log("noise analysis");
+
+test("noise: two 1k resistors in a divider give the thermal noise of 500 ohms", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], { wave: Waveform.dc(0), acMag: 1 })); c.add(new Resistor("R1", ["in", "out"], { r: 1000 })); c.add(new Resistor("R2", ["out", "0"], { r: 1000 }));
+    const r = new SimEngine(c).noise({ out: ["out"], input: "V1", fStart: 10, fStop: 1000, pointsPerDecade: 2 });
+    const kT = S.SIM.K * 300.15;
+    near(r[0].onoise, Math.sqrt(4 * kT * 500), 1e-12, "output noise density");
+    near(r[0].gain, 0.5, 1e-9, "gain input to output"); near(r[0].inoise, Math.sqrt(4 * kT * 500) / 0.5, 1e-12, "input referred");
+    rel(r[0].parts["R1 thermal"], 4 * kT * 1000 * 0.25, 1e-6, "each resistor contributes through its own transfer"); rel(r[0].parts["R2 thermal"], r[0].parts["R1 thermal"], 1e-6);
+});
+test("noise: the integrated noise of an RC low-pass is sqrt(kT/C), independent of R", () => {
+    for (const R of [1e3, 1e5]) {
+        const C = 1e-9, c = new SimCircuit();
+        c.add(new VoltageSource("V1", ["in", "0"], { wave: Waveform.dc(0), acMag: 1 })); c.add(new Resistor("R1", ["in", "out"], { r: R })); c.add(new Capacitor("C1", ["out", "0"], { c: C }));
+        const r = new SimEngine(c).noise({ out: ["out"], fStart: 1e-1, fStop: 1e10, pointsPerDecade: 60 });
+        let p = 0;
+        for (let i = 1; i < r.length; i++) p += 0.5 * (r[i].onoise ** 2 + r[i - 1].onoise ** 2) * (r[i].frequency - r[i - 1].frequency);
+        rel(Math.sqrt(p), Math.sqrt(S.SIM.K * 300.15 / C), 0.01, `R=${R}`);
+    }
+});
+test("noise: a forward-biased diode adds shot noise 2qI", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], vdc(5))); c.add(new Resistor("R1", ["in", "a"], { r: 1000 })); c.add(new Diode("D1", ["a", "0"], { is: 1e-14 }));
+    const eng = new SimEngine(c), r = eng.noise({ out: ["a"], fStart: 100, fStop: 1000, pointsPerDecade: 1 });
+    const id = c.elements.find(e => e.name === "D1").id, rd = S.SIM.VT / id;       // small-signal resistance
+    const rp = 1 / (1 / 1000 + 1 / rd);
+    rel(r[0].parts["D1 shot"], 2 * S.SIM.Q * id * rp * rp, 0.02);
+    rel(r[0].parts["R1 thermal"], (4 * S.SIM.K * 300.15 / 1000) * rp * rp, 0.02);
+});
+test("noise: a noise-free circuit and a ground output are reported sensibly", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], { wave: Waveform.dc(1), acMag: 1 })); c.add(new Resistor("R1", ["in", "0"], { r: 1000 }));
+    let msg = ""; try { new SimEngine(c).noise({ out: ["0"] }); } catch (e) { msg = e.message; }
+    if (!/other than ground/.test(msg)) throw new Error(msg);
+});
+test("noise: the temperature changes the thermal noise as the square root of absolute temperature", () => {
+    const mk = (T) => { const c = new SimCircuit(); c.add(new Resistor("R1", ["a", "0"], { r: 1000 })); c.add(new CurrentSource("I1", ["0", "a"], { wave: Waveform.dc(0), acMag: 1 })); return new SimEngine(c, { temp: T }).noise({ out: ["a"], fStart: 10, fStop: 100, pointsPerDecade: 1 })[0].onoise; };
+    near(mk(127) / mk(27), Math.sqrt(400.15 / 300.15), 1e-9);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

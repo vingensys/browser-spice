@@ -13,6 +13,8 @@ const SIM = {
     K_OVER_Q: 8.617333262e-5,  // Boltzmann / charge (V per kelvin)
     VT: 8.617333262e-5 * 300.15, // kT/q at 27 C
     GMIN: 1e-12,
+    Q: 1.602176634e-19,       // electron charge (C)
+    K: 1.380649e-23,          // Boltzmann constant (J/K)
     EXP_MAX: 80
 };
 
@@ -212,6 +214,8 @@ class Element {
     accept(ctx) { }
     current(x) { return 0; }
     breakpoints(tStop) { return []; }
+    // current-noise sources at the present operating point: [{ p, n, psd, label }], psd in A^2/Hz (null: noiseless)
+    noiseSources(kT) { return []; }
 }
 
 
@@ -225,6 +229,7 @@ class Resistor extends Element {
     }
     stamp(ctx) { ctx.sys.addG(this.n[0], this.n[1], 1 / this.r); }
     stampAC(ac) { ac.addY(this.n[0], this.n[1], 1 / this.r, 0); }
+    noiseSources(kT) { return [{ p: this.n[0], n: this.n[1], psd: 4 * kT / this.r, label: "thermal" }]; }
     current(x) { return (this.v(x, 0) - this.v(x, 1)) / this.r; }
     v(x, k) { return this.n[k] < 0 ? 0 : x[this.n[k]]; }
 }
@@ -647,6 +652,12 @@ class Diode extends NonlinearElement {
         this.keepForAC([ai, k], [[g, -g], [-g, g]]);
     }
 
+    noiseSources(kT) {
+        const out = [{ p: this.ai, n: this.n[1], psd: 2 * SIM.Q * Math.abs(this.id), label: "shot" }];
+        if (this.p.rs > 0) out.push({ p: this.n[0], n: this.ai, psd: 4 * kT / this.p.rs, label: "rs thermal" });
+        return out;
+    }
+
     stampAC(ac, omega) {
         if (this.p.rs > 0) ac.addY(this.n[0], this.ai, 1 / this.p.rs, 0);
         const g = this.gd || SIM.GMIN;
@@ -827,6 +838,11 @@ class BJT extends NonlinearElement {
         }
     }
 
+    noiseSources(kT) {
+        const [b, c, e] = this.n;
+        return [{ p: c, n: e, psd: 2 * SIM.Q * Math.abs(this.ic), label: "collector shot" }, { p: b, n: e, psd: 2 * SIM.Q * Math.abs(this.ib), label: "base shot" }];
+    }
+
     stampAC(ac, omega) {
         this.stampACJacobian(ac);
         if (!this.hasCaps) return;
@@ -955,6 +971,15 @@ class MOSFET extends NonlinearElement {
         ctx.sys.addG(g, s, ctx.gmin);
 
         this.keepForAC([g, d, s], J);
+    }
+
+    // channel thermal noise 4kT * 2/3 * gm between the internal drain and source
+    noiseSources(kT) {
+        const gm = this.acJ ? Math.abs(this.acJ[1][0]) : 0;
+        const out = [{ p: this.di, n: this.si, psd: 4 * kT * (2 / 3) * gm, label: "channel thermal" }];
+        if (this.p.rd > 0) out.push({ p: this.n[1], n: this.di, psd: 4 * kT / this.p.rd, label: "rd thermal" });
+        if (this.p.rs > 0) out.push({ p: this.n[2], n: this.si, psd: 4 * kT / this.p.rs, label: "rs thermal" });
+        return out;
     }
 
     stampAC(ac) {

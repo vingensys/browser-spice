@@ -7,7 +7,7 @@
     "postinstall": "node scripts/vendor-ngspice.mjs",
     "vendor": "node scripts/vendor-ngspice.mjs",
     "serve": "node scripts/serve.mjs",
-    "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/fuzz.test.js && node tests/ngspice-wasm.test.js && node tests/plot.test.js && node tests/logic.test.js && node tests/scope.test.js && node tests/logic.analyser.test.js && node tests/fft.test.js",
+    "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/fuzz.test.js && node tests/noise.ngspice.test.js && node tests/ngspice-wasm.test.js && node tests/plot.test.js && node tests/logic.test.js && node tests/scope.test.js && node tests/logic.analyser.test.js && node tests/fft.test.js",
     "test:browser": "node tests/run-browser.mjs",
     "test:all": "npm test && npm run test:browser"
   },

@@ -31,7 +31,7 @@ against Proteus / ngspice, **P3** polish.
 | --- | --- | --- |
 | ~~No counters / shift registers / 74xx~~ | P2 | **Done**: 37 logic ICs as event-driven state machines. Still missing: memories (RAM/ROM), 74181 ALU, monostables, bidirectional buses (74245), propagation delays, and a microcontroller. |
 | Logic ICs cannot be exported to SPICE | P3 | They run in the built-in engine only. |
-| No parametric sweep, Monte Carlo, noise, Fourier, `.measure` | P2 | |
+| ~~No parametric sweep, Monte Carlo, noise, Fourier~~ | P2 | **Done** (see README). Still missing: `.measure` expressions, `.tf`, `.sens`, flicker noise. |
 | BJT has no Gummel-Poon high-injection / resistances (ikf, rb, rc, re); MOSFET is level 1; JFET has constant capacitances | P2 | Vendor models using those parameters are approximated. |
 | `.include` / `.lib` and `.subckt` libraries cannot be loaded as hierarchy; `.subckt` is flattened; no B-source expression parser | P2 | |
 | SCR, TRIAC and flip-flops have no SPICE export, so ngspice cannot run designs that use them | P2 | |
@@ -49,7 +49,7 @@ against Proteus / ngspice, **P3** polish.
 ## 4. Interoperability
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| No KiCad, Eagle, Altium import / export; no SVG / PDF schematic export; no BOM (CSV) | P2 | Roadmap section 2. |
+| No KiCad, Eagle, Altium import / export; no SVG / PDF schematic export (BOM CSV and PNG are done) | P2 | Roadmap section 2. |
 | File format is undocumented JSON with no migration path | P2 | `browser-spice/1`. |
 | No PCB layout | P2 | The other half of Proteus (roadmap section 4). |
 
