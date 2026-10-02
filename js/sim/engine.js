@@ -283,7 +283,7 @@ class SimEngine {
         const sources = [];
         for (const el of c.elements) {
             if (el.name.includes(".")) continue;
-            for (const s of el.noiseSources(kT)) if (s.psd > 0) sources.push({ ...s, name: `${el.name} ${s.label}` });
+            for (const s of el.noiseSources(kT)) if (s.psd > 0 || s.flicker > 0) sources.push({ ...s, name: `${el.name} ${s.label}` });
         }
         const idx = (name) => { const i = c.lookup(name); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
         const [op, om] = [idx(out[0]), out.length > 1 ? idx(out[1]) : -1];
@@ -317,7 +317,7 @@ class SimEngine {
             let total = 0;
             for (const s of sources) {
                 const [pr, pi] = W(s.p), [mr, mi] = W(s.n);
-                const hr = pr - mr, hi = pi - mi, p = (hr * hr + hi * hi) * s.psd;
+                const hr = pr - mr, hi = pi - mi, p = (hr * hr + hi * hi) * (s.psd + (s.flicker ? s.flicker / f : 0));
                 parts[s.name] = p; total += p;
             }
             // transfer from the chosen input source to the output: the adjoint solution read at the source

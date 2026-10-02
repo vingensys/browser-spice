@@ -264,7 +264,7 @@ class SpiceParser {
             is: p.is || 1e-14, n: p.n || 1, rs: p.rs || 0,
             bv: p.bv || Infinity, ibv: p.ibv || 1e-3, nbv: p.nbv || 1,
             cjo: p.cjo || p.cj0 || 0, vj: p.vj || 1, m: p.m || 0.5, fc: p.fc || 0.5, tt: p.tt || 0,
-            eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti
+            eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti, kf: p.kf || 0, af: p.af === undefined ? 1 : p.af
         };
     }
 
@@ -278,7 +278,7 @@ class SpiceParser {
             cje: p.cje || 0, vje: p.vje || 0.75, mje: p.mje || 0.33,
             cjc: p.cjc || 0, vjc: p.vjc || 0.75, mjc: p.mjc || 0.33,
             tf: p.tf || 0, tr: p.tr || 0, fc: p.fc || 0.5,
-            eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti, xtb: p.xtb || 0
+            eg: p.eg || 1.11, xti: p.xti === undefined ? 3 : p.xti, xtb: p.xtb || 0, kf: p.kf || 0, af: p.af === undefined ? 1 : p.af
         };
     }
 
@@ -300,7 +300,7 @@ class SpiceParser {
         const p = m ? m.params : {};
         return {
             vto: p.vto === undefined ? -2 : p.vto, beta: p.beta || 1e-4, lambda: p.lambda || 0,
-            rd: p.rd || 0, rs: p.rs || 0, is: p.is || 1e-14, cgs: p.cgs || 0, cgd: p.cgd || 0
+            rd: p.rd || 0, rs: p.rs || 0, is: p.is || 1e-14, cgs: p.cgs || 0, cgd: p.cgd || 0, pb: p.pb || 1, m: p.m === undefined ? 0.5 : p.m, fc: p.fc === undefined ? 0.5 : p.fc
         };
     }
 

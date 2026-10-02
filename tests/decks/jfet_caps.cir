@@ -1,0 +1,14 @@
+JFET amplifier with gate-source and gate-drain junction capacitances
+VDD vdd 0 DC 15
+VIN in 0 SIN(0 0.1 200k) AC 0.1
+RIN in g 10k
+RG g 0 1Meg
+RD vdd d 3.3k
+RS s 0 1k
+CS s 0 100u
+J1 d g s JN
+.model JN NJF(VTO=-2 BETA=1.0m LAMBDA=0.005 RD=10 RS=10 CGS=8p CGD=3p PB=0.8)
+.op
+.ac dec 10 1k 100Meg
+.tran 20n 40u
+.end

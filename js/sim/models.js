@@ -73,6 +73,7 @@ function simModelCardFromParams(kind, name, p) {
         if (isFinite(p.bv)) parts.push(`BV=${f(p.bv)}`, `IBV=${f(p.ibv)}`);
         if (p.cjo) parts.push(`CJO=${f(p.cjo)}`, `VJ=${f(p.vj)}`, `M=${f(p.m)}`);
         if (p.tt) parts.push(`TT=${f(p.tt)}`);
+        if (p.kf) parts.push(`KF=${f(p.kf)}`, `AF=${f(p.af === undefined ? 1 : p.af)}`);
         return `.model ${name} D(${parts.join(" ")})`;
     }
     if (kind === "BJT_NPN" || kind === "BJT_PNP") {
@@ -90,6 +91,7 @@ function simModelCardFromParams(kind, name, p) {
         if (p.cjc) parts.push(`CJC=${f(p.cjc)}`, `VJC=${f(p.vjc || 0.75)}`, `MJC=${f(p.mjc || 0.33)}`);
         if (p.tf) parts.push(`TF=${f(p.tf)}`);
         if (p.tr) parts.push(`TR=${f(p.tr)}`);
+        if (p.kf) parts.push(`KF=${f(p.kf)}`, `AF=${f(p.af === undefined ? 1 : p.af)}`);
         return `.model ${name} ${t}(${parts.join(" ")})`;
     }
     if (kind === "NMOS" || kind === "PMOS") {
@@ -105,6 +107,9 @@ function simModelCardFromParams(kind, name, p) {
         if (p.rd) parts.push(`RD=${f(p.rd)}`);
         if (p.rs) parts.push(`RS=${f(p.rs)}`);
         if (p.is) parts.push(`IS=${f(p.is)}`);
+        if (p.cgs) parts.push(`CGS=${f(p.cgs)}`);
+        if (p.cgd) parts.push(`CGD=${f(p.cgd)}`);
+        if (p.pb && p.pb !== 1) parts.push(`PB=${f(p.pb)}`);
         return `.model ${name} ${kind === "JFET_N" ? "NJF" : "PJF"}(${parts.join(" ")})`;
     }
     return null;

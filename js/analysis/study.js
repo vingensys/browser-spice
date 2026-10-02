@@ -261,6 +261,37 @@ class Study {
         return { mode: "transient", xLabel: "Time", yLabel: "Voltage (V) / Current (A)", xValues: grid, series, study: { kind: "overlay", param: names } };
     }
 
+    // ---- sensitivity ------------------------------------------------------------------------------------------------------
+
+    // How strongly each part value moves one measurement: every parameter is raised by `delta` percent in turn and the
+    // result compared with the nominal run. Returns rows sorted by influence:
+    // { label, nominal, perturbed, abs (dm/dx), rel (percent change of the result per percent change of the part) }
+    static async sensitivity(editor, runner, spec, hooks = {}) {
+        const delta = (Number.isFinite(spec.delta) ? spec.delta : 1) / 100;
+        const probes = editor.probes.filter(pr => pr.graph !== false);
+        if (!probes.length) throw new Error("Add a probe to measure.");
+        const pi = Math.min(Math.max(spec.probe || 0, 0), probes.length - 1);
+        const metric = spec.analysis === "op" ? "value" : spec.metric;
+        const all = Study.parameters(editor, runner).filter(p => p.id !== "temp" && !/\.(frequency|acPhase)$/.test(p.id) && Number.isFinite(p.get()) && p.get() !== 0);
+        if (all.length > 80) throw new Error(`${all.length} parameters is too many to rank (the limit is 80).`);
+        const measureNow = async () => Study.metric(await Study.solve(editor, runner, spec.analysis), pi, metric, spec.freq);
+        const rows = [];
+        const nominal = await measureNow();
+        let done = 0;
+        for (const p of all) {
+            if (hooks.cancelled && hooks.cancelled()) throw new Error("Cancelled");
+            const x0 = p.get();
+            let m1;
+            await Study.withRestore(editor, [p], async () => { p.set(x0 * (1 + delta)); editor.refreshWires(); m1 = await measureNow(); });
+            const dm = m1 - nominal, dx = x0 * delta;
+            rows.push({ label: p.label, unit: p.unit, x0, nominal, perturbed: m1, abs: dm / dx, rel: Number.isFinite(nominal) && nominal !== 0 ? (dm / nominal) / delta : (dm === 0 ? 0 : NaN) });
+            if (hooks.progress) hooks.progress(++done, all.length);
+            if (done % 2 === 0) await new Promise(r => setTimeout(r));
+        }
+        rows.sort((a, b) => Math.abs(b.rel || 0) - Math.abs(a.rel || 0));
+        return { rows, nominal, probe: probes[pi].label, metric, analysis: spec.analysis, delta: delta * 100 };
+    }
+
     // ---- Monte Carlo ----------------------------------------------------------------------------------------------------
 
     static rng(seed) {      // mulberry32

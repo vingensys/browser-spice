@@ -603,3 +603,4 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 .palette-row.sel, .palette-row:hover { background: var(--ui-accent, #3b82f6); color: #fff; }
 .palette-row.off { opacity: 0.45; cursor: default; }
 .palette-row kbd { font-size: 11px; opacity: 0.8; }
+.se-bar { display: inline-block; height: 10px; border-radius: 2px; vertical-align: middle; }

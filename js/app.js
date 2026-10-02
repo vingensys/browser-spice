@@ -178,6 +178,7 @@
     C("sheet.next", "Next Sheet", { keys: "Ctrl+PageDown", enabled: () => editor.sheets.length > 1, run: () => { editor.sheetStack = []; editor.switchSheet((editor.sheetIndex + 1) % editor.sheets.length); } });
     C("design.params", "Parameters…", { run: () => ParamsDialog.open(editor, runner) });
     C("design.sweep", "Parametric Sweep…", { run: () => StudyDialog.openSweep() });
+    C("design.sensitivity", "Sensitivity…", { run: () => StudyDialog.openSensitivity() });
     C("design.montecarlo", "Monte Carlo…", { run: () => StudyDialog.openMonteCarlo() });
     C("design.erc", "Electrical Rules Check", { icon: "erc", run: runErc });
 
@@ -242,7 +243,7 @@
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
-        { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
+        { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "design.sensitivity", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },

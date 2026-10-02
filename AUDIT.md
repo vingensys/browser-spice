@@ -31,8 +31,8 @@ against Proteus / ngspice, **P3** polish.
 | --- | --- | --- |
 | ~~No counters / shift registers / 74xx~~ | P2 | **Done**: 37 logic ICs as event-driven state machines. Still missing: memories (RAM/ROM), 74181 ALU, monostables, bidirectional buses (74245), propagation delays, and a microcontroller. |
 | Logic ICs cannot be exported to SPICE | P3 | They run in the built-in engine only. |
-| ~~No parametric sweep, Monte Carlo, noise, Fourier~~ | P2 | **Done** (see README). `.measure` and `.tf` are done too. Still missing: `.sens`, flicker noise. |
-| ~~BJT has no Gummel-Poon~~ | P2 | **Done**: full Gummel-Poon (VAR, IKF, IKR, ISE/NE, ISC/NC, RB, RC, RE, base-charge-scaled transit time with transcapacitance), checked against ngspice in a reference deck and in the random-circuit test. MOSFET level 1 is now complete (body node, body effect, junction / overlap / Meyer capacitances). Still open: JFET has constant capacitances, no `IRB`/`XTF` effects, no level 2/3/BSIM. |
+| ~~No parametric sweep, Monte Carlo, noise, Fourier~~ | P2 | **Done** (see README). `.measure`, `.tf`, flicker noise and a finite-difference sensitivity ranking are done too. |
+| ~~BJT has no Gummel-Poon~~ | P2 | **Done**: full Gummel-Poon (VAR, IKF, IKR, ISE/NE, ISC/NC, RB, RC, RE, base-charge-scaled transit time with transcapacitance), checked against ngspice in a reference deck and in the random-circuit test. MOSFET level 1 is now complete (body node, body effect, junction / overlap / Meyer capacitances). Still open: JFET gates now have depletion capacitances; no `IRB`/`XTF` effects, no level 2/3/BSIM. |
 | `.include` / `.lib` and `.subckt` libraries cannot be loaded as hierarchy; `.subckt` is flattened | P2 | **Partly done**: a `.subckt` in an imported file becomes a part (see README); a schematic is still one flat sheet, and `.include` files cannot be fetched from a path. |
 | SCR, TRIAC and flip-flops have no SPICE export, so ngspice cannot run designs that use them | P2 | |
 | Regulators have no current limit; relay export is approximate | P3 | |

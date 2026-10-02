@@ -525,7 +525,7 @@ class Diode extends NonlinearElement {
         super(name, nodes);
         this.p = Object.assign({
             is: 1e-14, n: 1, rs: 0, bv: Infinity, ibv: 1e-3, nbv: 1,
-            cjo: 0, vj: 0.7, m: 0.5, fc: 0.5, tt: 0, eg: 1.11, xti: 3
+            cjo: 0, vj: 0.7, m: 0.5, fc: 0.5, tt: 0, eg: 1.11, xti: 3, kf: 0, af: 1
         }, p);
         this.p0 = this.p;
         this.setTemperature(27);
@@ -654,6 +654,7 @@ class Diode extends NonlinearElement {
 
     noiseSources(kT) {
         const out = [{ p: this.ai, n: this.n[1], psd: 2 * SIM.Q * Math.abs(this.id), label: "shot" }];
+        if (this.p.kf > 0) out.push({ p: this.ai, n: this.n[1], psd: 0, flicker: this.p.kf * Math.pow(Math.abs(this.id), this.p.af === undefined ? 1 : this.p.af), label: "flicker" });
         if (this.p.rs > 0) out.push({ p: this.n[0], n: this.ai, psd: 4 * kT / this.p.rs, label: "rs thermal" });
         return out;
     }
@@ -698,7 +699,7 @@ class BJT extends NonlinearElement {
         this.p = Object.assign({
             is: 1e-16, bf: 100, br: 1, nf: 1, nr: 1, vaf: 0, var: 0, ikf: 0, ikr: 0, ise: 0, ne: 1.5, isc: 0, nc: 2, rb: 0, rc: 0, re: 0,
             cje: 0, vje: 0.75, mje: 0.33, cjc: 0, vjc: 0.75, mjc: 0.33, tf: 0, tr: 0, fc: 0.5,
-            eg: 1.11, xti: 3, xtb: 0
+            eg: 1.11, xti: 3, xtb: 0, kf: 0, af: 1
         }, p);
         this.p0 = this.p;
         this.setTemperature(27);
@@ -865,6 +866,7 @@ class BJT extends NonlinearElement {
     noiseSources(kT) {
         const [b, c, e] = this.nn, rp = this.p;
         const out = [{ p: c, n: e, psd: 2 * SIM.Q * Math.abs(this.ic), label: "collector shot" }, { p: b, n: e, psd: 2 * SIM.Q * Math.abs(this.ib), label: "base shot" }];
+        if (rp.kf > 0) out.push({ p: b, n: e, psd: 0, flicker: rp.kf * Math.pow(Math.abs(this.ib), rp.af === undefined ? 1 : rp.af), label: "flicker" });
         if (rp.rb > 0) out.push({ p: this.n[0], n: b, psd: 4 * kT / rp.rb, label: "rb thermal" });
         if (rp.rc > 0) out.push({ p: this.n[1], n: c, psd: 4 * kT / rp.rc, label: "rc thermal" });
         if (rp.re > 0) out.push({ p: this.n[2], n: e, psd: 4 * kT / rp.re, label: "re thermal" });

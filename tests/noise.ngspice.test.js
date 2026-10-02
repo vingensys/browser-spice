@@ -13,6 +13,7 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "noise-"));
 
 // deck, output node, input source, band
 const CASES = [
+    ["noise_flicker", "c", "vin", [1, 1e5]],
     ["ce_amp", "c", "vin", [10, 1e6]],
     ["cs_amp", "d", "vin", [10, 1e6]],
     ["diff_pair", "c1", "v1", [1e3, 1e6]],

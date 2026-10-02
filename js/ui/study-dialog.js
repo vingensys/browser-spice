@@ -179,6 +179,57 @@ const StudyDialog = {
         });
     },
 
+    // ---- sensitivity ---------------------------------------------------------------------------------------------------------
+    openSensitivity() {
+        const editor = window.editor, runner = window.runner;
+        if (!editor) return;
+        const esc = StudyDialog.esc;
+        const memo = Object.assign({ analysis: "op", metric: "final", freq: 1000, delta: 1 }, StudyDialog.memo.sens || {});
+        const root = StudyDialog.shell(`
+            <label>Analysis</label><select id="seAnalysis"><option value="op">Operating point</option><option value="tran">Transient</option><option value="ac">AC (frequency response)</option></select>
+            <label>On probe</label><select id="seProbe">${StudyDialog.probeOptions(editor)}</select>
+            <label class="se-m">Measure</label><select id="seMetric" class="se-m"></select>
+            <label class="se-f">At frequency (Hz)</label><input id="seFreq" class="se-f" value="${memo.freq}">
+            <label>Change each part by (%)</label><input id="seDelta" value="${memo.delta}">
+            <div class="span se-out"></div>`);
+        const q = (id) => root.querySelector("#" + id);
+        const sync = () => {
+            const an = q("seAnalysis").value;
+            root.querySelectorAll(".se-m").forEach(e => e.classList.toggle("hidden", an === "op"));
+            root.querySelectorAll(".se-f").forEach(e => e.classList.toggle("hidden", an !== "ac"));
+            if (an !== "op") { const cur = q("seMetric").value; q("seMetric").innerHTML = StudyDialog.metricOptions(an, Study.METRICS[an].some(m => m[0] === cur) ? cur : Study.METRICS[an][0][0]); }
+        };
+        q("seAnalysis").value = memo.analysis; q("seAnalysis").onchange = sync; sync();
+        let last = null;
+        const show = (res) => {
+            last = res;
+            const f = (v) => (Number.isFinite(v) ? Number(v.toPrecision(4)).toString() : "—");
+            const max = Math.max(...res.rows.map(r => Math.abs(r.rel || 0)), 1e-12);
+            root.querySelector(".se-out").innerHTML = `<div class="prop-note">${esc(res.probe)}: ${esc(res.analysis === "op" ? "operating point value" : (Study.METRICS[res.analysis].find(m => m[0] === res.metric) || [0, res.metric])[1])}, nominal ${f(res.nominal)}. Each part changed by ${res.delta}%.</div>
+              <table class="results-table"><thead><tr><th>Part value</th><th>Nominal</th><th>% result per % part</th><th></th><th>d(result)/d(part)</th></tr></thead><tbody>${
+                res.rows.map(r => `<tr><td>${esc(r.label)}</td><td>${esc(Units.formatSI(r.x0, r.unit || ""))}</td><td class="val">${Number.isFinite(r.rel) ? (r.rel >= 0 ? "+" : "") + r.rel.toFixed(3) : "—"}</td><td><span class="se-bar" style="width:${Math.round(100 * Math.abs(r.rel || 0) / max)}px;background:${(r.rel || 0) >= 0 ? "#2e7d32" : "#c62828"}"></span></td><td>${f(r.abs)}</td></tr>`).join("")}</tbody></table>`;
+        };
+        Dialog.open({
+            title: "Sensitivity", content: root, width: "720px",
+            buttons: [
+                { label: "Cancel", onClick: () => { if (StudyDialog.running) { StudyDialog.running.cancel = true; SimWorker.cancel(); } } },
+                { label: "Copy CSV", onClick: () => { if (last) { try { navigator.clipboard.writeText(["part,nominal,relative,absolute", ...last.rows.map(r => `${PlotMath.csvCell(r.label)},${r.x0},${r.rel},${r.abs}`)].join("\n")); } catch (e) { /* no clipboard */ } } return false; } },
+                { label: "Run", primary: true, onClick: () => {
+                    if (StudyDialog.running) return false;
+                    const s = { analysis: q("seAnalysis").value, metric: q("seMetric").value, probe: Number(q("seProbe").value) || 0, freq: Units.parseSI(q("seFreq").value) || 1000, delta: Units.parseSI(q("seDelta").value) || 1 };
+                    StudyDialog.memo.sens = s;
+                    const bar = root.querySelector(".study-bar"), msg = root.querySelector(".study-msg"), state = { cancel: false };
+                    StudyDialog.running = state; bar.style.display = "block"; msg.className = "study-msg"; msg.textContent = "";
+                    Study.sensitivity(editor, runner, s, { cancelled: () => state.cancel, progress: (i, n) => { bar.firstElementChild.style.width = `${(100 * i) / n}%`; msg.textContent = `Part ${i} of ${n}`; } })
+                        .then((res) => { show(res); msg.textContent = `${res.rows.length} part values ranked.`; })
+                        .catch((e) => { msg.textContent = e.message === "Cancelled" ? "Cancelled." : e.message; msg.className = "study-msg " + (e.message === "Cancelled" ? "" : "err"); })
+                        .finally(() => { StudyDialog.running = null; bar.style.display = "none"; });
+                    return false;
+                } }
+            ]
+        });
+    },
+
     // ---- Monte Carlo -------------------------------------------------------------------------------------------------
     openMonteCarlo(spec = null) {
         const editor = window.editor, runner = window.runner, graph = window.graph;

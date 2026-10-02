@@ -1,0 +1,15 @@
+BJT amplifier with flicker noise
+VCC vcc 0 DC 12
+VIN in 0 DC 0 AC 1
+CIN in b 10u
+R1 vcc b 47k
+R2 b 0 10k
+RC vcc c 2.2k
+RE e 0 470
+CE e 0 100u
+Q1 c b e QN
+D1 b 0 DF
+.model QN NPN(IS=6.7e-15 BF=416 VAF=74 KF=1e-16 AF=1.3 RB=60)
+.model DF D(IS=1e-14 KF=2e-17 AF=1.1)
+.op
+.end

@@ -596,6 +596,23 @@ window.analysisTests = async function () {
     ok("it lists the parameters and escapes text", /<h2>Parameters<\/h2>/.test(html) && !/<script/.test(html));
     editor.measures = []; editor.params = []; graph.hide();
 
+
+    // ======================================================== sensitivity
+    clear(); editor.resetSheets();
+    const sb2 = new ExampleBuilder(editor);
+    const sv = sb2.part("V", 100, 300, { rot: 270, dcVoltage: 10, value: "10 V" }), sra = sb2.part("R", 300, 200, { value: "1 kΩ" }), srb = sb2.part("R", 460, 300, { rot: 90, value: "3 kΩ" }), sg = sb2.part("GND", 460, 440), sg0 = sb2.part("GND", 100, 440);
+    sb2.wire(sv, "2", sra, "1"); sb2.wire(sra, "2", srb, "1"); sb2.wire(srb, "2", sg, "1"); sb2.wire(sv, "1", sg0, "1"); sb2.vprobe(sra, "2", "Vout"); sb2.finish();
+    const sens = await Study.sensitivity(editor, runner, { analysis: "op", probe: 0, delta: 1 });
+    const byLabel = (re) => sens.rows.find(r => re.test(r.label));
+    ok("a divider: the output follows the source one for one", near(byLabel(/V1/).rel, 1, 0.01), byLabel(/V1/));
+    ok("the bottom resistor has sensitivity R1/(R1+R2) = 0.25 and the top one -0.25", near(byLabel(/R2/).rel, 0.25, 0.01) && near(byLabel(/R1/).rel, -0.25, 0.01), sens.rows.map(r => [r.label, r.rel]));
+    ok("rows are sorted by influence and the circuit is restored", sens.rows[0].label.includes("V1") && byLabel(/R1/).x0 === 1000 && byLabel(/R2/).x0 === 3000 && byLabel(/R1/).label && sra.value === "1 kΩ", sens.rows.map(r => r.label));
+    Commands.run("design.sensitivity");
+    ok("Design > Sensitivity opens its dialog", !!document.querySelector(".dialog #seAnalysis"));
+    [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Run").click(); await wait(1200);
+    ok("it ranks the parts in a table with bars", document.querySelectorAll(".se-out tbody tr").length === 3 && document.querySelectorAll(".se-bar").length === 3, document.querySelector(".se-out") && document.querySelector(".se-out").textContent.slice(0, 100));
+    Dialog.close("t");
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

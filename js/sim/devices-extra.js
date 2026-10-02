@@ -10,18 +10,21 @@
 class JFET extends MOSFET {
     constructor(name, nodes, polarity, p = {}) {
         super(name, nodes, polarity, {});
-        this.p = Object.assign({}, this.p, { vto: -2, beta: 1e-3, lambda: 0, rd: 0, rs: 0, is: 1e-14, cgs: 0, cgd: 0 }, p);
+        this.p = Object.assign({}, this.p, { vto: -2, beta: 1e-3, lambda: 0, rd: 0, rs: 0, is: 1e-14, cgs: 0, cgd: 0, pb: 1, m: 0.5, fc: 0.5 }, p);
         delete this.p.bodyDiode;
+        // the gate-channel junctions carry the zero-bias capacitances (depletion capacitors that follow the bias), not fixed ones
+        this.cjgs = this.p.cgs; this.cjgd = this.p.cgd;
+        this.p.cgs = 0; this.p.cgd = 0;
     }
 
     bind(circuit) {
         super.bind(circuit);
         const [g, d, s] = this.nodeNames;
-        const jd = { is: this.p.is, n: 1, rs: 0 };
+        const jd = (cj) => ({ is: this.p.is, n: 1, rs: 0, cjo: cj, vj: this.p.pb, m: this.p.m, fc: this.p.fc });
         // the gate forms a pn junction with the channel (anode at the gate for an N-channel part)
         const di = this.p.rd > 0 ? `${this.name}#d` : d, si = this.p.rs > 0 ? `${this.name}#s` : s;
         const pairs = this.pol > 0 ? [[g, si, "gs"], [g, di, "gd"]] : [[si, g, "gs"], [di, g, "gd"]];
-        for (const [a, b, tag] of pairs) circuit.add(new Diode(`${this.name}.${tag}`, [a, b], jd));
+        for (const [a, b, tag] of pairs) circuit.add(new Diode(`${this.name}.${tag}`, [a, b], jd(tag === "gs" ? this.cjgs : this.cjgd)));
     }
 
     fwd(vgs, vds) {
