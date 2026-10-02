@@ -9,6 +9,8 @@ netlists with standard SPICE tools. No build step, no server needed. See [ROADMA
 - Instruments: multi-channel oscilloscope (triggers, cursors, FFT, saved traces), logic analyser, spectrum, cursors and CSV / PNG export on every graph.
 - Works anywhere: analyses run on Web Workers (cancellable), installable and offline, share a design as a link, export report / BOM / PNG / SPICE, and an **MCP server** so an AI assistant can use the same engine.
 
+Live copy: https://vingensys.github.io/browser-spice/ (GitHub Pages; the ngspice option loads its engine from a CDN there).
+
 ```bash
 npm install          # optional: also vendors the ngspice WebAssembly engine
 npm run serve        # http://localhost:8137 (no-cache dev server; the build id shows at the bottom right)

@@ -66,7 +66,8 @@ class NgspiceBackend {
             NgspiceBackend.loading = (async () => {
                 let mod;
                 try {
-                    mod = await import(NGSPICE_LOCAL);
+                    try { mod = await import(NGSPICE_LOCAL); }
+                    catch (e) { mod = await import("https://cdn.jsdelivr.net/npm/eecircuit-engine@1.8.0/dist/eecircuit-engine.mjs"); }
                 } catch (e) {
                     throw new Error("The ngspice engine is not installed. Run `npm install` in the project folder " +
                         "(it copies the engine into vendor/ngspice/), then reload.");
