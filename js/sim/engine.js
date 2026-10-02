@@ -211,6 +211,47 @@ class SimEngine {
         return Object.assign({ x: r.x, method, iterations: r.iters }, this.snapshot(r.x));
     }
 
+    // ------------------------------------------------------- transfer function (.tf)
+
+    // Small-signal DC gain from `input` (a source name) to the output node pair, plus the resistance seen by the input
+    // and the resistance seen looking back into the output, all at the operating point. Capacitors are open and
+    // inductors short (the AC matrix at zero frequency). Resistances may be Infinity (an input that draws no current).
+    tf({ out, input }) {
+        const c = this.c;
+        this.operatingPoint();
+        const src = c.elements.find(e => e.name === input && (e instanceof VoltageSource || e instanceof CurrentSource));
+        if (!src) throw new Error(`The transfer function needs an input source; "${input}" is not a voltage or current source.`);
+        const idx = (name) => { const i = c.nodeIndex.get(String(name)); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
+        const op = idx(out[0]), om = out.length > 1 ? idx(out[1]) : -1;
+        if (op < 0 && om < 0) throw new Error("The transfer function output must be a node other than ground.");
+        const n = c.nodeCount;
+        const saved = c.elements.map(e => [e, e.acActive, e._acFallback, e.acMag, e.acPhase]);
+        const solveWith = (stimulus, inject) => {
+            for (const e of c.elements) {
+                if (e instanceof VoltageSource) { e.acActive = stimulus && e === src; e._acFallback = false; if (e === src) { e.acMag = 1; e.acPhase = 0; } }
+                else if (e instanceof CurrentSource) { e.acMag = stimulus && e === src ? 1 : 0; e.acPhase = 0; }
+            }
+            const st = new ComplexStamper(c.size);
+            for (let i = 0; i < n; i++) st.add(i, i, this.opt.gmin, 0);
+            for (const e of c.elements) e.stampAC(st, 0);
+            if (inject) { st.rhs(op, 1, 0); st.rhs(om, -1, 0); }
+            try { return st.solve(); }
+            catch (err) { if (err instanceof SingularMatrixError) throw new Error(`The transfer function matrix is singular near ${this.describeIndex(err.index % c.size)}.`); throw err; }
+        };
+        try {
+            const v = (s, i) => (i < 0 ? 0 : s.re[i]);
+            const a = solveWith(true, false);
+            const gain = v(a, op) - v(a, om);
+            // input resistance: unit voltage / current drawn, or the voltage across a unit current source
+            let rin;
+            if (src instanceof VoltageSource) { const i = Math.abs(a.re[src.br]); rin = i > 1e-11 ? 1 / i : Infinity; }      // below the gmin leakage floor: no input current
+            else rin = Math.abs(v(a, src.n[0]) - v(a, src.n[1]));
+            const b = solveWith(false, true);
+            const rout = Math.abs(v(b, op) - v(b, om));
+            return { gain, rin, rout, input: src.name };
+        } finally { for (const [e, act, fb, m, ph] of saved) { e.acActive = act; e._acFallback = fb; e.acMag = m; e.acPhase = ph; } }
+    }
+
     // ---------------------------------------------------------------- noise
 
     // Small-signal noise at the output node pair `out` ([plus, minus]) from fStart to fStop. One adjoint solve per

@@ -1,0 +1,19 @@
+Measurements on a Sallen-Key low-pass and an RC high-pass
+V1 in 0 DC 0 AC 1
+R1 in a 10k
+R2 a b 10k
+C1 a out 10n
+C2 b 0 10n
+E1 out 0 b 0 1.586
+C3 in h 10n
+R3 h 0 10k
+.ac dec 40 10 100k
+.meas ac gpk max vdb(out)
+.meas ac gmin min vdb(out) from=1k to=90k
+.meas ac g1k find vdb(out) at=1k
+.meas ac p1k find vp(out) at=1k
+.meas ac fcorner when vdb(out)=-3 fall=1
+.meas ac hpk max vdb(h)
+.meas ac h1k find vdb(h) at=1k
+.meas ac hhalf when vdb(h)=-10 rise=1
+.end

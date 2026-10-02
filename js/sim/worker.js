@@ -34,6 +34,7 @@ function run(job, progress) {
             sourceCurrents: Object.fromEntries(Object.entries(r.sourceCurrents).map(([k, z]) => [k, pack(z)]))
         }));
     }
+    if (job.kind === "tf") return engine.tf({ out: a.out, input: a.input });
     if (job.kind === "noise") return engine.noise({ out: a.out, input: a.input, fStart: a.fStart, fStop: a.fStop, pointsPerDecade: a.pointsPerDecade || 10, progress });
     if (job.kind === "sweep") return engine.dcSweep(a.source, a.start, a.stop, a.step, progress);
     throw new Error(`unknown analysis ${job.kind}`);

@@ -1132,6 +1132,31 @@ test("noise: the temperature changes the thermal noise as the square root of abs
     near(mk(127) / mk(27), Math.sqrt(400.15 / 300.15), 1e-9);
 });
 
+
+console.log("transfer function");
+test("tf: a resistive divider driven by a voltage source", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], vdc(1))); c.add(new Resistor("R1", ["in", "out"], { r: 1000 })); c.add(new Resistor("R2", ["out", "0"], { r: 3000 }));
+    const r = new SimEngine(c).tf({ out: ["out"], input: "V1" });
+    near(r.gain, 0.75, 1e-9); near(r.rin, 4000, 1e-3); near(r.rout, 750, 1e-3);
+});
+test("tf: a current source input gives a transresistance", () => {
+    const c = new SimCircuit();
+    c.add(new CurrentSource("I1", ["0", "a"], vdc(1e-3))); c.add(new Resistor("R1", ["a", "0"], { r: 2000 })); c.add(new Resistor("R2", ["a", "out"], { r: 500 })); c.add(new Resistor("R3", ["out", "0"], { r: 500 }));
+    const r = new SimEngine(c).tf({ out: ["out"], input: "I1" });
+    near(r.rin, 1 / (1 / 2000 + 1 / 1000), 1e-3, "input resistance = R1 || (R2 + R3)");
+    near(r.gain, r.rin * 0.5, 1e-3, "transresistance = Rin * divider");
+});
+test("tf: an input that draws no current has infinite input resistance; a bad source is refused", () => {
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["in", "0"], vdc(1))); c.add(new Resistor("R0", ["in", "0"], { r: 100 }));
+    c.add(new BSource("B1", ["out", "0"], { mode: "V", expr: "2*v(in)" })); c.add(new Resistor("R2", ["out", "0"], { r: 1000 }));
+    const eng = new SimEngine(c), r = eng.tf({ out: ["out"], input: "V1" });
+    near(r.gain, 2, 1e-6); near(r.rout, 0, 1e-3);
+    let msg = ""; try { eng.tf({ out: ["out"], input: "R0" }); } catch (e) { msg = e.message; }
+    if (!/not a voltage or current source/.test(msg)) throw new Error(msg);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

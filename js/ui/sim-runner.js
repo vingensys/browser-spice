@@ -87,6 +87,7 @@ class SimRunner {
         if (kind === "op") return engine.operatingPoint({ uic: !!args.uic, nodeIC: args.nodeIC || null });
         if (kind === "tran") return engine.transient({ tStop: args.tStop, tStep: args.tStep, uic: args.uic, method: "trap", nodeIC: args.nodeIC });
         if (kind === "ac") return engine.ac({ fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 20 });
+        if (kind === "tf") return engine.tf({ out: args.out, input: args.input });
         if (kind === "noise") return engine.noise({ out: args.out, input: args.input, fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 10 });
         return engine.dcSweep(args.source, args.start, args.stop, args.step);
     }

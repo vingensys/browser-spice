@@ -10,7 +10,7 @@ window.analysisTests = async function () {
         plotter.cache = {}; live.stop(); ScopeWindow.closeAll(); Dialog.close("t");
         editor.setTool("select");
         editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1; editor.titleBlock = SchematicEditor.defaultTitleBlock();
-        editor.historyStack = []; editor.futureStack = []; editor.clearSelection(); editor.resetView();
+        editor.historyStack = []; editor.futureStack = []; editor.clearSelection(); editor.resetView(); editor.measures = [];
         if (opOverlay.on) opOverlay.disable();
     };
     const byName = (n) => editor.components.find(c => c.name === n);
@@ -275,6 +275,45 @@ window.analysisTests = async function () {
     editor.probes = [];
     let nerr = ""; const realToast = runner.toast; runner.toast = (m, k) => { if (k === "error") nerr = m; }; await runner.runNoise(); runner.toast = realToast;
     ok("with no probe it asks for one", /voltage probe/.test(nerr), nerr);
+    graph.hide();
+
+
+    // ======================================================== measurements and transfer function
+    clear(); loadExampleById(editor, "rc-ladder");
+    document.getElementById("simTstop").value = "50m"; document.getElementById("simTstep").value = "50u";
+    document.getElementById("simFstart").value = "1"; document.getElementById("simFstop").value = "100k"; document.getElementById("simUic").checked = true;
+    Commands.run("graph.measure");
+    ok("Graph > Measurements opens its dialog with the function list", !!document.querySelector(".dialog .measure-dlg #mFn") && document.querySelectorAll("#mFn option").length === Object.keys(Measure.FUNCS.tran).length);
+    document.getElementById("mKind").value = "ac"; document.getElementById("mKind").dispatchEvent(new Event("change"));
+    ok("choosing AC swaps the function list", document.querySelectorAll("#mFn option").length === Object.keys(Measure.FUNCS.ac).length);
+    document.getElementById("mKind").value = "tran"; document.getElementById("mKind").dispatchEvent(new Event("change"));
+    document.getElementById("mFn").value = "when"; document.getElementById("mFn").dispatchEvent(new Event("change"));
+    document.getElementById("mSig").value = "V(c1)"; document.getElementById("mLevel").value = "5";
+    [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Add").click();
+    ok("Add stores a measurement with its parameters", editor.measures.length === 1 && editor.measures[0].fn === "when" && editor.measures[0].level === 5 && editor.measures[0].sig === "V(c1)", editor.measures);
+    Dialog.close("t");
+    editor.measures.push({ name: "vmax", kind: "tran", fn: "max", sig: "V(in)" }, { name: "vend", kind: "tran", fn: "find", sig: "V(c1)", at: 0.05 }, { name: "g10", kind: "ac", fn: "find", sig: "V(c1)", at: 10 }, { name: "bw", kind: "ac", fn: "bw", sig: "V(c1)" }, { name: "bad", kind: "tran", fn: "when", sig: "V(c1)", level: 99 });
+    const mall = await MeasureDialog.evaluate(editor, runner, true), mres = mall;
+    ok("the step source reaches 10 V", near(mres[1].value, 10, 1e-6), mres[1]);
+    ok("the first capacitor reaches 5 V after some milliseconds, found by interpolation", mres[0].value > 0.003 && mres[0].value < 0.03, [mres[0], JSON.stringify(editor.measures[0]), plotter.cache.tran && plotter.cache.tran.series.map(x => x.name + ":" + x.values[x.values.length - 1])]);
+    ok("after 50 ms the capacitor has charged to nearly the supply", mres[2].value > 9.5 && mres[2].value <= 10, mres[2]);
+    ok("an AC measurement: gain at 10 Hz of the low-pass is a little under 20 dB (a 10 V DC source stands in for the unit stimulus)", mres[3].value < 20.5 && mres[3].value > 15, mres[3]);
+    ok("an AC bandwidth is positive", mres[4].value > 1, mres[4]);
+    ok("a measurement that cannot be made says why instead of a number", mres[5].error && /does not cross/.test(mres[5].error), mres[5]);
+    ok("measurements are saved with the design and restored", (() => { const sv = JSON.parse(JSON.stringify(doc.serialize())); return sv.measures.length === 6 && sv.measures[1].name === "vmax"; })());
+    const snap = editor.snapshot(); editor.measures = []; editor.restore(snap);
+    ok("and survive undo / redo snapshots", editor.measures.length === 6);
+    ok("they can be written as SPICE .meas lines", Measure.toSpice(editor.measures.find(m => m.name === "vmax")) === ".meas tran vmax max V(in)" && /^\.meas ac g10 find V\(c1\) at=10$/.test(Measure.toSpice(editor.measures.find(m => m.name === "g10"))), Measure.toSpice(editor.measures[3]));
+    editor.measures = [];
+
+    const tfInfo = NetlistExtractor.extract(editor);
+    Commands.run("graph.tf");
+    ok("Graph > Transfer Function opens its dialog", !!document.querySelector(".dialog .tf #tfOut"));
+    document.querySelector("#tfOut").value = String(editor.probes.length - 1);
+    [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Calculate").click(); await wait(500);
+    const tfText = document.querySelector(".dialog .tf-result").textContent;
+    ok("it reports gain (1 for a DC-passed ladder), input and output resistance", /Gain.*1/.test(tfText) && /Input resistance/.test(tfText) && /Output resistance/.test(tfText), tfText);
+    Dialog.close("t");
     graph.hide();
 
     clear();

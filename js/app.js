@@ -169,6 +169,8 @@
 
     C("graph.tran", "Analogue Analysis (Transient)", { run: () => graph.show("tran") });
     C("graph.ac", "Frequency Response (AC)", { run: () => graph.show("ac") });
+    C("graph.measure", "Measurements…", { run: () => MeasureDialog.open(editor, runner, graph) });
+    C("graph.tf", "Transfer Function (.tf)…", { run: () => TfDialog.open(editor, runner) });
     C("graph.noise", "Noise Analysis", { run: () => graph.show("noise") });
     C("graph.sweep", "DC Sweep", { run: () => graph.show("sweep") });
     C("graph.dc", "Operating Point", { run: () => graph.show("dc") });
@@ -227,7 +229,7 @@
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
         { title: "Design", items: ["design.titleblock", "design.settings", "-", "design.sweep", "design.montecarlo", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
-        { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.simulate"] },
+        { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
         { title: "Help", items: ["help.keys", "help.about"] }

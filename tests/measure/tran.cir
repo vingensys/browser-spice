@@ -1,0 +1,24 @@
+Measurements on an RC-filtered pulse and a ringing RLC
+V1 in 0 PULSE(0 5 1m 20u 20u 4m 10m)
+R1 in out 1k
+C1 out 0 1u
+V2 s 0 PULSE(0 2 0.5m 1u 1u 1m 3m)
+R2 s x 50
+L1 x y 10m
+C2 y 0 1u
+R3 y 0 10k
+.tran 5u 20m
+.meas tran vmax max v(out)
+.meas tran vmin min v(out)
+.meas tran vpp pp v(out) from=1m to=10m
+.meas tran vavg avg v(out) from=2m to=9m
+.meas tran vrms rms v(out) from=2m to=9m
+.meas tran vint integ v(out) from=1m to=6m
+.meas tran vat find v(out) at=3m
+.meas tran tcross when v(out)=2.5 rise=1
+.meas tran tfall when v(out)=2.5 fall=1
+.meas tran tdly trig v(in) val=2.5 rise=1 targ v(out) val=2.5 rise=1
+.meas tran ypk max v(y) from=0.4m to=4m
+.meas tran yavg avg v(y) from=1m to=2m
+.meas tran ycross when v(y)=1 cross=2
+.end

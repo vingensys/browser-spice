@@ -151,6 +151,13 @@ class SpiceParser {
             case ".dc":
                 deck.analyses.push({ type: "dc", source: tok[1], start: N(tok[2]), stop: N(tok[3]), step: N(tok[4]) });
                 break;
+            case ".tf": deck.analyses.push({ type: "tf", out: (line.toLowerCase().match(/v\(\s*([^),\s]+)\s*(?:,\s*([^)\s]+)\s*)?\)/) || []).slice(1, 3).filter(Boolean), source: tok[tok.length - 1] }); break;
+            case ".meas": case ".measure": {
+                const m = typeof Measure !== "undefined" ? Measure.parse(line) : null;
+                if (m) (deck.measures = deck.measures || []).push(m);
+                else warnings.push(`${tok[0]} ${tok.slice(1, 4).join(" ")} is not a supported measurement and was ignored`);
+                break;
+            }
             case ".temp": deck.temp = N(tok[1]); break;
             case ".ic":
                 deck.ic = deck.ic || {};
