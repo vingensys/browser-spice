@@ -387,7 +387,7 @@ class SpiceParser {
             const m = deck.models[name];
             if (m) return m;
             if (typeof SIM_MODELS !== "undefined" && kinds) for (const k of kinds) {
-                const set = SIM_MODELS[k], key = set && Object.keys(set).find(x => x.toLowerCase() === String(name).toLowerCase());
+                const set = SIM_MODELS[k], bare = String(name).toLowerCase().replace(/^[qd](?=\d)/, ""), key = set && Object.keys(set).find(x => x.toLowerCase() === String(name).toLowerCase() || x.toLowerCase() === bare);
                 if (key) return { name, type: LIBTYPE[k], params: set[key].params, library: true };
             }
             warnings.push(`model ${name} for ${what} not found, using defaults`);

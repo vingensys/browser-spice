@@ -166,6 +166,31 @@ class KicadImporter {
     }
 
     // ---------------------------------------------------------------- components -> SPICE deck
+    // ---------------------------------------------------------------- simulation models (KiCad 7 / 8 Sim.* fields)
+    // key=value pairs, values optionally in double quotes ("sffm(-5 1 100meg 5 10meg)")
+    static simParams(text) {
+        const out = {};
+        for (const m of String(text || "").matchAll(/([A-Za-z_][\w.]*)\s*=\s*(?:"([^"]*)"|(\S+))/g)) out[m[1].toLowerCase()] = m[2] !== undefined ? m[2] : m[3];
+        return out;
+    }
+
+    // a part value as SPICE reads it: "2k7" -> 2.7k, "10R" -> 10, "1M" -> 1meg (KiCad's M is mega), "2200uF;63V" -> 2200uF
+    static spiceValue(v) {
+        let t = String(v === undefined || v === null ? "" : v).split(";")[0].trim().replace(/µ/g, "u").replace(/Ω|ohms?$/gi, "");
+        t = t.replace(/^(\d+)([RrkKMGTmunpf])(\d+)$/, (_, a, u, c) => `${a}.${c}${u === "R" || u === "r" ? "" : u}`);
+        t = t.replace(/^([\d.]+)[Rr]$/, "$1");
+        t = t.replace(/^([\d.]+)M(?!eg|EG)(?=[A-Za-z]*$)/, "$1meg");
+        return t;
+    }
+
+    // Sim.Pins "1=C 2=B 3=E" -> { "1": "C", ... }
+    static simPins(text) {
+        const out = {};
+        for (const m of String(text || "").matchAll(/(\S+?)=(\S+)/g)) out[m[1]] = m[2];
+        return out;
+    }
+
+    // ---------------------------------------------------------------- components -> SPICE deck
     static toSpice(text) {
         const K = KicadImporter;
         const warnings = [];
@@ -173,7 +198,7 @@ class KicadImporter {
         const comps = K.head(root) === "kicad_sch" ? K.fromSchematic(root, warnings)
             : (K.head(root) === "export" ? K.fromNetlist(root, warnings) : null);
         if (!comps) throw new Error("This is neither a KiCad schematic (.kicad_sch) nor a KiCad netlist (.net).");
-        const node = (net) => (/^(gnd|0|agnd|dgnd|pgnd|earth|vss)$/i.test(String(net).replace(/^.*\//, "")) ? "0" : String(net).replace(/^\//, "").replace(/[^A-Za-z0-9_+\-]/g, "_").replace(/^-/, "m_") || "N0");
+        const node = (net) => (/^(gnd|0)$/i.test(String(net).replace(/^.*\//, "")) ? "0" : (String(net).replace(/^\//, "").replace(/\+/g, "p").replace(/-/g, "m").replace(/[^A-Za-z0-9_]/g, "_") || "N0"));
         const lines = [];
         const models = new Set();
         const used = new Set();
@@ -184,62 +209,121 @@ class KicadImporter {
             used.add(nm.toUpperCase());
             return nm;
         };
-        const byName = (c, ...cands) => { for (const w of cands) { const p = c.pins.find(q => q.name.toUpperCase() === w || q.name.toUpperCase().replace(/[^A-Z]/g, "") === w); if (p) return p; } return null; };
-        const byNum = (c, n) => c.pins.find(p => p.number === String(n));
-        const num = (s) => { const t = String(s).trim().replace(/Ω|ohm/gi, "").replace(/µ/g, "u"); return t; };
-        const modelName = (c) => String(c.props["Sim.Name"] || c.value || c.libId.replace(/^.*:/, "")).replace(/[^A-Za-z0-9_.\-]/g, "_");
+        const opampPins = (cc) => {
+            const f = (re) => cc.pins.find(q => re.test(q.name.replace(/\s/g, "")));
+            const o = { inp: f(/^(\+|IN\+|INP|NONINV.*|V?IN\+)$/i), inn: f(/^(-|IN-|INN|INV.*|V?IN-)$/i), vcc: f(/^(V\+|VCC|VS\+|\+V|VDD|\+VS)$/i), vee: f(/^(V-|VEE|VS-|-V|VSS|-VS)$/i), out: f(/^(OUT|OUTPUT|VOUT|O)$/i) || cc.pins.find(q => q.type === "output") };
+            return o.inp && o.inn && o.vcc && o.vee && o.out ? o : null;
+        };
+        let usesOpamp = false;
+        const extraLines = [];
+        const lib = (kinds, name) => typeof SIM_MODELS !== "undefined" && kinds.some(k => SIM_MODELS[k] && Object.keys(SIM_MODELS[k]).some(x => x.toLowerCase() === String(name).toLowerCase().replace(/^[qd](?=\d)/, "")));
+        const addModel = (name, type, kinds) => { if (models.has(name) || lib(kinds, name)) return; models.add(name); lines.push(`.model ${name} ${type}`); };
 
         for (const c of comps) {
             if (c.props["Sim.Enable"] === "0" || c.props.Sim_Enable === "0") continue;
-            const part = c.libId.replace(/^.*:/, ""), lib = c.libId.replace(/:.*$/, "");
-            const R = (c.ref.match(/^[A-Za-z]+/) || [""])[0].toUpperCase();
-            const lc = `${lib}:${part}`.toLowerCase();
-            const two = () => { const a = byNum(c, 1), b = byNum(c, 2) || c.pins[1]; return a && b ? [node(a.net), node(b.net)] : null; };
+            const sim = K.simParams(c.props["Sim.Params"]), pins = K.simPins(c.props["Sim.Pins"]);
+            const ref = c.ref, letter = (ref.match(/^[A-Za-z]+/) || [""])[0].toUpperCase();
+            const libpart = c.libId.replace(/^.*:/, ""), lc = c.libId.toLowerCase();
+            // the pin that plays a role: by Sim.Pins, else by the pin's name, else by number
+            const byRole = (cc, pm, ...roles) => {
+                for (const r of roles) { const num = Object.keys(pm).find(k => pm[k].toUpperCase() === r); if (num !== undefined) { const p = cc.pins.find(q => q.number === num); if (p) return p; } }
+                for (const r of roles) { const p = cc.pins.find(q => q.name.toUpperCase() === r || q.name.toUpperCase().replace(/[^A-Z+\-]/g, "") === r); if (p) return p; }
+                return null;
+            };
+            let dev = String(c.props["Sim.Device"] || "").toUpperCase();
+            if (!dev) {                                          // no model fields (older files, KiCad 6, plain netlists): infer from the reference
+                if (letter === "R" && c.pins.length === 2) dev = "R"; else if (letter === "C" && c.pins.length === 2) dev = "C"; else if (letter === "L" && c.pins.length === 2) dev = "L";
+                else if (letter === "D" && c.pins.length === 2 || /(^|:)(led|d_.*|1n\d+.*)$/i.test(lc) && c.pins.length === 2) dev = "D";
+                else if (letter === "Q" && c.pins.length === 3) dev = /npn/i.test(lc) ? "NPN" : /pnp/i.test(lc) ? "PNP" : (byRole(c, pins, "G", "GATE") ? (/p[-_]?(ch|mos|channel)|pmos/i.test(lc) ? "PMOS" : "NMOS") : "NPN");
+                else if (letter === "V" || letter === "I") dev = letter;
+            }
+            const byNum = (n) => c.pins.find(p => p.number === String(n));
+            const two = () => { const a = byNum(1), b = byNum(2) || c.pins[1]; if (!a || !b) throw new Error("expected pins 1 and 2"); return [node(a.net), node(b.net)]; };
+            const value = () => K.spiceValue(sim.r || sim.c || sim.l || c.value);
             try {
-                if (/^(r|r_.*|r_small|r_us|r_pot.*|potentiometer.*)$/i.test(part) && R === "R" && c.pins.length === 2) {
-                    const n = two(); lines.push(`${uniq("R", c.ref)} ${n[0]} ${n[1]} ${num(c.value)}`);
-                } else if (/^c(p|p_.*|_.*|_small|_polarized.*)?$/i.test(part) && R === "C" && c.pins.length === 2) {
-                    const n = two(); lines.push(`${uniq("C", c.ref)} ${n[0]} ${n[1]} ${num(c.value)}`);
-                } else if (/^l(_.*|_small|_core.*)?$/i.test(part) && R === "L" && c.pins.length === 2) {
-                    const n = two(); lines.push(`${uniq("L", c.ref)} ${n[0]} ${n[1]} ${num(c.value)}`);
-                } else if (R === "D" && c.pins.length === 2 || /(^|:)(d|led|d_.*|led_.*|1n\d+.*)$/i.test(lc) && c.pins.length === 2) {
-                    const a = byName(c, "A", "ANODE", "A1") || byNum(c, 2), k = byName(c, "K", "CATHODE", "K1") || byNum(c, 1);
-                    const m = /led/i.test(lc) ? (modelName(c).toUpperCase() === "LED" || /^led/i.test(c.value) || !c.value ? "RED" : modelName(c)) : modelName(c);
-                    lines.push(`${uniq("D", c.ref)} ${node(a.net)} ${node(k.net)} ${/led/i.test(lc) && /^(led|red|green|blue|yellow|white|led.*)$/i.test(m) ? (/green|blue|yellow|white/i.test(m) ? m : "RED") : m}`);
-                } else if (R === "Q" && c.pins.length === 3) {
-                    const b = byName(c, "B", "BASE"), cc = byName(c, "C", "COLLECTOR"), e = byName(c, "E", "EMITTER");
-                    const g = byName(c, "G", "GATE"), d = byName(c, "D", "DRAIN"), s = byName(c, "S", "SOURCE");
-                    if (b && cc && e) {
-                        const m = modelName(c), pnp = /pnp/i.test(lc) || /^(2n(29|39)05|bc5(5|6)|bc3(27|37)|tip(3|4)2|2n3906|bc557|bc558)/i.test(m) && !/npn/i.test(lc);
-                        lines.push(`${uniq("Q", c.ref)} ${node(cc.net)} ${node(b.net)} ${node(e.net)} ${m}`);
-                        if (pnp && !(typeof SIM_MODELS !== "undefined" && SIM_MODELS.BJT_PNP && SIM_MODELS.BJT_PNP[m.toUpperCase()]) && !models.has(m)) { models.add(m); lines.push(`.model ${m} PNP`); }
-                    } else if (g && d && s) {
-                        const m = modelName(c), p = /p[-_]?(ch|mos|channel)|pmos/i.test(lc);
-                        lines.push(`${uniq("M", c.ref)} ${node(d.net)} ${node(g.net)} ${node(s.net)} ${node(s.net)} ${m}`);
-                        if (!models.has(m)) { models.add(m); lines.push(`.model ${m} ${p ? "PMOS" : "NMOS"}`); }
-                    } else throw new Error("pins not recognised (expected B/C/E or G/D/S)");
-                } else if (/^(v|i)(dc|ac|sin|pulse|source|_.*)?$/i.test(part) || /simulation_spice:(v|i)/i.test(lc) || R === "V" && c.pins.length === 2 || R === "I" && c.pins.length === 2) {
-                    const isI = /^i/i.test(part) || R === "I";
-                    const pl = byName(c, "+", "P", "PLUS") || byNum(c, 1), mi = byName(c, "-", "N", "MINUS") || byNum(c, 2);
-                    const prm = {}; for (const kv of String(c.props["Sim.Params"] || "").split(/\s+/)) { const [a, b] = kv.split("="); if (a && b !== undefined) prm[a.toLowerCase()] = b; }
-                    const type = String(c.props["Sim.Type"] || (/sin/i.test(part) ? "SIN" : /pulse/i.test(part) ? "PULSE" : "DC")).toUpperCase();
+                if (dev === "R" || dev === "C" || dev === "L") {
+                    const n = two(), pre = dev;
+                    lines.push(`${uniq(pre, ref)} ${n[0]} ${n[1]} ${value()}`);
+                } else if (dev === "V" || dev === "I") {
+                    const pl = byRole(c, pins, "+", "P", "PLUS") || byNum(1), mi = byRole(c, pins, "-", "N", "MINUS") || byNum(2);
+                    const type = String(c.props["Sim.Type"] || "DC").toUpperCase(), n = (k, d) => K.spiceValue(sim[k] !== undefined ? sim[k] : d);
+                    const ac = sim.ac !== undefined ? ` AC ${n("ac")}` : "";
                     let spec;
-                    if (type === "SIN") spec = `SIN(${num(prm.dc || 0)} ${num(prm.ampl || prm.amp || c.value || 1)} ${num(prm.f || prm.freq || 1000)} ${num(prm.td || 0)} ${num(prm.theta || 0)})`;
-                    else if (type === "PULSE") spec = `PULSE(${num(prm.y1 || 0)} ${num(prm.y2 || prm.v2 || 5)} ${num(prm.td || 0)} ${num(prm.tr || "1n")} ${num(prm.tf || "1n")} ${num(prm.tw || prm.pw || "1m")} ${num(prm.per || "2m")})`;
-                    else spec = `DC ${num(prm.dc || c.value || 0)}`;
-                    lines.push(`${uniq(isI ? "I" : "V", c.ref)} ${node(pl.net)} ${node(mi.net)} ${spec}`);
+                    if (type === "DC") { const dcv = sim.dc !== undefined ? n("dc") : K.spiceValue(c.value); spec = `DC ${/^[-+]?[\d.]/.test(dcv) ? dcv : 0}${ac}`; }
+                    else if (type === "PWL" && sim.pwl) spec = `PWL(${sim.pwl})${ac}`;
+                    else if (type === "SIN") spec = `SIN(${n("dc", 0)} ${n("ampl", 1)} ${n("f", 1000)} ${n("td", 0)} ${n("theta", 0)} ${n("phase", 0)})${ac}`;
+                    else if (type === "PULSE") spec = `PULSE(${n("y1", 0)} ${n("y2", 5)} ${n("td", 0)} ${n("tr", "1n")} ${n("tf", "1n")} ${n("tw", "1m")} ${n("per", "2m")})${ac}`;
+                    else if (type === "EXP") spec = `EXP(${n("y1", 0)} ${n("y2", 5)} ${n("td1", 0)} ${n("tau1", "1m")} ${n("td2", "1m")} ${n("tau2", "1m")})${ac}`;
+                    else { warnings.push(`${ref}: the ${type} source type has no equivalent here (supported: DC, SIN, PULSE, EXP and raw sffm / pwl); skipped`); continue; }
+                    lines.push(`${uniq(dev, ref)} ${node(pl.net)} ${node(mi.net)} ${spec}`);
+                } else if (dev === "SPICE") {
+                    // a raw model line: model="pwl(0 -7 50n -7 ...)" type="V"; the source / element letter comes from type
+                    const sp = K.simParams(c.props["Sim.Params"]), mt = String(sp.type || letter || "X").toUpperCase(), model = sp.model || "";
+                    const order = Object.keys(pins).sort((a, b) => Number(a) - Number(b)).map(k => c.pins.find(q => q.number === k)).filter(Boolean);
+                    const nodes = (order.length ? order : c.pins).map(q => node(q.net)).join(" ");
+                    if (/^(sffm|pwl|sin|pulse|exp)\(/i.test(model) && (mt === "V" || mt === "I")) lines.push(`${uniq(mt, ref)} ${nodes} ${model}`);
+                    else if ((mt === "R" || mt === "C" || mt === "L") && /^[\d.]/.test(model)) lines.push(`${uniq(mt, ref)} ${nodes} ${K.spiceValue(model)}`);
+                    else if (/^am\(/i.test(model)) { warnings.push(`${ref}: amplitude-modulated sources are not supported; skipped`); continue; }
+                    else { warnings.push(`${ref}: a raw SPICE model (${model.slice(0, 30)}) is not understood; skipped`); continue; }
+                } else if (dev === "D") {
+                    const a = byRole(c, pins, "A", "ANODE", "A1") || byNum(2), k = byRole(c, pins, "K", "CATHODE", "K1") || byNum(1);
+                    const m = String(c.props["Sim.Name"] || c.value || "D").replace(/[^A-Za-z0-9_.\-]/g, "_");
+                    lines.push(`${uniq("D", ref)} ${node(a.net)} ${node(k.net)} ${m}`);
+                    addModel(m, "D", ["D", "LED", "DZ"]);
+                } else if (dev === "NPN" || dev === "PNP") {
+                    const cc = byRole(c, pins, "C", "COLLECTOR") || byNum(1), b = byRole(c, pins, "B", "BASE") || byNum(2), e = byRole(c, pins, "E", "EMITTER") || byNum(3);
+                    const m = String(c.props["Sim.Name"] || c.value || dev).replace(/[^A-Za-z0-9_.\-]/g, "_");
+                    lines.push(`${uniq("Q", ref)} ${node(cc.net)} ${node(b.net)} ${node(e.net)} ${m}`);
+                    addModel(m, dev, ["BJT_NPN", "BJT_PNP"]);
+                } else if (dev === "NMOS" || dev === "PMOS") {
+                    const d = byRole(c, pins, "D", "DRAIN") || byNum(1), g = byRole(c, pins, "G", "GATE") || byNum(2), so = byRole(c, pins, "S", "SOURCE") || byNum(3);
+                    const m = String(c.props["Sim.Name"] || c.value || dev).replace(/[^A-Za-z0-9_.\-]/g, "_");
+                    lines.push(`${uniq("M", ref)} ${node(d.net)} ${node(g.net)} ${node(so.net)} ${node(so.net)} ${m}`);
+                    addModel(m, dev, ["NMOS", "PMOS"]);
+                } else if ((dev === "SUBCKT" || c.props["Sim.Library"]) && opampPins(c)) {
+                    // an op-amp whose model is a vendor library file we do not have: a generic single-pole op-amp stands in, and the warning says so
+                    const o = opampPins(c);
+                    if (!usesOpamp) { usesOpamp = true; extraLines.push(...K.GENERIC_OPAMP); }
+                    lines.push(`${uniq("X", ref)} ${node(o.inp.net)} ${node(o.inn.net)} ${node(o.vcc.net)} ${node(o.vee.net)} ${node(o.out.net)} KICAD_GENERIC_OPAMP`);
+                    warnings.push(`${ref}: the model ${c.props["Sim.Name"] || c.value} (${c.props["Sim.Library"] || "library file"}) is not available; a generic op-amp (gain 100 dB, GBW 1 MHz, output swing 1.5 V inside the rails) stands in for it`);
+                } else if ((!dev || dev === "SUBCKT") && c.props["Sim.Library"] && (byRole(c, pins, "C") && byRole(c, pins, "B") && byRole(c, pins, "E"))) {
+                    const cc = byRole(c, pins, "C"), b = byRole(c, pins, "B"), e = byRole(c, pins, "E"), m = String(c.props["Sim.Name"] || c.value).replace(/[^A-Za-z0-9_.\-]/g, "_");
+                    lines.push(`${uniq("Q", ref)} ${node(cc.net)} ${node(b.net)} ${node(e.net)} ${m}`);
+                    addModel(m, /pnp/i.test(c.libId + c.value) ? "PNP" : "NPN", ["BJT_NPN", "BJT_PNP"]);
+                    warnings.push(`${ref}: the model ${m} (${c.props["Sim.Library"]}) is not available; a default transistor model stands in for it`);
+                } else if ((!dev || dev === "SUBCKT") && c.props["Sim.Library"] && c.pins.length === 2 && /diode|^d/i.test(c.libId.replace(/^.*:/, "") + letter)) {
+                    const a = byRole(c, pins, "A") || byNum(2), k = byRole(c, pins, "K") || byNum(1), m = String(c.props["Sim.Name"] || c.value).replace(/[^A-Za-z0-9_.\-]/g, "_");
+                    lines.push(`${uniq("D", ref)} ${node(a.net)} ${node(k.net)} ${m}`);
+                    addModel(m, "D", ["D", "LED", "DZ"]);
+                    warnings.push(`${ref}: the model ${m} (${c.props["Sim.Library"]}) is not available; a default diode model stands in for it`);
+                } else if ((!dev || dev === "SUBCKT") && c.props["Sim.Library"] && byRole(c, pins, "G", "GATE") && byRole(c, pins, "D", "DRAIN") && byRole(c, pins, "S", "SOURCE")) {
+                    const d = byRole(c, pins, "D", "DRAIN"), g = byRole(c, pins, "G", "GATE"), so = byRole(c, pins, "S", "SOURCE");
+                    const val = String(c.value).replace(/[^A-Za-z0-9_.\-]/g, "_"), pch = /pmos|p[-_]?ch|bs250|irf9|fqp\d*p/i.test(c.libId + c.value + (c.props["Sim.Name"] || ""));
+                    const inLib = lib(["NMOS", "PMOS"], val), m = inLib ? val : String(c.props["Sim.Name"] || c.value).replace(/[^A-Za-z0-9_.\-]/g, "_");
+                    lines.push(`${uniq("M", ref)} ${node(d.net)} ${node(g.net)} ${node(so.net)} ${node(so.net)} ${m}`);
+                    if (inLib) warnings.push(`${ref}: the library file ${c.props["Sim.Library"]} is not available; the built-in model ${val} is used instead`);
+                    else { addModel(m, pch ? "PMOS" : "NMOS", ["NMOS", "PMOS"]); warnings.push(`${ref}: the model ${m} (${c.props["Sim.Library"]}) is not available; a default ${pch ? "P" : "N"}-channel MOSFET stands in for it`); }
+                } else if (dev === "SUBCKT" || c.props["Sim.Library"]) {
+                    warnings.push(`${ref} (${c.libId}): a model from the library file ${c.props["Sim.Library"] || "(unnamed)"} (${c.props["Sim.Name"] || c.value}) that is not available here; skipped (import that file first, File > Import, to place it)`);
+                } else if (letter === "R" || letter === "C" || letter === "L") {
+                    const n = two(); lines.push(`${uniq(letter, ref)} ${n[0]} ${n[1]} ${K.spiceValue(c.value)}`);
+                } else if (/^[RCL]\s*=/.test(String(c.value))) {
+                    warnings.push(`${ref}: a behavioural ${letter} expression (${String(c.value).slice(0, 40)}) is not supported; skipped`);
+                } else if (/^(J|H|U|SW|TP|MH|FID)/.test(ref) || !letter) {
+                    // connectors, mounting holes, test points, ICs without a simulation model: nothing to simulate
+                    if (!/^(J|H|TP|MH|FID)/.test(ref)) warnings.push(`${ref} (${c.libId || c.value}): no simulation model, skipped`);
                 } else {
-                    warnings.push(`${c.ref} (${c.libId || c.value}): no simulation mapping, skipped`);
+                    warnings.push(`${ref} (${c.libId || c.value}): no simulation mapping, skipped`);
                 }
             } catch (e) {
-                warnings.push(`${c.ref} (${c.libId}): ${e.message}, skipped`);
+                warnings.push(`${ref} (${c.libId}): ${e.message}, skipped`);
             }
         }
-        if (!lines.length) throw new Error("No simulatable parts (R, C, L, D, Q, M, V, I) were found in that KiCad file.");
+        if (!lines.some(l => !/^\.model/.test(l))) throw new Error("No simulatable parts (R, C, L, D, Q, M, V, I) were found in that KiCad file.");
         const nets = new Set();
         for (const c of comps) for (const p of c.pins) nets.add(node(p.net));
-        if (!nets.has("0")) warnings.push("the schematic has no ground (GND) net: add a ground symbol before simulating");
-        return { deck: `* imported from KiCad\n${lines.join("\n")}\n.end\n`, warnings };
+        if (!nets.has("0")) warnings.push("the schematic has no ground (GND or 0) net: add a ground symbol before simulating");
+        return { deck: `* imported from KiCad\n${lines.join("\n")}\n${extraLines.join("\n")}\n.end\n`, warnings };
     }
 
     static import(editor, text) {
@@ -249,6 +333,8 @@ class KicadImporter {
         r.title = "KiCad";
         return r;
     }
+
+    static GENERIC_OPAMP = [".subckt KICAD_GENERIC_OPAMP inp inn vcc vee out", "Rin inp inn 2meg", "Gm 0 a inp inn 1m", "Rp a 0 100meg", "Cp a 0 1.59155n", "Bout b 0 V=min(max(V(a),V(vee)+1.5),V(vcc)-1.5)", "Ro b out 75", ".ends KICAD_GENERIC_OPAMP"];
 
     static isKicad(text) { return /^\s*\((kicad_sch|export)\b/.test(text); }
 }
