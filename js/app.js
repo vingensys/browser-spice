@@ -367,7 +367,7 @@
         }
         window.popupMenu(e, entries);
     };
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") ctx.style.display = "none"; });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { ctx.style.display = "none"; SimWorker.cancel(); } });
 
     editor.onEditProbe = (probe) => {
         const wrap = document.createElement("div");

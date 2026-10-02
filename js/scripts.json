@@ -12,6 +12,7 @@
  "js/sim/engine.js",
  "js/sim/spice-parser.js",
  "js/sim/model-library.js",
+ "js/sim/sim-worker.js",
  "js/sim/ngspice-backend.js",
  "js/ui/theme.js",
  "js/cad/symbols.js",

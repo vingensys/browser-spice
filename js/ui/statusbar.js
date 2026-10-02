@@ -12,6 +12,7 @@ class StatusBar {
                 <button class="tb-btn stop" data-cmd="sim.stop" title="Stop (Shift+F12)">${Icons.svg("stop")}</button>
             </div>
             <div class="sim-state" id="simstate">READY</div>
+            <div id="busy" class="hidden"><span id="busyText"></span><span class="busy-bar"><span id="busyFill"></span></span><button id="busyCancel" title="Stop this analysis (Esc)">Cancel</button></div>
             <div id="msgbtn" title="Show messages">No Messages</div>
             <div id="statusText"></div>
             <div id="docstate" title=""></div>
@@ -20,6 +21,7 @@ class StatusBar {
         root.querySelector("#build").textContent = window.APP_VERSION || "dev";
 
         root.querySelectorAll("[data-cmd]").forEach(b => { b.onclick = () => Commands.run(b.dataset.cmd); });
+        root.querySelector("#busyCancel").onclick = () => SimWorker.cancel();
         root.querySelector("#msgbtn").onclick = () => MessagesDialog.open();
         AppLog.onChange(() => this.messages());
         Commands.onRefresh(() => this.refresh());

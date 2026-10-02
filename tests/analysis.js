@@ -206,6 +206,47 @@ window.analysisTests = async function () {
     SchematicImporter.import(editor, "many\nV1 a 0 1\nR1 a b 1k\nR2 b c 1k\nR3 c d 1k\nR4 d e 1k\nR5 e 0 1k\nB1 o 0 V=v(a)+v(b)+v(c)+v(d)+v(e)\nR6 o 0 1k\n.end");
     ok("a B source reading more than four nodes is skipped with a warning, not mangled", !editor.components.some(c => c.type === "BSRC"));
 
+
+    // ======================================================== analyses on a worker thread
+    clear(); loadExampleById(editor, "rc-ladder");
+    ok("workers are available in the page", SimWorker.available());
+    const winfo = NetlistExtractor.extract(editor);
+    let cloned = true; try { structuredClone(SimWorker.plain(winfo.elements)); } catch (e) { cloned = e.message; }
+    ok("the element list can be sent to a worker (plain data)", cloned === true, cloned);
+    const progressSeen = [];
+    const wres = await SimWorker.run(winfo.elements, "tran", { tStop: 0.05, tStep: 5e-6, uic: true, nodeIC: winfo.nodeIC }, {}, (p) => progressSeen.push(p));
+    const lres = new SimEngine(winfo.circuit).transient({ tStop: 0.05, tStep: 5e-6, uic: true, method: "trap", nodeIC: winfo.nodeIC });
+    const cnode = Object.keys(lres.nodeHistories)[1];
+    ok("a transient on the worker gives the same numbers as on the page", wres.timePoints.length === lres.timePoints.length && near(wres.nodeHistories[cnode][wres.timePoints.length - 1], lres.nodeHistories[cnode][lres.timePoints.length - 1], 1e-12), [wres.timePoints.length, lres.timePoints.length]);
+    ok("the worker reports progress", progressSeen.length >= 1 && progressSeen.every(p => p >= 0 && p <= 1), progressSeen.length);
+    const wac = SimWorker.unpackAc(await SimWorker.run(winfo.elements, "ac", { fStart: 10, fStop: 100000, pointsPerDecade: 10 }, {}));
+    const lac = new SimEngine(winfo.circuit).ac({ fStart: 10, fStop: 100000, pointsPerDecade: 10 });
+    ok("AC on the worker rebuilds complex numbers equal to the page's", wac.length === lac.length && wac[7].nodeVoltages[cnode] instanceof Complex && near(wac[7].nodeVoltages[cnode].re, lac[7].nodeVoltages[cnode].re, 1e-12) && near(wac[7].nodeVoltages[cnode].im, lac[7].nodeVoltages[cnode].im, 1e-12));
+    const wop = await SimWorker.run(winfo.elements, "op", {}, {});
+    ok("operating point and DC sweep work on the worker", Object.keys(wop.nodeVoltages).length > 2 && (await SimWorker.run(winfo.elements, "sweep", { source: winfo.elements.find(e => e.kind === "V").name, start: 0, stop: 5, step: 1 }, {})).sweep.length === 6);
+    let werr = ""; try { await SimWorker.run(winfo.elements, "bogus", {}, {}); } catch (e) { werr = e.message; }
+    ok("an error inside the worker comes back as a message, and the worker keeps working", werr.length > 0 && (await SimWorker.run(winfo.elements, "op", {}, {})).nodeVoltages !== undefined, werr);
+    // cancel a long run: terminates the worker, the next run starts a fresh one
+    const long = SimWorker.run(winfo.elements, "tran", { tStop: 50, tStep: 1e-6, uic: true, nodeIC: winfo.nodeIC }, {});
+    await wait(120);
+    const t0 = performance.now(); SimWorker.cancel();
+    let why = ""; try { await long; } catch (e) { why = e.message; }
+    ok("cancel stops a long analysis at once", why === "Cancelled" && performance.now() - t0 < 500 && !SimWorker.busy, why);
+    ok("a new analysis works after a cancel", (await SimWorker.run(winfo.elements, "op", {}, {})).nodeVoltages !== undefined);
+    ok("a second job while one runs is refused", await (async () => { const a = SimWorker.run(winfo.elements, "op", {}, {}); let m = ""; try { await SimWorker.run(winfo.elements, "op", {}, {}); } catch (e) { m = e.message; } await a; return /already running/.test(m); })());
+    // the runner's buttons use it, and the page stays responsive while a long run goes
+    document.getElementById("simTstop").value = "20"; document.getElementById("simTstep").value = "20u";
+    let ticks = 0; const iv = setInterval(() => ticks++, 20);
+    const running = runner.runTransient(); await wait(700);
+    ok("the page keeps responding while a long transient runs (timers keep firing)", ticks >= 20, ticks);
+    ok("a progress strip with Cancel is shown for a long run", !document.getElementById("busy").classList.contains("hidden") && /Transient/.test(document.getElementById("busyText").textContent), document.getElementById("busyText").textContent);
+    document.getElementById("busyCancel").click(); await running; clearInterval(iv);
+    ok("Cancel ends it, hides the strip and says so", document.getElementById("busy").classList.contains("hidden") && /cancelled/i.test(document.getElementById("toast").textContent), document.getElementById("toast").textContent);
+    document.getElementById("simTstop").value = "50m"; document.getElementById("simTstep").value = "50u";
+    await runner.runTransient(); await wait(50);
+    ok("a normal transient through the Simulate button still plots", plotter.data && plotter.data.series.length === 3 && plotter.data.xValues.length > 100);
+    graph.hide();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

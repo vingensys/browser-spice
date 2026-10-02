@@ -87,22 +87,21 @@ class Study {
     };
 
     // Solve the circuit as it is now. Returns { kind, items, ...data } where items map the graph probes to series.
-    static solve(editor, runner, kind) {
+    static async solve(editor, runner, kind) {
         const info = NetlistExtractor.extract(editor);
         const probes = editor.probes.filter(p => p.graph !== false);
         const items = runner.plotter.buildProbeSeriesMap(probes, info);
-        const s = runner.settings(), opts = runner.engineOptions();
-        const engine = new SimEngine(info.circuit, opts);
+        const s = runner.settings();
         if (kind === "tran") {
-            const res = engine.transient({ tStop: s.tStop, tStep: s.tStep, uic: s.uic, method: "trap", nodeIC: info.nodeIC });
+            const res = await runner.solve(info, "tran", { tStop: s.tStop, tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC }, "Study run");
             return { kind, info, items, t: res.timePoints, series: items.map(it => (it.type === "V" ? res.nodeHistories[it.node] : res.currentHistories[it.targetName]) || res.timePoints.map(() => 0)) };
         }
         if (kind === "ac") {
-            const res = engine.ac({ fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 20 });
+            const res = await runner.solve(info, "ac", { fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 20 }, "Study run");
             const zero = new Complex(0, 0);
             return { kind, info, items, f: res.map(r => r.frequency), z: items.map(it => res.map(r => (it.type === "V" ? r.nodeVoltages[it.node] : r.sourceCurrents[it.targetName]) || zero)) };
         }
-        const op = engine.operatingPoint();
+        const op = await runner.solve(info, "op", {}, "Study run");
         return { kind, info, items, values: items.map(it => (it.type === "V" ? op.nodeVoltages[it.node] : op.currents[it.targetName]) || 0) };
     }
 
@@ -155,7 +154,7 @@ class Study {
                 if (hooks.cancelled && hooks.cancelled()) throw new Error("Cancelled");
                 p.set(values[i]);
                 editor.refreshWires();
-                solved.push(Study.solve(editor, runner, spec.analysis));
+                solved.push(await Study.solve(editor, runner, spec.analysis));
                 if (hooks.progress) hooks.progress(i + 1, values.length);
                 if (i % 2 === 1) await new Promise(r => setTimeout(r));     // let the page breathe (and the cancel button work)
             }
@@ -242,7 +241,7 @@ class Study {
                     c.value = String(nominal[k] * (1 + d));
                 });
                 editor.refreshWires();
-                values.push(Study.metric(Study.solve(editor, runner, spec.analysis), probe, spec.metric, spec.freq));
+                values.push(Study.metric(await Study.solve(editor, runner, spec.analysis), probe, spec.metric, spec.freq));
                 if (hooks.progress) hooks.progress(i + 1, runs);
                 if (i % 2 === 1) await new Promise(r => setTimeout(r));
             }

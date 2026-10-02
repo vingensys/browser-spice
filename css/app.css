@@ -582,3 +582,10 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 .logan-bar button.on { background: #b88a00; color: #fff; }
 .logan-bar label { display: inline-flex; align-items: center; gap: 5px; }
 .logan-bar select, .logan-bar input[type=number] { background: #11151a; color: #d8dee9; border: 1px solid #39424c; padding: 1px 3px; }
+
+/* background analysis progress */
+#busy { display: flex; align-items: center; gap: 8px; padding: 0 8px; font-size: 11px; }
+#busy.hidden { display: none; }
+#busy .busy-bar { width: 120px; height: 6px; background: var(--ui-border, #ccc); border-radius: 3px; overflow: hidden; display: inline-block; }
+#busy #busyFill { display: block; height: 100%; width: 0; background: var(--ui-accent, #3b82f6); }
+#busy button { padding: 0 8px; font-size: 11px; }

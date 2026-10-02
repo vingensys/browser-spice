@@ -109,7 +109,7 @@ const StudyDialog = {
         Dialog.open({
             title: "Parametric Sweep", content: root, width: "640px",
             buttons: [
-                { label: "Cancel", onClick: () => { if (StudyDialog.running) StudyDialog.running.cancel = true; } },
+                { label: "Cancel", onClick: () => { if (StudyDialog.running) { StudyDialog.running.cancel = true; SimWorker.cancel(); } } },
                 { label: "Run", primary: true, onClick: () => {
                     if (StudyDialog.running) return false;
                     const scale = q("stScale").value;
@@ -160,7 +160,7 @@ const StudyDialog = {
         Dialog.open({
             title: "Monte Carlo (tolerance analysis)", content: root, width: "640px",
             buttons: [
-                { label: "Cancel", onClick: () => { if (StudyDialog.running) StudyDialog.running.cancel = true; } },
+                { label: "Cancel", onClick: () => { if (StudyDialog.running) { StudyDialog.running.cancel = true; SimWorker.cancel(); } } },
                 { label: "Run", primary: true, onClick: () => {
                     if (StudyDialog.running) return false;
                     const lo = Units.parseSI(q("mcLo").value), hi = Units.parseSI(q("mcHi").value);

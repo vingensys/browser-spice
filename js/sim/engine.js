@@ -214,7 +214,7 @@ class SimEngine {
     // ------------------------------------------------------------------ DC sweep
 
     // Sweep an independent source and record the node voltages at each point.
-    dcSweep(sourceName, start, stop, step) {
+    dcSweep(sourceName, start, stop, step, progress = null) {
         const src = this.c.elements.find(e => e.name === sourceName &&
             (e instanceof VoltageSource || e instanceof CurrentSource));
         if (!src) throw new Error(`DC sweep: no source named ${sourceName}`);
@@ -229,6 +229,7 @@ class SimEngine {
         const count = Math.floor(Math.abs((stop - start) / step) + 1e-9);
         try {
             for (let k = 0; k <= count; k++) {
+                if (progress && k % 8 === 0) progress(k / (count || 1));
                 const v = start + k * step * Math.sign(stop - start || 1);
                 src.wave = Waveform.dc(v);
                 let r = this.newton(ctx, x);
@@ -280,7 +281,7 @@ class SimEngine {
 
     // ------------------------------------------------------------------------ AC
 
-    ac({ fStart = 10, fStop = 1e6, pointsPerDecade = 20 } = {}) {
+    ac({ fStart = 10, fStop = 1e6, pointsPerDecade = 20, progress = null } = {}) {
         const c = this.c;
         const op = this.operatingPoint();
 
@@ -298,6 +299,7 @@ class SimEngine {
         const count = Math.max(1, Math.round(decades * pointsPerDecade));
 
         for (let k = 0; k <= count; k++) {
+            if (progress && k % 8 === 0) progress(k / count);
             const f = fStart * Math.pow(10, (k / count) * decades);
             const w = 2 * Math.PI * f;
 

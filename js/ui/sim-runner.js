@@ -65,9 +65,40 @@ class SimRunner {
         try {
             await fn();
         } catch (err) {
+            if (err.message === "Cancelled") { this.toast("Simulation cancelled.", "info"); return; }
             console.error(err);
             this.toast(err.message, "error");
         }
+    }
+
+    // Solve on a worker thread (page stays responsive, progress bar, Cancel); on the main thread when workers are
+    // unavailable. kind: "op" | "tran" | "ac" | "sweep"; args as in worker.js.
+    async solve(info, kind, args, label = "Simulating") {
+        if (SimWorker.available()) {
+            const busy = this.busyShow(label);
+            try {
+                const res = await SimWorker.run(info.elements, kind, args, this.engineOptions(), busy.progress);
+                return kind === "ac" ? SimWorker.unpackAc(res) : res;
+            } catch (e) {
+                if (!e.workerFailed) throw e;
+            } finally { busy.done(); }
+        }
+        const engine = new SimEngine(info.circuit, this.engineOptions());
+        if (kind === "op") return engine.operatingPoint({ uic: !!args.uic, nodeIC: args.nodeIC || null });
+        if (kind === "tran") return engine.transient({ tStop: args.tStop, tStep: args.tStep, uic: args.uic, method: "trap", nodeIC: args.nodeIC });
+        if (kind === "ac") return engine.ac({ fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 20 });
+        return engine.dcSweep(args.source, args.start, args.stop, args.step);
+    }
+
+    // the status-bar progress strip: appears only if the job takes longer than a moment
+    busyShow(label) {
+        const el = this.el("busy");
+        let shown = false, last = 0;
+        const timer = setTimeout(() => { shown = true; if (el) { el.classList.remove("hidden"); this.el("busyText").textContent = `${label}…`; this.el("busyFill").style.width = "0%"; } }, 200);
+        return {
+            progress: (p) => { last = p; if (shown && el) { this.el("busyFill").style.width = `${Math.round(100 * Math.min(1, p))}%`; this.el("busyText").textContent = `${label}… ${Math.round(100 * Math.min(1, p))} %`; } },
+            done: () => { clearTimeout(timer); if (el) el.classList.add("hidden"); }
+        };
     }
 
     // Use ngspice when asked for and possible; say so when a part forces the fallback.
@@ -102,7 +133,7 @@ class SimRunner {
                 op = NgspiceBackend.toOperatingPoint(await this.ngspice(info, ".op"), info);
                 label = " (ngspice)";
             } else {
-                op = new SimEngine(info.circuit, this.engineOptions()).operatingPoint();
+                op = await this.solve(info, "op", {}, "Operating point");
             }
             const ms = performance.now() - t0;
 
@@ -137,7 +168,7 @@ class SimRunner {
                 results = NgspiceBackend.toAc(res, info);
                 label = " (ngspice)";
             } else {
-                results = new SimEngine(info.circuit, this.engineOptions()).ac({ fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 20 });
+                results = await this.solve(info, "ac", { fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 20 }, "AC sweep");
             }
             this.plotter.plotAC(results, this.editor.probes, info);
             this.el("plotTitle").textContent = `AC Frequency Sweep (Bode Plot)${label}`;
@@ -159,7 +190,7 @@ class SimRunner {
                 res = NgspiceBackend.toTransient(raw, info);
                 label = " (ngspice)";
             } else {
-                res = new SimEngine(info.circuit, this.engineOptions()).transient({ tStop: s.tStop, tStep: s.tStep, uic: s.uic, method: "trap", nodeIC: info.nodeIC });
+                res = await this.solve(info, "tran", { tStop: s.tStop, tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC }, "Transient");
             }
             const ms = performance.now() - t0;
 
@@ -187,7 +218,7 @@ class SimRunner {
                 res = NgspiceBackend.toSweep(raw, info);
                 label = " (ngspice)";
             } else {
-                res = new SimEngine(info.circuit, this.engineOptions()).dcSweep(src.name, s.sweepStart, s.sweepStop, s.sweepStep);
+                res = await this.solve(info, "sweep", { source: src.name, start: s.sweepStart, stop: s.sweepStop, step: s.sweepStep }, "DC sweep");
             }
             this.plotter.plotSweep(res, this.editor.probes, info, `${src.name} (${unit})`, unit);
             this.el("plotTitle").textContent = `DC Sweep of ${src.name}${label}`;
