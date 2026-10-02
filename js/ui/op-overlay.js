@@ -34,9 +34,11 @@ class OpOverlay {
         if (!this.on) return;
         if (this.live.state !== "stopped" && this.live.run) { this.fromRun(this.live.run); return; }
         try {
-            const info = NetlistExtractor.extract(this.editor);
+            const loc = this.editor.sheetIndex !== 0 ? Hierarchy.locate(this.editor, this.editor.activeSheet.id) : null;
+            if (this.editor.sheetIndex !== 0 && !loc) throw new Error("This sheet is not used by any sheet symbol, so there is nothing to simulate.");
+            const info = loc ? loc.info : NetlistExtractor.extract(this.editor);
             const op = new SimEngine(info.circuit, this.runner.engineOptions()).operatingPoint();
-            this.editor.opData = this.build(info, op.nodeVoltages, op.currents);
+            this.editor.opData = this.build(info, op.nodeVoltages, op.currents, loc);
         } catch (e) {
             this.editor.opData = { error: e.message };
         }
@@ -45,34 +47,39 @@ class OpOverlay {
 
     // while Play is running: the live engine's present values
     fromRun(run) {
-        const info = this.live.info;
+        let info = this.live.info, loc = null;
         if (!info) return;
+        if (this.editor.sheetIndex !== 0) { loc = Hierarchy.locate(this.editor, this.editor.activeSheet.id); if (!loc) return; }
         const volts = { "0": 0 };
         for (const name of run.c.names) if (!run.c.isInternal(name)) volts[name] = run.voltage(name);
         const cur = {};
         for (const el of info.elements) if (!el.name.includes(".")) cur[el.name] = run.current(el.name);
-        this.editor.opData = this.build(info, volts, cur);
+        if (loc) for (const el of this.editor.components) cur[`${loc.path}__${el.name}`] = run.current(`${loc.path}__${el.name}`);
+        this.editor.opData = this.build(info, volts, cur, loc);
     }
 
-    build(info, volts, currents) {
+    // loc: when a sub-sheet is open, where its first use sits in the flattened design (see Hierarchy.locate)
+    build(info, volts, currents, loc = null) {
         const ed = this.editor;
-        const nets = info.nets;              // the same net numbering the solver used (numbers are assigned on first use)
+        const nets = loc ? loc.nets : info.nets;       // the same net numbering the solver used (numbers are assigned on first use)
+        const gid = (id) => (loc ? loc.node(id) : id);                   // this sheet's net -> the solver's node name
         // one label per net: on its longest wire segment
         const labels = new Map();
         for (const w of ed.wires) {
             if (!w.route || w.route.length < 2) continue;
             const id = nets.wireNode(w);
-            if (id === null || id === "0" || volts[id] === undefined) continue;
+            if (id === null || id === "0" || volts[gid(id)] === undefined) continue;
             for (let i = 0; i < w.route.length - 1; i++) {
                 const a = w.route[i], b = w.route[i + 1], len = Math.hypot(b.x - a.x, b.y - a.y);
                 const cur = labels.get(id);
-                if (!cur || len > cur.len) labels.set(id, { id, len, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, horizontal: Math.abs(b.y - a.y) < 1e-6, v: volts[id] });
+                if (!cur || len > cur.len) labels.set(id, { id, len, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, horizontal: Math.abs(b.y - a.y) < 1e-6, v: volts[gid(id)] });
             }
         }
         // currents: beside each part that has a branch current
         const parts = [];
-        for (const el of info.elements) {
-            if (!el.comp || el.name.includes("_") && el.comp.name !== el.name) continue;
+        const elements = loc ? ed.components.map(c => ({ comp: c, name: `${loc.path}__${c.name}` })) : info.elements;
+        for (const el of elements) {
+            if (!el.comp || el.name.includes("_") && !loc && el.comp.name !== el.name) continue;
             const i = currents[el.name];
             if (i === undefined || !Number.isFinite(i) || ["VM", "SCOPE", "LOGAN", "GND"].includes(el.comp.type)) continue;
             if (!parts.some(p => p.comp === el.comp)) parts.push({ comp: el.comp, i });

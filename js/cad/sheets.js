@@ -162,6 +162,13 @@ class SheetManager {
         this.sheetStack = [];
     }
 
+    // the probes the simulation reads: this sheet's, plus those placed on sub-sheets (one per use of the sheet, labelled
+    // with the instance path). Falls back to this sheet's own probes when the design cannot be extracted.
+    allProbes() {
+        if (this.sheets.length < 2) return this.probes;
+        try { return NetlistExtractor.extract(this).probes; } catch (e) { return this.probes; }
+    }
+
     // every component of every sheet (for the parts list, subcircuit library ...)
     allComponents() {
         return this.sheets.flatMap((s, i) => (i === this.sheetIndex ? this.components : ((s.data && s.data.components) || [])));
@@ -200,7 +207,7 @@ applyMixin(SchematicEditor, SheetManager);
 SchematicEditor.headless = function (state, params = []) {
     const e = Object.create(SchematicEditor.prototype);
     Object.assign(e, {
-        gridSize: 20, components: state.components, wires: state.wires, probes: [], titleBlock: state.titleBlock, measures: [], params, nextId: state.nextId || 1,
+        gridSize: 20, components: state.components, wires: state.wires, probes: state.probes || [], titleBlock: state.titleBlock, measures: [], params, nextId: state.nextId || 1,
         selection: [], selectedWire: null, selectedProbe: null, hoverSnap: null, connectedPins: new Set(), historyStack: [], futureStack: [], width: 800, height: 600, zoom: 1, panX: 0, panY: 0,
         sheets: [], sheetIndex: 0, sheetStack: []
     });

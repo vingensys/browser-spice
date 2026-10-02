@@ -5,7 +5,7 @@ const TfDialog = {
     esc: (s) => PropertiesPanel.esc(String(s)),
 
     open(editor, runner) {
-        const probes = editor.probes.filter(p => p.type === "V");
+        const probes = editor.allProbes().filter(p => p.type === "V");
         const sources = editor.components.filter(c => c.type === "V" || c.type === "I");
         if (!probes.length) { runner.toast("Add a voltage probe at the output node first.", "info"); return; }
         if (!sources.length) { runner.toast("The transfer function needs a voltage or current source as its input.", "info"); return; }
@@ -22,8 +22,8 @@ const TfDialog = {
                 label: "Calculate", primary: true, onClick: () => {
                     runner.guard(async () => {
                         const info = runner.prepare();
-                        const prb = probes[Number(wrap.querySelector("#tfOut").value)];
-                        const node = info.getPointNodeName(prb.x, prb.y) || "0";
+                        const prb = info.probes.filter(p => p.type === "V")[Number(wrap.querySelector("#tfOut").value)];
+                        const node = prb._node !== undefined ? prb._node : (info.getPointNodeName(prb.x, prb.y) || "0");
                         const name = wrap.querySelector("#tfIn").value;
                         const r = await runner.solve(info, "tf", { out: [node], input: name }, "Transfer function");
                         const fmt = (v, u) => (v === Infinity ? "∞ (draws no current)" : Units.formatSI(v, u));

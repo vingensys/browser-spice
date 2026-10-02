@@ -56,7 +56,7 @@ const MeasureDialog = {
     },
 
     open(editor, runner, graph) {
-        const probes = editor.probes.filter(p => p.graph !== false);
+        const probes = editor.allProbes().filter(p => p.graph !== false);
         const wrap = document.createElement("div");
         wrap.className = "measure-dlg";
         const probeOpts = probes.map(p => `<option>${MeasureDialog.esc(p.label)}</option>`).join("");

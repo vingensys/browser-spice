@@ -9,7 +9,7 @@ const StudyDialog = {
 
     // shared pieces ------------------------------------------------------------------------------------------------
     probeOptions(editor) {
-        return editor.probes.filter(p => p.graph !== false).map((p, i) => `<option value="${i}">${StudyDialog.esc(p.label)}</option>`).join("");
+        return editor.allProbes().filter(p => p.graph !== false).map((p, i) => `<option value="${i}">${StudyDialog.esc(p.label)}</option>`).join("");
     },
     metricOptions(kind, sel) {
         return Study.METRICS[kind].map(([k, l]) => `<option value="${k}" ${k === sel ? "selected" : ""}>${l}</option>`).join("");

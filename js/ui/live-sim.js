@@ -57,9 +57,12 @@ class LiveSim {
 
     build() {
         const ed = this.editor;
-        this.runner.rootSheet();
+        // a sub-sheet that is open is simulated in place (as one use of it inside the whole design); a sheet no symbol uses
+        // sends you to the first sheet
+        let loc = null;
+        if (ed.sheetIndex !== 0) { loc = Hierarchy.locate(ed, ed.activeSheet.id); if (!loc) this.runner.rootSheet(); }
         this.runner.rejectImpossible();
-        const info = NetlistExtractor.extract(ed);
+        const info = loc ? loc.info : NetlistExtractor.extract(ed);
         if (info.warnings.length) this.runner.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}`, "warn");
 
         const s = this.runner.settings();
@@ -74,9 +77,10 @@ class LiveSim {
 
         // channels: probes first, then scope inputs
         this.channels = [];
-        for (const prb of ed.probes) {
-            if (prb.type === "V") this.channels.push({ name: prb.label, probe: prb, node: info.getPointNodeName(prb.x, prb.y) });
-            else this.channels.push({ name: prb.label, probe: prb, element: prb.targetName });
+        for (const prb of info.probes) {
+            const orig = prb._orig || prb;
+            if (prb.type === "V") this.channels.push({ name: prb.label, probe: orig, node: prb._node !== undefined ? prb._node : info.getPointNodeName(prb.x, prb.y) });
+            else this.channels.push({ name: prb.label, probe: orig, element: prb._target || prb.targetName });
         }
         this.meters = info.instruments.filter(i => i.type === "VM" || i.type === "AM");
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
@@ -268,6 +272,7 @@ class LiveSim {
 
     clearDisplays() {
         for (const prb of this.editor.probes) delete prb.live;
+        for (const sh of this.editor.sheets) if (sh.data) for (const prb of sh.data.probes) delete prb.live;
         for (const c of this.editor.components) { for (const k of ["live", "scopeTrace", "scopeScale", "logTrace", "glow", "seg", "energized", "blown", "on"]) delete c[k]; }
         this.editor.draw();
     }

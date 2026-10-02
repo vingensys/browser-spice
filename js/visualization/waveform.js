@@ -371,7 +371,7 @@ class WaveformPlotter {
         for (const prb of probes) {
             if (prb.graph === false) continue;            // "live only" probes are not plotted
             if (prb.type === 'V') {
-                const nodeName = netlistInfo.getPointNodeName(prb.x, prb.y) || "0";
+                const nodeName = prb._node !== undefined ? prb._node : (netlistInfo.getPointNodeName(prb.x, prb.y) || "0");
                 result.push({
                     type: 'V',
                     label: `${prb.label} (Node ${nodeName})`,
@@ -383,7 +383,7 @@ class WaveformPlotter {
                     type: 'I',
                     label: prb.label,
                     color: prb.color,
-                    targetName: prb.targetName
+                    targetName: prb._target || prb.targetName
                 });
             }
         }

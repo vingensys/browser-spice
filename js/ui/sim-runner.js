@@ -166,7 +166,7 @@ class SimRunner {
 
             this.el("dcResults").innerHTML = html;
             this.el("plotTitle").textContent = `DC Analysis Probed Values${label}`;
-            this.plotter.plotDC({ nodeVoltages: op.nodeVoltages, sourceCurrents: op.currents }, this.editor.probes, info);
+            this.plotter.plotDC({ nodeVoltages: op.nodeVoltages, sourceCurrents: op.currents }, info.probes, info);
             this.last = { kind: "dc", info, op };
         });
     }
@@ -183,10 +183,10 @@ class SimRunner {
             } else {
                 results = await this.solve(info, "ac", { fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 20 }, "AC sweep");
             }
-            this.plotter.plotAC(results, this.editor.probes, info);
+            this.plotter.plotAC(results, info.probes, info);
             this.el("plotTitle").textContent = `AC Frequency Sweep (Bode Plot)${label}`;
             this.last = { kind: "ac", info, results };
-            if (!this.editor.probes.length) this.toast("Add a voltage probe to see the response.", "info");
+            if (!info.probes.length) this.toast("Add a voltage probe to see the response.", "info");
         });
     }
 
@@ -195,14 +195,14 @@ class SimRunner {
         return this.guard(async () => {
             const info = this.prepare();
             const s = this.settings();
-            const probes = this.editor.probes.filter(p => p.type === "V" && p.graph !== false);
+            const probes = info.probes.filter(p => p.type === "V" && p.graph !== false);
             if (!probes.length) throw new Error("Add a voltage probe at the node whose noise you want to see.");
             const sources = info.elements.filter(e => e.kind === "V" || e.kind === "I");
             const input = sources.find(e => (e.params.acMag || 0) > 0) || sources.find(e => e.kind === "V");
             const t0 = performance.now();
             const outs = [];
             for (const prb of probes) {
-                const node = info.getPointNodeName(prb.x, prb.y) || "0";
+                const node = prb._node !== undefined ? prb._node : (info.getPointNodeName(prb.x, prb.y) || "0");
                 if (node === "0") throw new Error(`${prb.label} is on ground: put the probe on the node whose noise you want.`);
                 const rows = await this.solve(info, "noise", { out: [node], input: input ? input.name : null, fStart: s.fStart, fStop: s.fStop, pointsPerDecade: 10 }, "Noise");
                 outs.push({ label: `${prb.label} (Node ${node})`, color: prb.color, rows });
@@ -232,11 +232,11 @@ class SimRunner {
             }
             const ms = performance.now() - t0;
 
-            this.plotter.plotTransient(res, this.editor.probes, info);
+            this.plotter.plotTransient(res, info.probes, info);
             this.el("plotTitle").textContent = `Transient Waveform V(t) / I(t)${label}`;
             this.last = { kind: "tran", info, res };
             this.toast(`Transient${label}: ${res.steps} steps in ${ms.toFixed(0)} ms${res.rejected ? ` (${res.rejected} retried)` : ""}.` +
-                (this.editor.probes.length ? "" : " Add voltage probes to plot signals."), "info");
+                (info.probes.length ? "" : " Add voltage probes to plot signals."), "info");
         });
     }
 
@@ -258,11 +258,11 @@ class SimRunner {
             } else {
                 res = await this.solve(info, "sweep", { source: src.name, start: s.sweepStart, stop: s.sweepStop, step: s.sweepStep }, "DC sweep");
             }
-            this.plotter.plotSweep(res, this.editor.probes, info, `${src.name} (${unit})`, unit);
+            this.plotter.plotSweep(res, info.probes, info, `${src.name} (${unit})`, unit);
             this.el("plotTitle").textContent = `DC Sweep of ${src.name}${label}`;
             this.last = { kind: "sweep", info, res };
             this.toast(`DC sweep${label}: ${res.sweep.length} points in ${(performance.now() - t0).toFixed(0)} ms.` +
-                (this.editor.probes.length ? "" : " Add voltage probes to plot signals."), "info");
+                (info.probes.length ? "" : " Add voltage probes to plot signals."), "info");
         });
     }
 

@@ -471,7 +471,7 @@ class NetlistExtractor {
 
         const circuit = NetlistExtractor.instantiate(els);
         return {
-            circuit, elements: els, warnings, nodeIC: els.nodeIC || {}, instruments: els.instruments || [],
+            circuit, elements: els, warnings, probes: [...editor.probes, ...(els.subProbes || [])], located: els.located, nodeIC: els.nodeIC || {}, instruments: els.instruments || [],
             getPointNodeName: nets.getPointNodeName,
             getTerminalNodeName: nets.terminalNode,
             nets

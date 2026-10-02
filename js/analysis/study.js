@@ -97,7 +97,7 @@ class Study {
     // Solve the circuit as it is now. Returns { kind, items, ...data } where items map the graph probes to series.
     static async solve(editor, runner, kind) {
         const info = NetlistExtractor.extract(editor);
-        const probes = editor.probes.filter(p => p.graph !== false);
+        const probes = info.probes.filter(p => p.graph !== false);
         const items = runner.plotter.buildProbeSeriesMap(probes, info);
         const s = runner.settings();
         if (kind === "tran") {
@@ -177,7 +177,7 @@ class Study {
         if (lists.some(l => l.length < 2)) throw new Error("A sweep needs at least two values.");
         const total = lists.reduce((n, l) => n * l.length, 1);
         if (total > Study.MAX_RUNS) throw new Error(`That is ${total} runs (the limit is ${Study.MAX_RUNS}). Use fewer values or parameters.`);
-        const probes = editor.probes.filter(pr => pr.graph !== false);
+        const probes = editor.allProbes().filter(pr => pr.graph !== false);
         if (!probes.length) throw new Error(spec.show === "metric" ? "Add a probe to measure." : "Add voltage or current probes: the sweep plots what they measure.");
         if (spec.show !== "metric" && spec.analysis !== "op" && total > Study.MAX_OVERLAY) throw new Error(`${total} overlaid curves would be unreadable (the limit is ${Study.MAX_OVERLAY}). Show a measurement instead, or use fewer values.`);
 
@@ -268,7 +268,7 @@ class Study {
     // { label, nominal, perturbed, abs (dm/dx), rel (percent change of the result per percent change of the part) }
     static async sensitivity(editor, runner, spec, hooks = {}) {
         const delta = (Number.isFinite(spec.delta) ? spec.delta : 1) / 100;
-        const probes = editor.probes.filter(pr => pr.graph !== false);
+        const probes = editor.allProbes().filter(pr => pr.graph !== false);
         if (!probes.length) throw new Error("Add a probe to measure.");
         const pi = Math.min(Math.max(spec.probe || 0, 0), probes.length - 1);
         const metric = spec.analysis === "op" ? "value" : spec.metric;
@@ -311,7 +311,7 @@ class Study {
     static async monteCarlo(editor, runner, spec, hooks = {}) {
         const runs = Math.round(spec.runs || 50);
         if (runs < 2 || runs > 2000) throw new Error("Use between 2 and 2000 runs.");
-        const probes = editor.probes.filter(pr => pr.graph !== false);
+        const probes = editor.allProbes().filter(pr => pr.graph !== false);
         if (!probes.length) throw new Error("Add a probe to measure.");
         const rand = Study.rng(spec.seed === undefined ? 1 : spec.seed);
         const defaults = Object.assign({ R: 5, C: 10, L: 10 }, spec.defaults || {});

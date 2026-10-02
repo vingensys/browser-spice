@@ -502,7 +502,7 @@ window.analysisTests = async function () {
     hb.vprobe(u1, "OUT", "Vmid"); hb.vprobe(u2, "OUT", "Vout");
     hb.finish();
     const hinfo = NetlistExtractor.extract(editor);
-    ok("the netlist holds the elements of both instances with their paths", ["S1.R1", "S1.R2", "S2.R1", "S2.R2"].every(n => hinfo.elements.some(e => e.name.toUpperCase() === n.toUpperCase() || e.name === n)) || hinfo.elements.some(e => /\./.test(e.name)), hinfo.elements.map(e => e.name));
+    ok("the netlist holds the elements of both instances with their paths", ["S1.R1", "S1.R2", "S2.R1", "S2.R2"].every(n => hinfo.elements.some(e => e.name.toUpperCase() === n.replace(".", "__").toUpperCase())) || hinfo.elements.some(e => /__/.test(e.name)), hinfo.elements.map(e => e.name));
     const hop = new SimEngine(hinfo.circuit).operatingPoint().nodeVoltages;
     const hvmid = hop[hinfo.getPointNodeName(editor.probes[0].x, editor.probes[0].y)], hvout = hop[hinfo.getPointNodeName(editor.probes[1].x, editor.probes[1].y)];
     ok("the first divider gives 6.31 V once the second stage loads it", near(hvmid, 6.3135, 0.01), hvmid);
@@ -660,7 +660,7 @@ window.analysisTests = async function () {
     const pi_iv = pi_ib.part("V", 100, 300, { rot: 270, dcVoltage: 1, value: "1 V" }), pi_ig = pi_ib.part("GND", 100, 440), pi_ig2 = pi_ib.part("GND", 900, 440), pi_irl = pi_ib.part("R", 900, 300, { rot: 90, value: "1 kΩ" });
     pi_ib.wire(pi_iv, "2", pi_iu1, "IN"); pi_ib.wire(pi_iu1, "OUT", pi_iu2, "IN"); pi_ib.wire(pi_iu2, "OUT", pi_irl, "1"); pi_ib.wire(pi_iv, "1", pi_ig, "1"); pi_ib.wire(pi_irl, "2", pi_ig2, "1"); pi_ib.finish();
     const pi_iinfo = NetlistExtractor.extract(editor);
-    const pi_rvals = pi_iinfo.elements.filter(e => e.kind === "R" && /\./.test(e.name)).map(e => [e.name, e.params.r]);
+    const pi_rvals = pi_iinfo.elements.filter(e => e.kind === "R" && /__/.test(e.name)).map(e => [e.name, e.params.r]);
     ok("each use of a sheet gets its own parameter values (1 kΩ by default, 2k × scale = 6 kΩ for the second)", pi_rvals.length === 2 && pi_rvals.some(r => r[1] === 1000) && pi_rvals.some(r => r[1] === 6000), pi_rvals);
     pi_iu2.overrides = "nonsense";
     ok("a bad override is reported, not silently ignored", NetlistExtractor.extract(editor).warnings.some(w => /not name=value/.test(w)));
@@ -679,6 +679,87 @@ window.analysisTests = async function () {
     ok("the KiCad netlist lists every part and net with balanced parentheses", /^\(export \(version D\)/.test(net) && (net.match(/\(comp /g) || []).length === editor.components.filter(c => !["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET"].includes(c.type)).length && (net.match(/\(/g) || []).length === (net.match(/\)/g) || []).length, net.slice(0, 300));
     ok("every pin of every part appears in exactly one net", (() => { const pins = (net.match(/\(node /g) || []).length; const expected = editor.components.filter(c => !["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET"].includes(c.type)).reduce((n, c) => n + editor.getTerminals(c).filter(t => NetlistExtractor.nets(editor).terminalNode(c, t.name) !== null).length, 0); return pins === expected; })());
     ok("the ground net is called GND", /\(name "GND"\)/.test(net));
+
+
+    // ======================================================== probes inside sub-sheets
+    clear(); editor.resetSheets();
+    const qb = new ExampleBuilder(editor);
+    const qsh = editor.addSheet("STAGE"); editor.switchSheet(1);
+    const qc = new ExampleBuilder(editor);
+    const qin = qc.part("PORT", 120, 200, { net: "IN", value: "IN" }), qr1 = qc.part("R", 300, 200, { value: "1 kΩ" }), qout = qc.part("PORT", 520, 200, { net: "OUT", value: "OUT" }), qr2 = qc.part("R", 420, 300, { rot: 90, value: "1 kΩ" }), qg = qc.part("GND", 420, 440);
+    qc.wire(qin, "1", qr1, "1"); qc.wire(qr1, "2", qout, "1"); qc.wire(qr1, "2", qr2, "1"); qc.wire(qr2, "2", qg, "1");
+    qc.vprobe(qr1, "2", "Vmid"); qc.iprobe(qr1);
+    qc.finish();
+    editor.switchSheet(0);
+    const qv = qb.part("V", 100, 300, { rot: 270, dcVoltage: 8, value: "8 V" }), qg0 = qb.part("GND", 100, 440), qrl = qb.part("R", 900, 300, { rot: 90, value: "1 MΩ" }), qg2 = qb.part("GND", 900, 440);
+    const qs1 = qb.part("SHEET", 400, 200, { sheet: qsh.id }), qs2 = qb.part("SHEET", 640, 200, { sheet: qsh.id });
+    qb.wire(qv, "2", qs1, "IN"); qb.wire(qs1, "OUT", qs2, "IN"); qb.wire(qs2, "OUT", qrl, "1"); qb.wire(qv, "1", qg0, "1"); qb.wire(qrl, "2", qg2, "1");
+    qb.vprobe(qrl, "1", "Vout");
+    qb.finish();
+    const qinfo = NetlistExtractor.extract(editor);
+    ok("probes on a sub-sheet appear once per use, labelled with the instance", qinfo.probes.length === 5 && qinfo.probes.filter(p => p._sub).map(p => p.label).sort().join() === "I(R1)@" + qs1.name + ",I(R1)@" + qs2.name + ",Vmid@" + qs1.name + ",Vmid@" + qs2.name, qinfo.probes.map(p => p.label));
+    ok("allProbes() gives the same list for dialogs", editor.allProbes().length === 5 && editor.allProbes().every((p, i) => p.label === qinfo.probes[i].label));
+    const qop = new SimEngine(qinfo.circuit).operatingPoint();
+    const qm1 = qinfo.probes.find(p => p.label === "Vmid@" + qs1.name), qm2 = qinfo.probes.find(p => p.label === "Vmid@" + qs2.name);
+    ok("each instance's voltage probe reads its own node (the second stage sees the first one's output)", qm1._node !== qm2._node && qop.nodeVoltages[qm1._node] > qop.nodeVoltages[qm2._node] && qop.nodeVoltages[qm2._node] > 0, [qop.nodeVoltages[qm1._node], qop.nodeVoltages[qm2._node]]);
+    ok("a current probe on a sub-sheet part reads that instance's resistor", (() => { const ip = qinfo.probes.find(p => p.label === "I(R1)@" + qs1.name); return near(Math.abs(qop.currents[ip._target]), Math.abs(qop.nodeVoltages[qm1._node] - 0) > 0 ? Math.abs(qop.currents[ip._target]) : 0, 1) && Math.abs(qop.currents[ip._target]) > 1e-4; })());
+    document.getElementById("simTstop").value = "1m"; document.getElementById("simTstep").value = "50u";
+    await runner.runTransient(); await wait(100);
+    ok("a transient run plots the sub-sheet probes next to the root ones", plotter.data && plotter.data.series.length === 5 && plotter.data.series.some(s => /^Vmid@/.test(s.name)) && plotter.data.series.some(s => /^I\(R1\)@/.test(s.name)), plotter.data && plotter.data.series.map(s => s.name));
+    const qvals = plotter.data.series.filter(s => /^Vmid@/.test(s.name)).map(s => s.values[s.values.length - 1]);
+    ok("with different values for the two instances", qvals.length === 2 && qvals[0] !== qvals[1] && qvals.every(v => v > 0), qvals);
+    live.start(); await wait(700);
+    ok("live simulation reads them too and the probe flag on the sub-sheet shows its value", live.channels.some(c => /^Vmid@/.test(c.name)) && (() => { const sheetProbe = editor.sheets[1].data.probes.find(p => p.label === "Vmid"); return !!sheetProbe && /V/.test(String(sheetProbe.live)); })(), live.channels.map(c => c.name));
+    live.stop();
+    editor.switchSheet(1);
+    ok("opening the sub-sheet shows its own probes as placed", editor.probes.length === 2 && editor.probes.every(p => !p._sub));
+    editor.switchSheet(0);
+    const qsw = await Study.sweep(editor, runner, { analysis: "op", show: "metric", probe: 1, params: [{ param: Study.parameters(editor, runner).find(p => /^V1 DC/.test(p.label)).id, list: [4, 8] }] });
+    ok("studies can measure a sub-sheet probe", (() => { const sr = qsw.series.find(x => /^Vmid@/.test(x.name)); return !!sr && sr.values[1] > sr.values[0] * 1.5; })(), qsw.series.map(x => x.name));
+    editor.resetSheets(); sheetBar.render();
+
+
+    // operating-point numbers on a sub-sheet
+    {
+        clear(); editor.resetSheets();
+        const ob = new ExampleBuilder(editor);
+        const osh = editor.addSheet("DIVB"); editor.switchSheet(1);
+        const oc = new ExampleBuilder(editor);
+        const oin = oc.part("PORT", 120, 200, { net: "IN", value: "IN" }), or1 = oc.part("R", 300, 200, { value: "1 kΩ" }), oout = oc.part("PORT", 520, 200, { net: "OUT", value: "OUT" }), or2 = oc.part("R", 420, 300, { rot: 90, value: "3 kΩ" }), og = oc.part("GND", 420, 440);
+        oc.wire(oin, "1", or1, "1"); oc.wire(or1, "2", oout, "1"); oc.wire(or1, "2", or2, "1"); oc.wire(or2, "2", og, "1"); oc.finish();
+        editor.switchSheet(0);
+        const ov = ob.part("V", 100, 300, { rot: 270, dcVoltage: 8, value: "8 V" }), og0 = ob.part("GND", 100, 440), ou = ob.part("SHEET", 400, 200, { sheet: osh.id }), orl = ob.part("R", 700, 300, { rot: 90, value: "1 MΩ" }), og2 = ob.part("GND", 700, 440);
+        ob.wire(ov, "2", ou, "IN"); ob.wire(ou, "OUT", orl, "1"); ob.wire(ov, "1", og0, "1"); ob.wire(orl, "2", og2, "1"); ob.finish();
+        editor.switchSheet(1);
+        opOverlay.enable(); await wait(300);
+        const od = editor.opData;
+        ok("with a sub-sheet open the operating point shows that sheet's node voltages and part currents", od && !od.error && od.nodes.length >= 2 && od.nodes.some(n => Math.abs(n.v - 8 * 3 / 4) < 0.01) && od.nodes.some(n => Math.abs(n.v - 8) < 0.01) && od.parts.some(p => p.comp.name === "R1" && Math.abs(Math.abs(p.i) - 2e-3) < 1e-5), od && JSON.stringify(od.nodes.map(n => n.v)));
+        opOverlay.disable(); editor.switchSheet(0);
+        editor.resetSheets(); sheetBar.render();
+    }
+
+
+    // playing the circuit while a sub-sheet is open
+    {
+        clear(); editor.resetSheets();
+        const lb = new ExampleBuilder(editor);
+        const lsh = editor.addSheet("DIVC"); editor.switchSheet(1);
+        const lc = new ExampleBuilder(editor);
+        const lin = lc.part("PORT", 120, 200, { net: "IN", value: "IN" }), lr1 = lc.part("R", 300, 200, { value: "1 kΩ" }), lout = lc.part("PORT", 520, 200, { net: "OUT", value: "OUT" }), lr2 = lc.part("R", 420, 300, { rot: 90, value: "3 kΩ" }), lg = lc.part("GND", 420, 440);
+        lc.wire(lin, "1", lr1, "1"); lc.wire(lr1, "2", lout, "1"); lc.wire(lr1, "2", lr2, "1"); lc.wire(lr2, "2", lg, "1"); lc.vprobe(lr1, "2", "Vq"); lc.finish();
+        editor.switchSheet(0);
+        const lv = lb.part("V", 100, 300, { rot: 270, dcVoltage: 8, value: "8 V" }), lg0 = lb.part("GND", 100, 440), lu = lb.part("SHEET", 400, 200, { sheet: lsh.id }), lrl = lb.part("R", 700, 300, { rot: 90, value: "1 MΩ" }), lg2 = lb.part("GND", 700, 440);
+        lb.wire(lv, "2", lu, "IN"); lb.wire(lu, "OUT", lrl, "1"); lb.wire(lv, "1", lg0, "1"); lb.wire(lrl, "2", lg2, "1"); lb.finish();
+        editor.switchSheet(1);
+        opOverlay.enable();
+        document.getElementById("simTstop").value = "100000"; document.getElementById("simTstep").value = "10m"; document.getElementById("liveSpeed").value = "0.1";
+        live.start(); await wait(900);
+        ok("Play with the sub-sheet open keeps it open and simulates the whole design", editor.sheetIndex === 1 && live.state === "running" && live.channels.some(c => /^Vq@/.test(c.name)), [editor.sheetIndex, live.state, live.channels.map(c => c.name)]);
+        const lqp = editor.probes.find(p => p.label === "Vq");
+        ok("the probe on the open sheet shows the running value and the wires carry live numbers", /V/.test(String(lqp.live)) && editor.opData && !editor.opData.error && editor.opData.nodes.some(n => Math.abs(n.v - 6) < 0.05), [lqp.live, editor.opData && editor.opData.nodes.map(n => n.v)]);
+        live.stop(); opOverlay.disable();
+        editor.switchSheet(0); editor.resetSheets(); sheetBar.render();
+    }
 
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
