@@ -17,7 +17,10 @@ class TouchBar {
         Commands.onRefresh(() => this.refresh());
     }
 
-    set(on) { this.on = !!on; this.root.style.display = this.on ? "flex" : "none"; }
+    // the sheet area the toolbar covers (so Fit leaves it clear)
+    get inset() { return this.on ? this.root.offsetHeight + 16 : 0; }
+
+    set(on) { this.on = !!on; this.root.style.display = this.on ? "flex" : "none"; if (this.editor) this.editor.bottomInset = this.inset; }
     toggle() { this.set(!this.on); }
 
     refresh() {

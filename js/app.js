@@ -23,6 +23,7 @@
     if (window.innerWidth < 760) document.body.classList.add("nosidebar");
     const sheetBar = new SheetBar($("sheetbar"), editor, runner);
     const touchBar = new TouchBar($("sheetwrap"));
+    touchBar.editor = editor; editor.bottomInset = touchBar.inset;
     const doc = new DocumentStore(editor, runner);
     const pcbView = new PcbView(editor, doc, runner);
     doc.onChange(() => status.setDocument(doc));

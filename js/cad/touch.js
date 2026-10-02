@@ -7,6 +7,7 @@ class TouchInput {
     touchDown(e) {
         if (e.pointerType !== "touch") { this.hitBoost = 1; return false; }
         this.hitBoost = 1.8;
+        this.guardCompatMouse();
         this.touches = this.touches || new Map();
         this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
         clearTimeout(this.lpTimer);
@@ -60,7 +61,7 @@ class TouchInput {
         clearTimeout(this.lpTimer); this.lpTimer = 0;
         if (this.pinch) { if (this.touches.size < 2) this.pinch = null; this.draw(); return true; }
         if (!had) return false;
-        if (this.longPressed) { this.longPressed = false; this.isPanning = false; return true; }
+        if (this.longPressed) { this.longPressed = false; this.isPanning = false; this.ignoreCompatUntil = performance.now() + 350; return true; }
         // double tap: two short taps close together in time and place
         if (e.type === "pointerup" && this.lpStart && Math.hypot(e.clientX - this.lpStart.x, e.clientY - this.lpStart.y) < 12) {
             const now = performance.now(), last = this.lastTap;
@@ -73,6 +74,14 @@ class TouchInput {
             this.lastTap = { t: now, x: e.clientX, y: e.clientY };
         }
         return false;
+    }
+
+    // after a long press the browser sends the mouse events of a click when the finger lifts; the menu the press just opened
+    // would be closed by that mousedown, so they are swallowed for a moment
+    guardCompatMouse() {
+        if (this.compatGuard) return;
+        this.compatGuard = (ev) => { if (this.ignoreCompatUntil && performance.now() < this.ignoreCompatUntil) { ev.stopImmediatePropagation(); ev.preventDefault(); } };
+        for (const t of ["mousedown", "mouseup", "click"]) document.addEventListener(t, this.compatGuard, true);
     }
 
     longPress() {

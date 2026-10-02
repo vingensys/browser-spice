@@ -523,14 +523,14 @@ class SchematicEditor {
             x1 = Math.min(x1, b.x1); y1 = Math.min(y1, b.y1);
             x2 = Math.max(x2, b.x2); y2 = Math.max(y2, b.y2);
         }
-        const pad = 60;
+        const pad = 60, h = this.height - (this.bottomInset || 0);      // the floating touch toolbar covers the bottom of the sheet
         const zoom = Math.min(2, Math.max(0.25, Math.min(
             this.width / (x2 - x1 + pad * 2),
-            this.height / (y2 - y1 + pad * 2)
+            h / (y2 - y1 + pad * 2)
         )));
         this.zoom = zoom;
         this.panX = this.width / 2 - ((x1 + x2) / 2) * zoom;
-        this.panY = this.height / 2 - ((y1 + y2) / 2) * zoom;
+        this.panY = h / 2 - ((y1 + y2) / 2) * zoom;
         this.draw();
     }
 
@@ -986,20 +986,23 @@ class SchematicEditor {
     }
 
     findTerminal(x, y, tolerance = 16) {
-        let best = null;
-        let bestDist = (tolerance * (this.hitBoost || 1)) / this.zoom;
-
-        for (const component of this.components) {
-            for (const terminal of this.getTerminals(component)) {
-                const p = this.getTerminalPosition(component, terminal);
-                const d = Math.hypot(x - p.x, y - p.y);
-                if (d <= bestDist) {
-                    bestDist = d;
-                    best = { component, terminal, x: p.x, y: p.y };
+        const search = (radius) => {
+            let best = null, bestDist = radius;
+            for (const component of this.components) {
+                for (const terminal of this.getTerminals(component)) {
+                    const p = this.getTerminalPosition(component, terminal);
+                    const d = Math.hypot(x - p.x, y - p.y);
+                    if (d <= bestDist) { bestDist = d; best = { component, terminal, x: p.x, y: p.y }; }
                 }
             }
-        }
-        return best;
+            return best;
+        };
+        const exact = search(tolerance / this.zoom);
+        if (!(this.hitBoost > 1)) return exact;
+        // a finger is wide: pins are reached from further away, but a touch that lands on a part's body is a touch on the part
+        // (zoomed out, the enlarged radius would otherwise swallow the whole symbol)
+        const wide = search((tolerance * this.hitBoost) / this.zoom);
+        return wide && wide !== exact && this.findComponent(x, y) ? exact : wide;
     }
 
     getTerminalInfo(componentId, terminalName) {
