@@ -128,8 +128,12 @@ class SimEngine {
                 xn = sys.solve();
             } catch (e) {
                 if (e instanceof SingularMatrixError) {
-                    throw new Error(`The circuit equations are singular near ${this.describeIndex(e.index)}. ` +
-                        `Check for a floating node, a missing ground, or voltage sources forming a loop.`);
+                    const msg = `The circuit equations are singular near ${this.describeIndex(e.index)}. ` +
+                        `Check for a floating node, a missing ground, or voltage sources forming a loop.`;
+                    // in a nonlinear circuit a wild Newton iterate can make the matrix singular for one step: that is a failed
+                    // attempt (gmin / source stepping may still succeed), not proof the circuit has no solution
+                    if (c.nonlinear && iter > 1) { this.lastSingular = msg; return { ok: false, x: ctx.x, iters: iter }; }
+                    throw new Error(msg);
                 }
                 throw e;
             }
@@ -170,6 +174,7 @@ class SimEngine {
     // nodeIC: { nodeName: volts } applied only to the initial solve of a UIC transient
     operatingPoint({ uic = false, nodeIC = null } = {}) {
         const c = this.c;
+        this.lastSingular = null;
         const ctx = this.makeCtx("op");
         ctx.uic = uic;
         if (uic && nodeIC) {
@@ -211,6 +216,7 @@ class SimEngine {
         }
 
         if (!r.ok) {
+            if (this.lastSingular) throw new Error(this.lastSingular);
             throw new Error("DC operating point did not converge. Check bias networks, feedback and supply connections.");
         }
 

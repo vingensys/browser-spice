@@ -923,14 +923,22 @@ class BJT extends NonlinearElement {
 // ------------------------------------------------------------------ MOSFET
 
 class MOSFET extends NonlinearElement {
-    // nodes: [G, D, S]; polarity +1 NMOS, -1 PMOS
-    // p: vto (magnitude, positive), beta (kp*W/L), lambda
+    // nodes: [G, D, S] or [G, D, S, B]; polarity +1 NMOS, -1 PMOS. SPICE level 1:
+    // p: vto (threshold of the NMOS-equivalent device, so it is negative for depletion types), beta (kp*W/L), lambda,
+    //    gamma, phi (body effect), rd, rs, isb (bulk junction saturation current), pb, cbd, cbs, cj, cjsw, mj, mjsw, fc,
+    //    cgso, cgdo, cgbo (overlap, per metre of W / L), tox (> 0 switches the Meyer gate capacitances on), w, l, ad, as, pd, ps
     constructor(name, nodes, polarity, p = {}) {
         super(name, nodes);
         this.pol = polarity;
-        this.p = Object.assign({ vto: 2, beta: 0.02, lambda: 0.01, rd: 0, rs: 0 }, p);
+        this.p = Object.assign({
+            vto: 2, beta: 0.02, lambda: 0.01, rd: 0, rs: 0, gamma: 0, phi: 0.6, isb: 0, pb: 0.8, cbd: 0, cbs: 0, cj: 0, cjsw: 0, mj: 0.5, mjsw: 0.33, fc: 0.5,
+            cgso: 0, cgdo: 0, cgbo: 0, tox: 0, w: 1e-4, l: 1e-4, ad: 0, as: 0, pd: 0, ps: 0
+        }, p);
         this.vgs = 0;
         this.id = 0;
+        this.von = this.p.vto;
+        this.vbsj = 0; this.vbdj = 0;
+        this.cs = {};
     }
 
     bind(circuit) {
@@ -940,74 +948,194 @@ class MOSFET extends NonlinearElement {
         // series drain / source resistance sits between the pin and an internal node
         this.di = p.rd > 0 ? circuit.internalNode(`${this.name}#d`) : this.n[1];
         this.si = p.rs > 0 ? circuit.internalNode(`${this.name}#s`) : this.n[2];
+        this.nb = this.nodeNames.length > 3 ? this.n[3] : this.n[2];       // an unwired body is tied to the source
         if (p.bodyDiode) {
             const pins = this.pol > 0 ? [s, d] : [d, s];
             circuit.add(new Diode(`${this.name}.bd`, pins, p.bodyDiode));
         }
         if (p.cgs > 0) circuit.add(new Capacitor(`${this.name}.cgs`, [g, s], { c: p.cgs }));
         if (p.cgd > 0) circuit.add(new Capacitor(`${this.name}.cgd`, [g, d], { c: p.cgd }));
+        // constant overlap capacitances
+        this.covGS = p.cgso * p.w; this.covGD = p.cgdo * p.w; this.covGB = p.cgbo * p.l;
+        this.cox = p.tox > 0 ? (3.9 * 8.854187817e-12 / p.tox) * p.w * p.l : 0;
+        // junction capacitance: the zero-bias value given directly, else area and sidewall terms (own grading exponents)
+        this.cjbs = p.cbs > 0 ? p.cbs : p.cj * p.as; this.cjbd = p.cbd > 0 ? p.cbd : p.cj * p.ad;
+        this.cswbs = p.cbs > 0 ? 0 : p.cjsw * p.ps; this.cswbd = p.cbd > 0 ? 0 : p.cjsw * p.pd;
+        this.hasCaps = this.covGS > 0 || this.covGD > 0 || this.covGB > 0 || this.cox > 0 || this.cjbs > 0 || this.cjbd > 0 || this.cswbs > 0 || this.cswbd > 0;
+        this.vt = SIM.VT;
+        this.vcrit = this.vt * Math.log(this.vt / (Math.SQRT2 * Math.max(p.isb, 1e-30)));
+    }
+
+    setTemperature(tC) {
+        this.vt = SIM.K_OVER_Q * (tC + 273.15);
+        this.vcrit = this.vt * Math.log(this.vt / (Math.SQRT2 * Math.max(this.p.isb, 1e-30)));
+    }
+
+    // NMOS-equivalent voltages at the internal terminals
+    volts(ctx) {
+        const p = this.pol, g = this.n[0], d = this.di, s = this.si, b = this.nb;
+        return { vgs: p * (ctx.v(g) - ctx.v(s)), vds: p * (ctx.v(d) - ctx.v(s)), vbs: p * (ctx.v(b) - ctx.v(s)), vbd: p * (ctx.v(b) - ctx.v(d)) };
     }
 
     beginSolve(ctx) {
-        this.vgs = this.pol * (ctx.v(this.n[0]) - ctx.v(this.si));
+        const v = this.volts(ctx);
+        this.vgs = v.vgs;
+        this.vbsj = v.vbs; this.vbdj = v.vbd;
     }
 
-    // forward-mode square-law current; returns id, gm, gds
-    fwd(vgs, vds) {
-        const { vto, beta, lambda } = this.p;
-        const vov = vgs - vto;
-        if (vov <= 0) return { id: 0, gm: 0, gds: 0 };
-        const lam = 1 + lambda * vds;
-        if (vds < vov) {
-            const core = vov * vds - (vds * vds) / 2;
-            return {
-                id: beta * core * lam,
-                gm: beta * vds * lam,
-                gds: beta * (vov - vds) * lam + beta * core * lambda
-            };
+    // forward-mode level-1 current for vgs, vds >= 0, vbs: id, gm, gds, gmbs (and the threshold)
+    fwd(vgs, vds, vbs) {
+        const { vto, beta, lambda, gamma, phi } = this.p;
+        let sarg, dsarg = 0;
+        if (gamma > 0) {
+            if (vbs <= 0) { sarg = Math.sqrt(Math.max(phi - vbs, 1e-12)); } else { const sp = Math.sqrt(phi); sarg = sp / (1 + 0.5 * vbs / phi); }
+        } else sarg = Math.sqrt(phi);
+        const von = vto - gamma * Math.sqrt(phi) + gamma * sarg;
+        const vgst = vgs - von;
+        if (vgst <= 0) return { id: 0, gm: 0, gds: 0, gmbs: 0, von };
+        const arg = gamma > 0 ? gamma / (2 * sarg) : 0;            // as in SPICE3, the same for forward and reverse body bias
+        const betap = beta * (1 + lambda * vds);
+        let id, gm, gds;
+        if (vgst <= vds) {
+            id = (betap * vgst * vgst) / 2; gm = betap * vgst; gds = (lambda * beta * vgst * vgst) / 2;
+        } else {
+            id = betap * vds * (vgst - vds / 2); gm = betap * vds; gds = betap * (vgst - vds) + lambda * beta * vds * (vgst - vds / 2);
         }
-        return {
-            id: (beta / 2) * vov * vov * lam,
-            gm: beta * vov * lam,
-            gds: (beta / 2) * vov * vov * lambda
-        };
+        return { id, gm, gds, gmbs: gm * arg, von, vdsat: Math.max(vgst, 0) };
     }
 
-    // drain-current model valid for either sign of vds (source/drain swap)
-    eval(vgs, vds) {
-        if (vds >= 0) return this.fwd(vgs, vds);
-        const f = this.fwd(vgs - vds, -vds);
-        return { id: -f.id, gm: -f.gm, gds: f.gm + f.gds };
+    // drain current valid for either sign of vds (source/drain swap); returns the current into the drain terminal and
+    // its derivatives with respect to vg, vd, vs, vb (NMOS-equivalent volts)
+    eval(vgs, vds, vbs) {
+        if (vds >= 0) {
+            const f = this.fwd(vgs, vds, vbs);
+            const gb = f.gmbs || 0, von = f.von === undefined ? this.p.vto : f.von;
+            return { id: f.id, dg: f.gm, dd: f.gds, ds: -(f.gm + f.gds + gb), db: gb, von, vdsat: f.vdsat || 0, rev: false };
+        }
+        // reversed: the drain acts as the source. vgs' = vgd, vbs' = vbd, vds' = -vds
+        const f = this.fwd(vgs - vds, -vds, vbs - vds);
+        const gb = f.gmbs || 0, von = f.von === undefined ? this.p.vto : f.von;
+        return { id: -f.id, dg: -f.gm, dd: f.gm + f.gds + gb, ds: -f.gds, db: -gb, von, vdsat: f.vdsat || 0, rev: true };
     }
 
     stamp(ctx) {
-        const g = this.n[0], d = this.di, s = this.si;
-        const p = this.pol;
-        if (this.p.rd > 0) ctx.sys.addG(this.n[1], d, 1 / this.p.rd);
-        if (this.p.rs > 0) ctx.sys.addG(this.n[2], s, 1 / this.p.rs);
+        const g = this.n[0], d = this.di, s = this.si, b = this.nb;
+        const p = this.pol, par = this.p;
+        if (par.rd > 0) ctx.sys.addG(this.n[1], d, 1 / par.rd);
+        if (par.rs > 0) ctx.sys.addG(this.n[2], s, 1 / par.rs);
 
-        let vgs = p * (ctx.v(g) - ctx.v(s));
-        const vds = p * (ctx.v(d) - ctx.v(s));
-        const vgsLim = fetlim(vgs, this.vgs, this.p.vto);
+        const v = this.volts(ctx);
+        let { vgs, vds, vbs } = v;
+        const vgsLim = fetlim(vgs, this.vgs, this.von);
         if (Math.abs(vgsLim - vgs) > 1e-12) ctx.noncon = true;
         vgs = vgsLim;
         this.vgs = vgs;
 
-        const m = this.eval(vgs, vds);
+        const m = this.eval(vgs, vds, vbs);
+        this.von = m.von; this.last = m; this.acVolts = { vgs, vds, vbs, vbd: v.vbd };
         this.id = p * m.id;
 
-        // Id flows into D and out of S.  dId/dvg = gm, dId/dvd = gds, dId/dvs = -(gm+gds)
-        const J = [
-            [0, 0, 0],
-            [m.gm, m.gds, -(m.gm + m.gds)],
-            [-m.gm, -m.gds, m.gm + m.gds]
-        ];
-        const ieqD = p * (m.id - m.gm * vgs - m.gds * vds);
-        stampNonlinear(ctx.sys, [g, d, s], J, [0, ieqD, -ieqD]);
+        // Id flows into D and out of S. Derivatives are the same in actual and equivalent coordinates.
+        const nodes = [g, d, s, b];
+        const row = [m.dg, m.dd, m.ds, m.db];
+        const J = [[0, 0, 0, 0], row, row.map(x => -x), [0, 0, 0, 0]];
+        const vn = nodes.map(n => ctx.v(n));
+        const ieqD = p * m.id - row.reduce((acc, x, k) => acc + x * vn[k], 0);
+        stampNonlinear(ctx.sys, nodes, J, [0, ieqD, -ieqD, 0]);
         ctx.sys.addG(d, s, ctx.gmin);
         ctx.sys.addG(g, s, ctx.gmin);
+        this.keepForAC(nodes, J);
 
-        this.keepForAC([g, d, s], J);
+        // bulk junctions (source-bulk and drain-bulk diodes)
+        if (par.isb > 0) {
+            for (const [key, n2, vRaw] of [["bs", s, v.vbs], ["bd", d, v.vbd]]) {
+                const vOld = key === "bs" ? this.vbsj : this.vbdj;
+                const vj = pnjlim(vRaw, vOld, this.vt, this.vcrit);
+                if (Math.abs(vj - vRaw) > 1e-12) ctx.noncon = true;
+                if (key === "bs") this.vbsj = vj; else this.vbdj = vj;
+                const e = safeExp(vj / this.vt), i0 = par.isb * (e - 1), gj = (par.isb * e) / this.vt + ctx.gmin;
+                const iAct = p * (i0 + ctx.gmin * vj);
+                const ieq = iAct - gj * (ctx.v(b) - ctx.v(n2));
+                ctx.sys.addG(b, n2, gj);
+                ctx.sys.rhs(b, -ieq); ctx.sys.rhs(n2, ieq);
+                this[`ij${key}`] = i0; this[`gj${key}`] = gj - ctx.gmin;
+            }
+        }
+
+        // charge storage
+        if (this.hasCaps && ctx.mode === "tran") {
+            const trap = ctx.method === "trap", kk = (trap ? 2 : 1) / ctx.dt;
+            for (const cp of this.capList(v, m)) {
+                const st = this.cs[cp.key] || (this.cs[cp.key] = { qPrev: 0, iPrev: 0, vPrev: 0, init: false });
+                if (!st.init) { st.qPrev = cp.q; st.vPrev = cp.ve; st.init = true; }
+                const q = cp.inc ? st.qPrev + cp.c * (cp.ve - st.vPrev) : cp.q;
+                const geq = kk * cp.c;
+                const iAct = p * (kk * (q - st.qPrev) - (trap ? st.iPrev : 0));
+                const ieqc = iAct - geq * (ctx.v(cp.a) - ctx.v(cp.b));
+                ctx.sys.addG(cp.a, cp.b, geq);
+                ctx.sys.rhs(cp.a, -ieqc); ctx.sys.rhs(cp.b, ieqc);
+                st.kk = kk; st.trap = trap;
+            }
+        }
+    }
+
+    // the capacitors at the given operating voltages: { key, a, b (nodes), ve (equivalent-coordinate voltage), c, q, inc }
+    capList(v, m) {
+        const out = [], par = this.p, g = this.n[0];
+        const add = (key, a, b, ve, c, q, inc = false) => { if (c > 0 || q) out.push({ key, a, b, ve, c, q, inc }); };
+        if (this.covGS > 0) add("ogs", g, this.si, v.vgs, this.covGS, this.covGS * v.vgs);
+        if (this.covGD > 0) add("ogd", g, this.di, v.vgs - v.vds, this.covGD, this.covGD * (v.vgs - v.vds));
+        if (this.covGB > 0) add("ogb", g, this.nb, v.vgs - v.vbs, this.covGB, this.covGB * (v.vgs - v.vbs));
+        if (this.cjbs > 0) add("jbs", this.nb, this.si, v.vbs, depletionCap(v.vbs, this.cjbs, par.pb, par.mj, par.fc), depletionCharge(v.vbs, this.cjbs, par.pb, par.mj, par.fc));
+        if (this.cjbd > 0) add("jbd", this.nb, this.di, v.vbd, depletionCap(v.vbd, this.cjbd, par.pb, par.mj, par.fc), depletionCharge(v.vbd, this.cjbd, par.pb, par.mj, par.fc));
+        if (this.cswbs > 0) add("jsbs", this.nb, this.si, v.vbs, depletionCap(v.vbs, this.cswbs, par.pb, par.mjsw, par.fc), depletionCharge(v.vbs, this.cswbs, par.pb, par.mjsw, par.fc));
+        if (this.cswbd > 0) add("jsbd", this.nb, this.di, v.vbd, depletionCap(v.vbd, this.cswbd, par.pb, par.mjsw, par.fc), depletionCharge(v.vbd, this.cswbd, par.pb, par.mjsw, par.fc));
+        if (this.cox > 0) {
+            const mc = this.meyer(v, m);
+            add("mgs", g, this.si, v.vgs, mc.cgs, 0, true);
+            add("mgd", g, this.di, v.vgs - v.vds, mc.cgd, 0, true);
+            add("mgb", g, this.nb, v.vgs - v.vbs, mc.cgb, 0, true);
+        }
+        return out;
+    }
+
+    // Meyer gate capacitances (SPICE3 DEVqmeyer), in the orientation of the present operating mode
+    meyer(v, m) {
+        const phi = this.p.phi, cox = this.cox, rev = m.rev;
+        const vgs = rev ? v.vgs - v.vds : v.vgs, vds = Math.abs(v.vds), von = m.von;
+        const vgst = vgs - von, vdsat = Math.max(vgst, 0);
+        let cgs = 0, cgd = 0, cgb = 0;
+        if (vgst <= -phi) cgb = cox / 2;
+        else if (vgst <= -phi / 2) cgb = (-vgst * cox) / (2 * phi);
+        else if (vgst <= 0) { cgb = (-vgst * cox) / (2 * phi); cgs = (vgst * cox) / (1.5 * phi) + cox / 3; }
+        else if (vdsat <= vds) cgs = cox / 3;
+        else {
+            const vddif = 2 * vdsat - vds, vddif1 = vdsat - vds, vddif2 = vddif * vddif;
+            cgd = (cox * (1 - (vdsat * vdsat) / vddif2)) / 3;
+            cgs = (cox * (1 - (vddif1 * vddif1) / vddif2)) / 3;
+        }
+        // the SPICE3 formulas give half of each capacitance (the simulator adds the two halves of old and new state)
+        cgs *= 2; cgd *= 2; cgb *= 2;
+        return rev ? { cgs: cgd, cgd: cgs, cgb } : { cgs, cgd, cgb };
+    }
+
+    initState(ctx) {
+        this.cs = {};
+        if (!this.hasCaps) return;
+        const v = this.volts(ctx), m = this.eval(v.vgs, v.vds, v.vbs);
+        for (const cp of this.capList(v, m)) this.cs[cp.key] = { qPrev: cp.q, iPrev: 0, vPrev: cp.ve, init: true, kk: 0, trap: false };
+    }
+
+    accept(ctx) {
+        if (!this.hasCaps) return;
+        const v = this.volts(ctx), m = this.eval(v.vgs, v.vds, v.vbs);
+        for (const cp of this.capList(v, m)) {
+            const st = this.cs[cp.key];
+            if (!st) continue;
+            const q = cp.inc ? st.qPrev + cp.c * (cp.ve - st.vPrev) : cp.q;
+            st.iPrev = (st.kk || 0) * (q - st.qPrev) - (st.trap ? st.iPrev : 0);
+            st.qPrev = q; st.vPrev = cp.ve;
+        }
     }
 
     // channel thermal noise 4kT * 2/3 * gm between the internal drain and source
@@ -1019,17 +1147,26 @@ class MOSFET extends NonlinearElement {
         return out;
     }
 
-    stampAC(ac) {
+    stampAC(ac, omega) {
+        const par = this.p;
         // series drain / source resistance is part of the small-signal circuit too
-        if (this.p.rd > 0) ac.addY(this.n[1], this.di, 1 / this.p.rd, 0);
-        if (this.p.rs > 0) ac.addY(this.n[2], this.si, 1 / this.p.rs, 0);
+        if (par.rd > 0) ac.addY(this.n[1], this.di, 1 / par.rd, 0);
+        if (par.rs > 0) ac.addY(this.n[2], this.si, 1 / par.rs, 0);
         this.stampACJacobian(ac);
+        if (par.isb > 0) {
+            ac.addY(this.nb, this.si, this.gjbs || 0, 0);
+            ac.addY(this.nb, this.di, this.gjbd || 0, 0);
+        }
+        if (this.hasCaps && this.acVolts) {
+            const m = this.last || this.eval(this.acVolts.vgs, this.acVolts.vds, this.acVolts.vbs);
+            for (const cp of this.capList(this.acVolts, m)) ac.addY(cp.a, cp.b, 0, omega * cp.c);
+        }
     }
 
     current(x) {
         const v = (i) => (i < 0 ? 0 : x[i]);
         const p = this.pol;
-        return p * this.eval(p * (v(this.n[0]) - v(this.si)), p * (v(this.di) - v(this.si))).id;
+        return p * this.eval(p * (v(this.n[0]) - v(this.si)), p * (v(this.di) - v(this.si)), p * (v(this.nb) - v(this.si))).id;
     }
 }
 

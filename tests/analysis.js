@@ -455,6 +455,29 @@ window.analysisTests = async function () {
     ok("OK stores them", editor.params.length === 3 && editor.params[2].name === "rz" && editor.params[2].value === "rv*3", editor.params);
     editor.params = []; byName("R1").value = "1k"; byName("R2").value = "2.2k"; byName("C1").value = "10u";
 
+
+    // ======================================================== MOSFET body terminal
+    clear();
+    const mb = new ExampleBuilder(editor);
+    const mvdd = mb.part("V", 100, 200, { rot: 270, dcVoltage: 5, value: "5 V" }), mvin = mb.part("V", 100, 360, { rot: 270, dcVoltage: 3, value: "3 V" });
+    const mvb = mb.part("V", 300, 420, { rot: 270, dcVoltage: -2, value: "-2 V" });
+    const mq = mb.part("NMOS", 400, 200, { model: "2N7000", value: "2N7000" }), mrs = mb.part("R", 400, 340, { value: "10 kΩ" });
+    const mg1 = mb.part("GND", 100, 460), mg2 = mb.part("GND", 300, 500), mg3 = mb.part("GND", 400, 440), mg4 = mb.part("GND", 220, 120);
+    mb.wire(mvdd, "2", mq, "D"); mb.wire(mvdd, "1", mg1, "1"); mb.wire(mvin, "2", mq, "G"); mb.wire(mvin, "1", mg1, "1");
+    mb.wire(mq, "S", mrs, "1"); mb.wire(mrs, "2", mg3, "1");
+    mb.finish();
+    ok("an NMOS has a body pin", editor.getTerminals(mq).map(t => t.name).join() === "G,D,S,B", editor.getTerminals(mq));
+    const mnb = NetlistExtractor.extract(editor);
+    ok("an open body is tied to the source without any warning", mnb.elements.find(e => e.kind === "M").nodes[3] === mnb.elements.find(e => e.kind === "M").nodes[2] && !mnb.warnings.some(w => /B/.test(w) && /MOS|Q\d|M\d/.test(w)), mnb.warnings);
+    ok("and the rule check does not flag it", !ErcChecker.run(editor).issues.some(i => i.rule === "pin" && /\bB\b/.test(i.text)), ErcChecker.run(editor).issues.map(i => i.text));
+    const vsrc = new SimEngine(mnb.circuit).operatingPoint().nodeVoltages[mnb.getTerminalNodeName(mq, "S")];
+    mb.wire(mq, "B", mvb, "2"); mb.wire(mvb, "1", mg2, "1"); editor.refreshWires();
+    const mnb2 = NetlistExtractor.extract(editor);
+    const vsrc2 = new SimEngine(mnb2.circuit).operatingPoint().nodeVoltages[mnb2.getTerminalNodeName(mq, "S")];
+    ok("with the model's body effect (a negative body raises the threshold) the follower's source sits lower", vsrc2 < vsrc - 0.001 || SIM_MODELS.NMOS["2N7000"].params.gamma === undefined, [vsrc, vsrc2]);
+    ok("the export writes the body node as the fourth connection", /^M\S+ \S+ \S+ \S+ \S+ \S+/m.test(NetlistExtractor.toSpice(mnb2.elements, {})) && NetlistExtractor.toSpice(mnb2.elements, {}).split("\n").find(l => /^M/.test(l)).split(" ")[4] === mnb2.elements.find(e => e.kind === "M").nodes[3]);
+    graph.hide();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

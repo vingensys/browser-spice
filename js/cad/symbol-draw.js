@@ -620,9 +620,20 @@ class SymbolRenderer {
         ctx.lineTo(20, 40);
         ctx.stroke();
 
+        // body terminal: a lead from the channel to the right edge with an arrow (in for N, out for P)
+        const pmos = component.type === "PMOS";
+        ctx.beginPath();
+        ctx.lineWidth = this.lw(1.5);
+        ctx.moveTo(-4, 0); ctx.lineTo(40, 0);
+        const ax = pmos ? 4 : -4, dir = pmos ? -1 : 1;
+        ctx.moveTo(pmos ? 6 : 4, 0); ctx.lineTo(pmos ? 14 : 12, -4); ctx.moveTo(pmos ? 6 : 4, 0); ctx.lineTo(pmos ? 14 : 12, 4);
+        ctx.stroke();
+        ctx.lineWidth = this.lw(3);
+
         this.drawTerminal(-40, 0);
         this.drawTerminal(20, -40);
         this.drawTerminal(20, 40);
+        this.drawTerminal(40, 0);
         this.drawLabel(component);
     }
 

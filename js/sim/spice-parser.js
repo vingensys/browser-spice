@@ -214,7 +214,7 @@ class SpiceParser {
             }
             case "m": {
                 const p = SpiceParser.params(tok.slice(6));
-                return { kind: "M", name, nodes: [tok[2], tok[1], tok[3]], model: tok[5], w: p.w, l: p.l };
+                return { kind: "M", name, nodes: [tok[2], tok[1], tok[3], tok[4]], model: tok[5], w: p.w, l: p.l, ad: p.ad, as: p.as, pd: p.pd, ps: p.ps };
             }
             case "j": return { kind: "J", name, nodes: [tok[2], tok[1], tok[3]], model: tok[4] }; // parser order: gate, drain, source
             case "k": return { kind: "K", name, inductors: [tok[1], tok[2]], k: N(tok[3]) };
@@ -282,10 +282,18 @@ class SpiceParser {
         };
     }
 
-    static mosParams(m, w, l) {
+    // level-1 MOSFET parameters. vto is returned for the NMOS-equivalent device (negated for PMOS), so a depletion
+    // device keeps its sign; w, l and the junction areas come from the element card.
+    static mosParams(m, w, l, e = {}) {
         const p = m ? m.params : {};
-        const ratio = (w || 1e-4) / (l || 1e-4);
-        return { vto: Math.abs(p.vto === undefined ? 0 : p.vto), beta: (p.kp || 2e-5) * ratio, lambda: p.lambda || 0, rd: p.rd || 0, rs: p.rs || 0 };
+        const W = w || 1e-4, L = l || 1e-4, pmos = !!(m && m.type === "pmos");
+        return {
+            vto: (pmos ? -1 : 1) * (p.vto === undefined ? 0 : p.vto), beta: (p.kp || 2e-5) * (W / L), lambda: p.lambda || 0, rd: p.rd || 0, rs: p.rs || 0,
+            gamma: p.gamma || 0, phi: p.phi || 0.6, isb: p.is === undefined ? 1e-14 : p.is, pb: p.pb || 0.8,
+            cbd: p.cbd || 0, cbs: p.cbs || 0, cj: p.cj || 0, cjsw: p.cjsw || 0, mj: p.mj === undefined ? 0.5 : p.mj, mjsw: p.mjsw === undefined ? 0.33 : p.mjsw, fc: p.fc === undefined ? 0.5 : p.fc,
+            cgso: p.cgso || 0, cgdo: p.cgdo || 0, cgbo: p.cgbo || 0, tox: p.tox || 0, w: W, l: L,
+            ad: e.ad || 0, as: e.as || 0, pd: e.pd || 0, ps: e.ps || 0
+        };
     }
 
     static jfetParams(m) {
@@ -389,7 +397,7 @@ class SpiceParser {
                     const m = model(e.model, e.name);
                     const pol = m && m.type === "pmos" ? -1 : 1;
                     // e.nodes is [g, d, s]
-                    circuit.add(new MOSFET(nm, e.nodes, pol, SpiceParser.mosParams(m, e.w, e.l)));
+                    circuit.add(new MOSFET(nm, e.nodes, pol, SpiceParser.mosParams(m, e.w, e.l, e)));
                     break;
                 }
                 case "E": circuit.add(new VCVS(nm, e.nodes, { gain: e.gain })); break;

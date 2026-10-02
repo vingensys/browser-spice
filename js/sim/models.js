@@ -95,8 +95,10 @@ function simModelCardFromParams(kind, name, p) {
     if (kind === "NMOS" || kind === "PMOS") {
         const t = kind === "NMOS" ? "NMOS" : "PMOS";
         // Level 1: KP * W/L = beta, so use W=L=1u and KP=beta
-        const extra = `${p.rd ? ` RD=${f(p.rd)}` : ""}${p.rs ? ` RS=${f(p.rs)}` : ""}`;
-        return `.model ${name} ${t}(LEVEL=1 VTO=${f(kind === "NMOS" ? p.vto : -p.vto)} KP=${f(p.beta)} LAMBDA=${f(p.lambda)}${extra})`;
+        const w = p.w || 1e-6, l = p.l || 1e-6;
+        const opt = (k, v) => (v ? ` ${k}=${f(v)}` : "");
+        const extra = `${opt("RD", p.rd)}${opt("RS", p.rs)}${opt("GAMMA", p.gamma)}${p.phi && p.phi !== 0.6 ? ` PHI=${f(p.phi)}` : ""}${p.isb !== undefined ? ` IS=${f(p.isb)}` : ""}${opt("PB", p.pb && p.pb !== 0.8 ? p.pb : 0)}${opt("CBD", p.cbd)}${opt("CBS", p.cbs)}${opt("CJ", p.cj)}${opt("CJSW", p.cjsw)}${opt("MJ", p.mj && p.mj !== 0.5 ? p.mj : 0)}${opt("MJSW", p.mjsw && p.mjsw !== 0.33 ? p.mjsw : 0)}${opt("CGSO", p.cgso)}${opt("CGDO", p.cgdo)}${opt("CGBO", p.cgbo)}${opt("TOX", p.tox)}`;
+        return `.model ${name} ${t}(LEVEL=1 VTO=${f(kind === "NMOS" ? p.vto : -p.vto)} KP=${f((p.beta * l) / w)} LAMBDA=${f(p.lambda)}${extra})`;
     }
     if (kind === "JFET_N" || kind === "JFET_P") {
         const parts = [`VTO=${f(p.vto)}`, `BETA=${f(p.beta)}`, `LAMBDA=${f(p.lambda || 0)}`];

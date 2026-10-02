@@ -225,6 +225,7 @@ class NetlistExtractor {
             const unwired = editor.getTerminals(comp)
                 .filter(t => !nets.wired.has(`${comp.id}:${t.name}`)).map(t => t.name);
             const quiet = typeof PartLib !== "undefined" && PartLib.defs[comp.type] && PartLib.defs[comp.type].quietPins;
+            if (comp.type === "NMOS" || comp.type === "PMOS") unwired.splice(0, unwired.length, ...unwired.filter(n => n !== "B"));
             if (unwired.length && comp.type !== "SCOPE" && comp.type !== "LOGAN" && !quiet) warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
 
             switch (comp.type) {
@@ -287,7 +288,8 @@ class NetlistExtractor {
                     const model = comp.model || SIM_DEFAULT_MODEL[comp.type];
                     els.push({
                         ...base, kind: "M", model, modelKind: comp.type, pol: comp.type === "NMOS" ? 1 : -1,
-                        nodes: [pin("G"), pin("D"), pin("S")], params: comp.customParams || simModel(comp.type, model).params
+                        // an unwired body is tied to the source
+                        nodes: [pin("G"), pin("D"), pin("S"), nets.wired.has(`${comp.id}:B`) ? pin("B") : pin("S")], params: comp.customParams || simModel(comp.type, model).params
                     });
                     break;
                 }
@@ -570,8 +572,8 @@ class NetlistExtractor {
                     break;
                 case "M":
                     models.set(e.model, { kind: e.modelKind, params: p });
-                    // drain gate source bulk(=source)
-                    lines.push(`${name} ${n[1]} ${n[0]} ${n[2]} ${n[2]} ${e.model} W=1u L=1u`);
+                    // drain gate source bulk
+                    lines.push(`${name} ${n[1]} ${n[0]} ${n[2]} ${n[3] === undefined ? n[2] : n[3]} ${e.model} W=${f(p.w || 1e-6)} L=${f(p.l || 1e-6)}${p.ad ? ` AD=${f(p.ad)}` : ""}${p.as ? ` AS=${f(p.as)}` : ""}${p.pd ? ` PD=${f(p.pd)}` : ""}${p.ps ? ` PS=${f(p.ps)}` : ""}`);
                     break;
                 case "OPAMP": {
                     const sub = `OPAMP_${e.model}`;

@@ -25,7 +25,7 @@ function generate(seed) {
     const r = rng(seed), pick = (a) => a[Math.floor(r() * a.length)], int = (a, b) => a + Math.floor(r() * (b - a + 1));
     const logu = (lo, hi) => lo * Math.pow(hi / lo, r());
     const fmt = (v) => Number(v.toPrecision(3)).toString();
-    const kind = pick(["resistive", "diodes", "bjt", "rlc", "rlc", "behavioural", "mixed"]);
+    const kind = pick(["resistive", "diodes", "bjt", "rlc", "rlc", "behavioural", "mixed", "mos", "mos"]);
     const n = int(3, 7), nodes = Array.from({ length: n }, (_, i) => `n${i + 1}`);
     const lines = [`Random circuit seed ${seed} (${kind})`];
     let k = 0;
@@ -44,12 +44,22 @@ function generate(seed) {
         if (a === b || (a === nodes[0] && b === "0")) continue;          // an inductor straight across the source is a V-L loop
         if (r() < 0.6 || inductors) lines.push(`C${++k} ${a} ${b} ${fmt(logu(1e-9, 1e-6))}`); else { inductors++; lines.push(`L${++k} ${a} ${b} ${fmt(logu(1e-4, 1e-1))}`); }
     }
-    let models = false;
+    let models = false, mos = false;
     if (kind === "diodes" || kind === "mixed") for (let e = int(1, 3); e > 0; e--) { const a = pick(nodes), b = pick(nodes.concat(["0"])); if (a !== b && !(a === nodes[0] && b === "0")) { lines.push(`D${++k} ${a} ${b} DM`); models = true; } }
     if (kind === "bjt") {          // no BJTs next to capacitors: a UIC start would force absurd junction voltages (the engines legitimately differ there)
         for (let e = int(1, 2); e > 0; e--) {
             const c = pick(nodes), b = pick(nodes.slice(1)), em = pick(nodes.concat(["0"]));      // the base is never the source node itself (that would force an absurd Vbe)
             if (new Set([c, b, em]).size === 3) { lines.push(`Q${++k} ${c} ${b} ${em} QM`); models = true; }
+        }
+    }
+    if (kind === "mos") {
+        // level-1 MOSFETs with body effect, junction and overlap capacitances; the body is the source or ground
+        for (let e = int(1, 2); e > 0; e--) {
+            const d = pick(nodes), g = pick(nodes), sNode = pick(nodes.concat(["0"]));
+            if (new Set([d, g, sNode]).size < 3) continue;
+            const body = r() < 0.5 ? sNode : "0";
+            lines.push(`M${++k} ${d} ${g} ${sNode} ${body} MM W=${fmt(logu(2e-6, 5e-5))} L=${fmt(logu(1e-6, 4e-6))} AD=${fmt(logu(1e-12, 5e-11))} AS=${fmt(logu(1e-12, 5e-11))} PD=${fmt(logu(4e-6, 5e-5))} PS=${fmt(logu(4e-6, 5e-5))}`);
+            models = true; mos = true;
         }
     }
     if (kind === "behavioural") {
@@ -59,6 +69,7 @@ function generate(seed) {
     }
     // BJT models: plain, or with the Gummel-Poon extras (reverse Early, high-injection knees, leakage, series resistances)
     const gp = kind === "bjt" && r() < 0.6 ? ` VAR=${fmt(logu(10, 100))} IKF=${fmt(logu(5e-3, 0.1))} IKR=${fmt(logu(5e-3, 0.1))} ISE=${fmt(logu(1e-15, 1e-12))} NE=${fmt(1.2 + r())} ISC=${fmt(logu(1e-15, 1e-12))} NC=${fmt(1.2 + r())} RB=${fmt(logu(5, 200))} RC=${fmt(logu(0.5, 20))} RE=${fmt(logu(0.1, 5))}` : "";
+    if (mos) lines.push(`.model MM NMOS(LEVEL=1 VTO=${fmt(0.3 + r())} KP=${fmt(logu(2e-5, 2e-4))} GAMMA=${fmt(r() * 0.8)} PHI=${fmt(0.5 + r() * 0.3)} LAMBDA=${fmt(r() * 0.05)} IS=1e-14 CJ=${fmt(logu(1e-4, 5e-4))} CJSW=${fmt(logu(1e-10, 5e-10))} CGSO=${fmt(logu(1e-10, 5e-10))} CGDO=${fmt(logu(1e-10, 5e-10))} CGBO=${fmt(logu(1e-11, 1e-10))}${r() < 0.5 ? ` TOX=${fmt(logu(5e-9, 3e-8))}` : ""})`);
     if (models) lines.push(".model DM D(IS=1e-14 N=1.05 RS=5 CJO=2p)", `.model QM NPN(IS=1e-14 BF=120 VAF=80 CJE=3p CJC=2p TF=0.3n${gp})`);
     const probe = nodes.concat(kind === "behavioural" ? [`n${n + 1}`] : []);
     lines.push(`.tran ${tran ? "0.1u 0.4m" : "20u 1m"}`, ".ac dec 10 10 100k", ".end");
@@ -110,6 +121,7 @@ function check(seed) {
         const t = readPairs(`${tmp}/${id}.tran.txt`, nodes.length);
         nodes.forEach((n, k) => {
             const ys = t.y[k];
+            if (Math.max(...ys.map(Math.abs)) < 0.05) return;        // a node that never leaves 50 mV is set by leakage currents (junction leakage against gmin), not by the circuit
             const range = Math.max(Math.max(...ys) - Math.min(...ys), 0.05 * Math.max(...ys.map(Math.abs)), 1e-3);
             let acc = 0, cnt = 0;
             // the first few steps are skipped: with "uic" ngspice starts every node at 0 V, this engine starts from the

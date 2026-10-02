@@ -49,7 +49,7 @@ class ErcChecker {
             if (c.type === "GND" || c.type === "NODEIC" || c.type === "SCOPE" || c.type === "LOGAN") continue;
             const def = typeof PartLib !== "undefined" ? PartLib.defs[c.type] : null;
             if (def && def.quietPins) continue;
-            const open = editor.getTerminals(c).filter(t => !nets.wired.has(`${c.id}:${t.name}`));
+            const open = editor.getTerminals(c).filter(t => !nets.wired.has(`${c.id}:${t.name}`) && !((c.type === "NMOS" || c.type === "PMOS") && t.name === "B"));   // an open MOSFET body is tied to the source
             if (open.length) add("warn", "pin", `${c.name}: ${open.length > 1 ? "pins" : "pin"} ${open.map(t => t.name).join(", ")} ${open.length > 1 ? "are" : "is"} not connected.`, open.map(t => ({ comp: c, ...posOf(c, t.name) })));
         }
 

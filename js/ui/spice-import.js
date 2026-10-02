@@ -15,7 +15,7 @@ class SchematicImporter {
         G: ["O+", "O-", "C+", "C-"],
         D: ["1", "2"],
         Q: ["C", "B", "E"],       // parser order (collector, base, emitter)
-        M: ["G", "D", "S"],       // parser order (gate, drain, source)
+        M: ["G", "D", "S", "B"],  // parser order (gate, drain, source, body)
         J: ["G", "D", "S"],
         XFMR: ["P1", "P2", "S1", "S2"],
         B: ["O+", "O-", "A", "B", "C", "D"]
@@ -235,7 +235,8 @@ class SchematicImporter {
             case "M": {
                 const m = deck.models[e.model];
                 const type = m && m.type === "pmos" ? "PMOS" : "NMOS";
-                return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.mosParams(m, e.w, e.l) : undefined } };
+                if (e.nodes.length > 3 && String(e.nodes[3]).toLowerCase() === String(e.nodes[2]).toLowerCase()) base.nodes = e.nodes.slice(0, 3);     // body on the source: leave the B pin open
+                return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.mosParams(m, e.w, e.l, e) : undefined } };
             }
             default:
                 return null;

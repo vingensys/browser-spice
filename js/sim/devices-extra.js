@@ -10,7 +10,7 @@
 class JFET extends MOSFET {
     constructor(name, nodes, polarity, p = {}) {
         super(name, nodes, polarity, {});
-        this.p = Object.assign({ vto: -2, beta: 1e-3, lambda: 0, rd: 0, rs: 0, is: 1e-14, cgs: 0, cgd: 0 }, p);
+        this.p = Object.assign({}, this.p, { vto: -2, beta: 1e-3, lambda: 0, rd: 0, rs: 0, is: 1e-14, cgs: 0, cgd: 0 }, p);
         delete this.p.bodyDiode;
     }
 
