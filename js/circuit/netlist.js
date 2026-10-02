@@ -505,6 +505,46 @@ class NetlistExtractor {
         ".ends NE555"
     ];
 
+    // ports: anode cathode gate (SCR) or MT2 MT1 gate (TRIAC). The state x relaxes to 1 when the device is forward biased
+    // and triggered, to 0 when the current falls below the holding current; it holds in between.
+    static thyristorSubckt(id, triac, params, f) {
+        const p = Object.assign({ igt: 5e-3, ih: 10e-3, vf: 1, ron: 0.05, rg: 100 }, params);
+        const vf = f(p.vf), igt = f(p.igt), ih = f(p.ih), ron = f(p.ron), rg = f(p.rg);
+        const xx = "min(max(v(x),0),1)";
+        const step = (expr, w) => `0.5*(1+tanh((${expr})/(${w})))`;
+        const ak = triac ? "abs(v(a1,k))" : "v(a1,k)", cur = triac ? "abs(i(Vs))" : "i(Vs)", gate = triac ? "abs(v(g,k))" : "v(g,k)";
+        return [
+            `.subckt ${id} a k g`,
+            `Rg g k ${rg}`, `Vs a a1 0`, `Cx x 0 1n`,
+            `Bx 0 x I = 1m*(${step(`${ak}-${vf}`, "0.05")}*${step(`${gate}/${rg}-${igt}`, f(0.1 * p.igt))}*(1-${xx})-${step(`${ih}-${cur}`, f(0.1 * p.ih))}*${xx})`,
+            triac ? `Bak a1 k I = ${xx}*sgn(v(a1,k))*max(abs(v(a1,k))-${vf},0)/${ron}+(1-${xx})*1e-9*v(a1,k)` : `Bak a1 k I = ${xx}*max(v(a1,k)-${vf},0)/${ron}+(1-${xx})*1e-9*v(a1,k)`,
+            `.ends ${id}`
+        ];
+    }
+
+    // Master-slave flip-flop from two sample-and-hold nodes (no clock-edge detection, so it does not depend on the time
+    // step): the master follows the next-state function while the clock is low, the slave follows the master while it is
+    // high; asynchronous set / reset (active high, reset wins) act on the slave. Ports: d k clk q qn set rst.
+    static flipFlopSubckt(id, kind, params, f) {
+        const vcc = params.vcc === undefined ? 5 : params.vcc, ro = params.ro || 50;
+        const h = (x, at = 0.5, w = 0.05) => `0.5*(1+tanh((${x}-${f(vcc * at)})/${f(w * vcc)}))`;
+        const hq = "0.5*(1+tanh((v(s)-0.5)/0.05))", hm = "0.5*(1+tanh((v(m)-0.5)/0.05))";
+        const hd = h("v(d)"), hk = h("v(k)");
+        const next = kind === "T" ? `(${hd}*(1-${hq})+(1-${hd})*${hq})`
+            : kind === "JK" ? `(${hd}*(1-${hk})+${hd}*${hk}*(1-${hq})+(1-${hd})*(1-${hk})*${hq})` : hd;
+        // separate thresholds for the two halves leave a dead zone while the clock crosses, so they are never both open
+        const low = `(1-${h("v(clk)", 0.45, 0.01)})`, high = h("v(clk)", 0.55, 0.01);
+        return [
+            `.subckt ${id} d k clk q qn set rst`,
+            `Cm m 0 1p`, `Cs s 0 1p`,
+            `Bm 0 m I = 1m*${low}*(${next}-v(m))+50u*(${hm}-v(m))`,
+            `Bs 0 s I = 1m*${high}*(v(m)-v(s))+50u*(${hq}-v(s))+10m*${h("v(set)")}*(1-v(s))*(1-${h("v(rst)")})-10m*${h("v(rst)")}*v(s)`,
+            `Bq qi 0 V = ${f(vcc)}*${hq}`, `Rq qi q ${f(ro)}`,
+            `Bqn qni 0 V = ${f(vcc)}*(1-${hq})`, `Rqn qni qn ${f(ro)}`,
+            `.ends ${id}`
+        ];
+    }
+
     static spiceName(e) {
         const clean = (s) => String(s).replace(/[^A-Za-z0-9_]/g, "_");
         const prefix = { R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", SW: "R", D: "D", Q: "Q", M: "M", OPAMP: "X", GATE: "B", "555": "X", J: "J" }[e.kind] || "X";
@@ -521,6 +561,7 @@ class NetlistExtractor {
         const extra = [];
         let uses555 = false;
         const userSubckts = new Map();
+        const thyristors = new Map();
 
         for (const e of els) {
             const name = NetlistExtractor.spiceName(e);
@@ -665,7 +706,21 @@ class NetlistExtractor {
                     lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} I=${f(p.gain)}*I(${sense})*tanh(V(${n[0]},${n[1]})/${f(p.vsat)})`);
                     break;
                 }
-                case "SCR": case "TRIAC": case "FF": case "DIGITAL":
+                case "SCR": case "TRIAC": {
+                    // a latch node x (0 off, 1 on) with a behavioural conduction path; see thyristorSubckt
+                    const id = `${e.kind}_${String(e.model || "X").replace(/[^A-Za-z0-9_]/g, "_")}`;
+                    thyristors.set(id, NetlistExtractor.thyristorSubckt(id, e.kind === "TRIAC", p, f));
+                    const ports = e.kind === "TRIAC" ? [n[1], n[0], n[2]] : [n[0], n[1], n[2]];
+                    lines.push(`X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")} ${ports.join(" ")} ${id}`);
+                    break;
+                }
+                case "FF": {
+                    const id = `FF_${e.ff}_${String(p.vcc).replace(/[^0-9]/g, "_")}`;
+                    thyristors.set(id, NetlistExtractor.flipFlopSubckt(id, e.ff, p, f));
+                    lines.push(`X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")} ${n.join(" ")} ${id}`);
+                    break;
+                }
+                case "DIGITAL":
                     lines.push(`* ${e.name}: ${e.kind === "FF" ? "flip-flop" : (e.kind === "DIGITAL" ? e.ic + " logic IC" : e.kind)} has no SPICE model in this export (built-in simulator only)`);
                     break;
                 case "555":
@@ -702,6 +757,8 @@ class NetlistExtractor {
                 );
             }
         }
+
+        if (thyristors.size) lines.push("", "* thyristor macromodels (latch + conduction path)", ...[...thyristors.values()].flat());
 
         if (userSubckts.size) {
             lines.push("", "* subcircuits");

@@ -57,6 +57,9 @@ window.engineTests = async function () {
         "555-astable": { tol: { op: 0.05, tran: 0.6 }, opts: { skipOp: true } }, // bistable: no unique DC state; periods differ ~1-2 %
         "psu": { tol: { op: 0.05, tran: 0.2 }, opts: { skipOp: true } }, // floating rectifier nodes: leakage sets the DC state; kick spikes are timing sensitive
         "jfet-amp": { opts: { uic: false } },                            // bias circuit: start from the operating point
+        "scr-lamp": { tol: { op: 0.05, tran: 0.06 }, opts: { skipOp: true } }, // behavioural latch vs the exact switching instant
+        "ripple-counter": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },   // master-slave macromodel vs the exact-edge flip-flop
+        "logic-analyser": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },
         "boost": { tol: { op: 0.01, tran: 0.2 } }                        // switching ripple is phase sensitive
     };
     for (const ex of EXAMPLES) {
@@ -106,6 +109,21 @@ window.engineTests = async function () {
         b.vprobe(nand, "Y", "nand"); b.vprobe(inv, "Y", "and");
         b.finish();
     }, { tStop: 400e-6, tStep: 0.5e-6 }, { op: 0.02, tran: 0.1 });
+
+    // a TRIAC conducting in both half-cycles
+    await compare("triac", () => {
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        const b = new ExampleBuilder(editor);
+        const v = b.part("V", 100, 340, { rot: 270, sourceType: "AC", acMagnitude: 24, frequency: 50, dcOffset: 0, acPhase: 0 });
+        const rl = b.part("R", 320, 240, { value: "10 Ω" });
+        const tr = b.part("TRIAC", 520, 340, { rot: 90, model: "BT136", value: "BT136" });
+        const vg = b.part("V", 300, 520, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 8, delay: 3e-3, rise: 1e-6, fall: 1e-6, width: 0.5e-3, period: 10e-3 } });
+        const rg = b.part("R", 440, 460, { value: "100 Ω" });
+        const g = b.part("GND", 520, 600);
+        b.wire(v, "2", rl, "1"); b.wire(rl, "2", tr, "MT2"); b.wire(tr, "MT1", g, "1"); b.wire(vg, "2", rg, "1"); b.wire(rg, "2", tr, "G"); b.wire(vg, "1", g, "1"); b.wire(v, "1", g, "1");
+        b.vprobe(rl, "2", "V(triac)"); b.vprobe(v, "2", "V(in)");
+        b.finish();
+    }, { tStop: 60e-3, tStep: 50e-6 }, { op: 0.05, tran: 0.08 }, { skipOp: true });
 
     const failed = results.filter(r => !r.pass);
     return { total: results.length, failed: failed.length, failures: failed, results };

@@ -116,7 +116,7 @@ window.partsTests = async function () {
     deck = spice("relay-driver");
     ok("relay exports as coil + switch", /^S\w+ .* SW_\w+/m.test(deck) && /\.model SW_\w+ SW\(VT=/.test(deck));
     deck = spice("ripple-counter");
-    ok("flip-flops are flagged as not exported", /flip-flop has no SPICE model/.test(deck) && NgspiceBackend.unsupported(NetlistExtractor.extract(editor)).length === 3);
+    ok("flip-flops export as master-slave macromodels (a subcircuit per kind), nothing left unsupported", /^\.subckt FF_D_5 d k clk q qn set rst/m.test(deck) && /^XU1 /m.test(deck) && NgspiceBackend.unsupported(NetlistExtractor.extract(editor)).length === 0, deck.split("\n").filter(l => /^X|^\.subckt/.test(l)));
 
     // ---- property panels --------------------------------------------------------------
     const propBad = [];
