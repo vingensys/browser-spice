@@ -13,7 +13,7 @@ class Pcb {
     static DEFAULT_RULES = { clearance: 0.2, track: 0.3, via: 0.8, viaDrill: 0.4, minTrack: 0.15, edge: 0.3 };
 
     static blank(w = 80, h = 60) {
-        return { outline: { w, h }, rules: { ...Pcb.DEFAULT_RULES }, parts: [], tracks: [], vias: [], nextId: 1 };
+        return { outline: { w, h }, rules: { ...Pcb.DEFAULT_RULES }, parts: [], tracks: [], vias: [], zones: [], footprints: {}, nextId: 1 };
     }
 
     // ---------------------------------------------------------------- footprints
@@ -31,9 +31,10 @@ class Pcb {
         J: [["to92", "TO-92 (through-hole)"], ["sot23", "SOT-23 (SMD)"]],
         DIGITAL: [["dip", "DIP (through-hole)"], ["soic", "SOIC, 1.27 mm (SMD)"]]
     };
-    static packages(kind) { return Pcb.PACKAGES[kind] || []; }
+    static packages(kind, lib) { return [...(Pcb.PACKAGES[kind] || []), ...Object.keys(lib || {}).sort().map(n => [`user:${n}`, `${n} (user)`])]; }
 
-    static footprint(kind, nPins, ic, pkg) {
+    static footprint(kind, nPins, ic, pkg, lib) {
+        if (typeof pkg === "string" && pkg.startsWith("user:") && lib && lib[pkg.slice(5)]) return Pcb.userFootprint(lib[pkg.slice(5)]);
         const list = Pcb.PACKAGES[kind], id = list && list.some(x => x[0] === pkg) ? pkg : (list ? list[0][0] : "header");
         const bounds = (pads, extra = 1) => {
             const xs = pads.flatMap(p => [p.x - p.w / 2, p.x + p.w / 2]), ys = pads.flatMap(p => [p.y - p.h / 2, p.y + p.h / 2]);
@@ -81,6 +82,108 @@ class Pcb {
         }
     }
 
+    // ---------------------------------------------------------------- user-defined footprints
+    // A user footprint is stored in the design (pcb.footprints[name]) as { name, pads, silk, pinMap? } and written as text:
+    //   footprint NAME
+    //   pad N X Y W H [round|rect] [drill D]        a pad with a drill is through-hole, one without is surface-mount
+    //   line X1 Y1 X2 Y2 [X3 Y3 ...]                a silkscreen polyline
+    //   circle X Y R                                a silkscreen circle
+    //   map I J K ...                               pad i takes netlist pin map[i] (0-based); default is pad i = pin i
+    // Pads are taken by the part's pins in the order they are listed. Lines starting with # are comments.
+    static parseFootprint(text) {
+        let name = "", pads = [], silk = [], pinMap = null;
+        text.split(/\r?\n/).forEach((raw, ln) => {
+            const line = raw.replace(/#.*/, "").trim();
+            if (!line) return;
+            const w = line.split(/\s+/), op = w[0].toLowerCase(), nums = (a) => a.map(Number);
+            const bad = (m) => { throw new Error(`line ${ln + 1}: ${m}`); };
+            if (op === "footprint") { name = w.slice(1).join("_"); if (!name) bad("a footprint needs a name"); }
+            else if (op === "pad") {
+                if (w.length < 6) bad("pad needs: pad N X Y W H [round|rect] [drill D]");
+                const [x, y, pw, ph] = nums(w.slice(2, 6));
+                if (![x, y, pw, ph].every(Number.isFinite) || pw <= 0 || ph <= 0) bad("pad position and size must be numbers (size above 0)");
+                const rest = w.slice(6).map(t => t.toLowerCase()), di = rest.indexOf("drill"), drill = di >= 0 ? Number(rest[di + 1]) : 0;
+                if (di >= 0 && !(drill > 0)) bad("the drill must be above 0");
+                if (drill > Math.min(pw, ph) - 0.2) bad("the drill leaves no copper ring (it must be at least 0.2 mm smaller than the pad)");
+                pads.push({ n: w[1], x, y, w: pw, h: ph, drill: drill || 0, shape: rest.includes("rect") ? "rect" : "round", smd: !(drill > 0) });
+            } else if (op === "line") {
+                const v = nums(w.slice(1));
+                if (v.length < 4 || v.length % 2 || !v.every(Number.isFinite)) bad("line needs pairs of coordinates (at least two points)");
+                const pts = []; for (let i = 0; i < v.length; i += 2) pts.push([v[i], v[i + 1]]);
+                silk.push(pts);
+            } else if (op === "circle") {
+                const [x, y, r] = nums(w.slice(1, 4));
+                if (![x, y, r].every(Number.isFinite) || !(r > 0)) bad("circle needs: circle X Y R");
+                silk.push(Array.from({ length: 25 }, (_, i) => [x + Math.cos((i / 24) * 2 * Math.PI) * r, y + Math.sin((i / 24) * 2 * Math.PI) * r]));
+            } else if (op === "map") {
+                pinMap = nums(w.slice(1));
+                if (!pinMap.every(v => Number.isInteger(v) && v >= 0)) bad("map takes pin numbers counting from 0");
+            } else bad(`unknown word "${w[0]}"`);
+        });
+        if (!name) throw new Error("the first line must be: footprint NAME");
+        if (!/^[A-Za-z0-9_.+\-]+$/.test(name)) throw new Error("the name may use letters, digits and _ . + - only");
+        if (!pads.length) throw new Error("a footprint needs at least one pad");
+        if (pinMap && pinMap.length !== pads.length) throw new Error(`map lists ${pinMap.length} pins for ${pads.length} pads`);
+        return { name, pads, silk, pinMap };
+    }
+
+    static footprintText(fp) {
+        const f = (v) => String(Number(v.toFixed(4)));
+        const out = [`footprint ${fp.name}`];
+        for (const p of fp.pads) out.push(`pad ${p.n} ${f(p.x)} ${f(p.y)} ${f(p.w)} ${f(p.h)} ${p.shape}${p.drill ? ` drill ${f(p.drill)}` : ""}`);
+        for (const l of fp.silk || []) out.push(`line ${l.map(q => `${f(q[0])} ${f(q[1])}`).join(" ")}`);
+        if (fp.pinMap) out.push(`map ${fp.pinMap.join(" ")}`);
+        return out.join("\n") + "\n";
+    }
+
+    // the ready-to-use footprint (courtyard size, smd flag) for a stored user footprint
+    static userFootprint(def) {
+        const pads = def.pads.map(p => ({ ...p }));
+        const xs = pads.flatMap(p => [p.x - p.w / 2, p.x + p.w / 2]), ys = pads.flatMap(p => [p.y - p.h / 2, p.y + p.h / 2]);
+        for (const l of def.silk || []) for (const q of l) { xs.push(q[0]); ys.push(q[1]); }
+        const w = Math.max(...xs.map(Math.abs)) * 2 + 1, h = Math.max(...ys.map(Math.abs)) * 2 + 1;
+        return { name: def.name, pads, silk: def.silk || [], pinMap: def.pinMap || null, w, h, smd: pads.every(p => p.smd), user: true };
+    }
+
+    // KiCad .kicad_mod (or an old .mod "module"): pads, silkscreen lines / circles / rectangles. Needs KicadImporter.parseSexp.
+    static importKicadFootprint(text) {
+        const K = KicadImporter, root = K.parseSexp(text), h = K.head(root);
+        if (h !== "footprint" && h !== "module") throw new Error("this is not a KiCad footprint (.kicad_mod)");
+        const nm = (K.str(root[1]) || "KICAD").replace(/^.*:/, "").replace(/[^A-Za-z0-9_.+\-]/g, "_");
+        const pads = [], silk = [];
+        const xy = (l, key) => { const k = K.kid(l, key); return k ? [K.num(k[1]), K.num(k[2])] : null; };
+        for (const e of root.filter(x => Array.isArray(x))) {
+            const hd = K.head(e);
+            if (hd === "pad") {
+                const num = K.str(e[1]) ?? String(e[1]), type = e[2], shape = e[3], at = K.kid(e, "at"), sz = K.kid(e, "size"), dr = K.kid(e, "drill");
+                if (!at || !sz) continue;
+                let w = K.num(sz[1]), hgt = K.num(sz[2]);
+                const rot = Number(at[3] || 0);
+                if (Math.abs(Math.round(rot / 90)) % 2 === 1) [w, hgt] = [hgt, w];
+                let drill = 0;
+                if (dr) drill = dr[1] === "oval" ? Math.min(K.num(dr[2]), K.num(dr[3])) : K.num(dr[1]);
+                if (type === "np_thru_hole") continue;
+                pads.push({ n: num, x: K.num(at[1]), y: K.num(at[2]), w, h: hgt, drill: type === "smd" || type === "connect" ? 0 : (drill || 0.8), shape: shape === "circle" ? "round" : "rect", smd: type === "smd" || type === "connect" || !(drill > 0) && type !== "thru_hole" });
+            } else if (hd === "fp_line") {
+                const layer = K.kid(e, "layer") && K.str(K.kid(e, "layer")[1]);
+                if (layer && !/SilkS/.test(layer)) continue;
+                const a = xy(e, "start"), b = xy(e, "end"); if (a && b) silk.push([a, b]);
+            } else if (hd === "fp_rect") {
+                const layer = K.kid(e, "layer") && K.str(K.kid(e, "layer")[1]);
+                if (layer && !/SilkS/.test(layer)) continue;
+                const a = xy(e, "start"), b = xy(e, "end"); if (a && b) silk.push([a, [b[0], a[1]], b, [a[0], b[1]], a]);
+            } else if (hd === "fp_circle") {
+                const layer = K.kid(e, "layer") && K.str(K.kid(e, "layer")[1]);
+                if (layer && !/SilkS/.test(layer)) continue;
+                const c = xy(e, "center"), en = xy(e, "end");
+                if (c && en) { const r = Math.hypot(en[0] - c[0], en[1] - c[1]); silk.push(Array.from({ length: 25 }, (_, i) => [c[0] + Math.cos((i / 24) * 2 * Math.PI) * r, c[1] + Math.sin((i / 24) * 2 * Math.PI) * r])); }
+            }
+        }
+        if (!pads.length) throw new Error("that footprint has no pads");
+        pads.sort((a, b) => { const x = Number(a.n), y = Number(b.n); return (Number.isFinite(x) ? x : 1e9) - (Number.isFinite(y) ? y : 1e9); });
+        return { name: nm, pads, silk, pinMap: null };
+    }
+
     // ---------------------------------------------------------------- schematic -> board
     // elements: the netlist extractor's `info.elements` (name, kind, nodes, ic). Existing placement and routing is kept:
     // parts are matched by reference, new ones are added at the board's top-left, vanished ones are removed along with
@@ -93,7 +196,7 @@ class Pcb {
             if (!e.nodes || !e.nodes.length) continue;
             const old = byRef.get(e.name), part = old || { ref: e.name, x: 0, y: 0, rot: 0, placed: false, flip: false };
             part.kind = e.kind; part.ic = e.ic; part.nodes = e.nodes.map(String);
-            Pcb.setPackage(part, part.pkg);
+            Pcb.setPackage(part, part.pkg, pcb.footprints);
             if (!old) added++;
             next.push(part);
         }
@@ -103,12 +206,12 @@ class Pcb {
     }
 
     // (re)build a part's footprint and the nets on its pads; an unknown package falls back to the kind's default
-    static setPackage(part, pkg) {
+    static setPackage(part, pkg, lib) {
         const nodes = part.nodes || [];
         part.pkg = pkg;
-        part.fp = Pcb.footprint(part.kind, nodes.length, part.ic, pkg);
+        part.fp = Pcb.footprint(part.kind, nodes.length, part.ic, pkg, lib);
         part.nets = part.fp.pads.map((_, i) => { const k = part.fp.pinMap ? part.fp.pinMap[i] : i; return nodes[k] === undefined ? "" : String(nodes[k]); });
-        if (!Pcb.packages(part.kind).some(x => x[0] === pkg)) part.pkg = undefined;
+        if (!Pcb.packages(part.kind, lib).some(x => x[0] === pkg)) part.pkg = undefined;
         if (!part.fp.smd) part.flip = false;            // only surface-mount parts can go on the back
     }
 
@@ -155,7 +258,7 @@ class Pcb {
     // ---------------------------------------------------------------- connectivity
     // Which copper is joined: pads and track ends / vias that touch. Returns the union-find groups, each with its pads,
     // the net it carries (null when empty, "!" when it joins different nets = a short) and the item ids.
-    static connectivity(pcb) {
+    static connectivity(pcb, withZones = true) {
         const items = [];   // {kind, ref, layers, x/y or pts}
         const pads = Pcb.pads(pcb);
         pads.forEach(p => items.push({ kind: "pad", ref: p, layers: p.layers }));
@@ -186,6 +289,12 @@ class Pcb {
             return false;
         };
         for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) if (touches(items[i], items[j])) union(i, j);
+        // a pour joins the pads of its net that sit inside it on its layer
+        if (withZones) for (const z of pcb.zones || []) {
+            const hits = [];
+            items.forEach((it, i) => { if (it.kind === "pad" && it.ref.net && String(it.ref.net) === String(z.net) && it.layers.includes(z.layer) && Pcb.inPoly(it.ref.x, it.ref.y, z.pts)) hits.push(i); });
+            for (let k = 1; k < hits.length; k++) union(hits[0], hits[k]);
+        }
         const groups = new Map();
         items.forEach((it, i) => {
             const r = find(i);
@@ -197,6 +306,151 @@ class Pcb {
         const out = [...groups.values()];
         for (const g of out) g.net = g.nets.size === 0 ? null : (g.nets.size === 1 ? [...g.nets][0] : "!");
         return out;
+    }
+
+    // ---------------------------------------------------------------- copper pours (zones)
+    // zone = { id, layer, net, pts: [[x, y], ...], thermal: true, clearance? }. For the netlist a pour joins every pad of its
+    // net on its layer that lies inside the polygon. The copper itself (Pcb.fillZones) is computed on a 0.1 mm grid: the
+    // polygon minus a clearance around everything of another net, thermal-relief spokes on its own pads, and only the
+    // copper that is actually connected to a pad or via of the net (no islands). Edges therefore step in 0.1 mm.
+    static inPoly(x, y, pts) {
+        let inside = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+            const [xi, yi] = pts[i], [xj, yj] = pts[j];
+            if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+        }
+        return inside;
+    }
+
+    static zoneKey(pcb) {
+        return JSON.stringify([pcb.outline, pcb.rules, pcb.zones, pcb.tracks, pcb.vias, pcb.parts.map(p => [p.ref, p.x, p.y, p.rot, p.flip, p.fp.name, p.nets])]);
+    }
+
+    // [{ zone, rects: [[x1, y1, x2, y2]], connected: [pad...], islands: [pad...], cells }] (cached until the board changes)
+    static fillZones(pcb, res = 0.1) {
+        const zones = pcb.zones || [];
+        if (!zones.length) return [];
+        const cache = Pcb._fills || (Pcb._fills = new WeakMap()), key = Pcb.zoneKey(pcb) + res, hit = cache.get(pcb);
+        if (hit && hit.key === key) return hit.fills;
+        const R = pcb.rules, W = pcb.outline.w, H = pcb.outline.h, nx = Math.ceil(W / res), ny = Math.ceil(H / res);
+        const conn = Pcb.connectivity(pcb, false), pads = Pcb.pads(pcb);
+        const netOf = new Map();
+        conn.forEach((g, gi) => { g.tracks.forEach(t => netOf.set(t, g.net)); g.vias.forEach(v => netOf.set(v, g.net)); });
+        const fills = [];
+        zones.forEach((z, zi) => {
+            const L = z.layer, net = String(z.net), clr = z.clearance || R.clearance, half = res * 0.5;
+            const blocked = new Uint8Array(nx * ny), inz = new Uint8Array(nx * ny);
+            const edge = R.edge;
+            for (let j = 0; j < ny; j++) {
+                const y = (j + 0.5) * res;
+                for (let i = 0; i < nx; i++) {
+                    const x = (i + 0.5) * res;
+                    if (x < edge || y < edge || x > W - edge || y > H - edge) continue;
+                    if (Pcb.inPoly(x, y, z.pts)) inz[j * nx + i] = 1;
+                }
+            }
+            const disc = (cx, cy, r) => {
+                const i0 = Math.max(0, Math.floor((cx - r) / res)), i1 = Math.min(nx - 1, Math.ceil((cx + r) / res)), j0 = Math.max(0, Math.floor((cy - r) / res)), j1 = Math.min(ny - 1, Math.ceil((cy + r) / res));
+                for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot((i + 0.5) * res - cx, (j + 0.5) * res - cy) <= r + half) blocked[j * nx + i] = 1;
+            };
+            const rectGrow = (px, py, hw, hh, grow) => {
+                const i0 = Math.max(0, Math.floor((px - hw - grow) / res)), i1 = Math.min(nx - 1, Math.ceil((px + hw + grow) / res)), j0 = Math.max(0, Math.floor((py - hh - grow) / res)), j1 = Math.min(ny - 1, Math.ceil((py + hh + grow) / res));
+                for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+                    const dx = Math.max(0, Math.abs((i + 0.5) * res - px) - hw), dy = Math.max(0, Math.abs((j + 0.5) * res - py) - hh);
+                    if (Math.hypot(dx, dy) <= grow + half) blocked[j * nx + i] = 1;
+                }
+            };
+            const seg = (a, b, r) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (res / 2))); for (let k = 0; k <= n; k++) disc(a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, r); };
+            const seeds = [];
+            for (const p of pads) {
+                if (!p.layers.includes(L)) continue;
+                const hw = p.w / 2, hh = p.h / 2;
+                if (String(p.net) === net && p.net) {
+                    seeds.push({ kind: "pad", ref: p, x: p.x, y: p.y });
+                    if (z.thermal !== false) {
+                        // a ring of clearance around the pad with four spokes left open (relief)
+                        const gap = 0.3, spoke = 0.2;
+                        const i0 = Math.max(0, Math.floor((p.x - hw - gap) / res)), i1 = Math.min(nx - 1, Math.ceil((p.x + hw + gap) / res)), j0 = Math.max(0, Math.floor((p.y - hh - gap) / res)), j1 = Math.min(ny - 1, Math.ceil((p.y + hh + gap) / res));
+                        for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+                            const cx = (i + 0.5) * res - p.x, cy = (j + 0.5) * res - p.y;
+                            const d = p.shape === "round" ? Math.max(0, Math.hypot(cx, cy) - Math.min(hw, hh)) : Math.hypot(Math.max(0, Math.abs(cx) - hw), Math.max(0, Math.abs(cy) - hh));
+                            if (d > half && d <= gap + half && Math.abs(cx) > spoke && Math.abs(cy) > spoke) blocked[j * nx + i] = 1;
+                        }
+                    }
+                } else if (p.shape === "round") disc(p.x, p.y, Math.min(hw, hh) + clr); else rectGrow(p.x, p.y, hw, hh, clr);
+            }
+            for (const t of pcb.tracks) {
+                if (t.layer !== L) continue;
+                const tn = netOf.get(t);
+                if (tn && String(tn) === net) { for (const q of t.pts) seeds.push({ kind: "track", ref: t, x: q[0], y: q[1] }); continue; }
+                for (let k = 0; k + 1 < t.pts.length; k++) seg(t.pts[k], t.pts[k + 1], t.w / 2 + clr);
+            }
+            for (const v of pcb.vias) {
+                const vn = netOf.get(v);
+                if (vn && String(vn) === net) { seeds.push({ kind: "via", ref: v, x: v.x, y: v.y }); continue; }
+                disc(v.x, v.y, v.d / 2 + clr);
+            }
+            // zones that come earlier win where they overlap: keep out of another net's pour
+            for (let k = 0; k < zi; k++) {
+                const o = zones[k];
+                if (o.layer !== L || String(o.net) === net) continue;
+                for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (Pcb.inPoly((i + 0.5) * res, (j + 0.5) * res, o.pts)) blocked[j * nx + i] = 1;
+                for (let m = 0; m < o.pts.length; m++) seg(o.pts[m], o.pts[(m + 1) % o.pts.length], clr);
+            }
+            // keep only copper connected to a pad / via / track of the net; every region is its own component
+            const keep = new Uint16Array(nx * ny), stack = [];
+            const free = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny && inz[j * nx + i] && !blocked[j * nx + i];
+            const seedCell = new Map();
+            let comps = 0;
+            for (const sd of seeds) {
+                // the seed may sit on blocked copper of its own pad (spokes keep the centre open); search a few cells around
+                const ci = Math.floor(sd.x / res), cj = Math.floor(sd.y / res);
+                let found = null;
+                for (let r = 0; r <= 12 && !found; r++) for (let dj = -r; dj <= r && !found; dj++) for (let di = -r; di <= r; di++) if (Math.max(Math.abs(di), Math.abs(dj)) === r && free(ci + di, cj + dj)) { found = [ci + di, cj + dj]; break; }
+                seedCell.set(sd, found);
+                if (!found || keep[found[1] * nx + found[0]]) continue;
+                const id = ++comps;
+                keep[found[1] * nx + found[0]] = id; stack.push(found);
+                while (stack.length) {
+                    const [i, j] = stack.pop();
+                    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const a2 = i + di, b2 = j + dj; if (free(a2, b2) && !keep[b2 * nx + a2]) { keep[b2 * nx + a2] = id; stack.push([a2, b2]); } }
+                }
+            }
+            // the largest region (by pads) is the pour proper; a pad in another region is cut off unless a track joins it to the pour
+            const padsIn = new Map();
+            for (const sd of seeds) if (sd.kind === "pad") { const c = seedCell.get(sd), id = c ? keep[c[1] * nx + c[0]] : 0; if (!padsIn.has(id)) padsIn.set(id, []); padsIn.get(id).push(sd.ref); }
+            let mainId = 0, best = -1;
+            for (const [id, list] of padsIn) if (id && list.length > best) { best = list.length; mainId = id; }
+            const pk = (p) => `${p.part.ref}:${p.i}`, groupOf = new Map(); conn.forEach((g, gi) => g.pads.forEach(p => groupOf.set(pk(p), gi)));
+            const mainGroups = new Set((padsIn.get(mainId) || []).map(p => groupOf.get(pk(p))));
+            const connected = [], islands = [];
+            for (const sd of seeds) {
+                if (sd.kind !== "pad") continue;
+                const c = seedCell.get(sd), id = c ? keep[c[1] * nx + c[0]] : 0;
+                (id === mainId && id || mainGroups.has(groupOf.get(pk(sd.ref))) ? connected : islands).push(sd.ref);
+            }
+            // rows of runs, merged downwards into rectangles
+            const rects = [];
+            let open = new Map(), cells = 0;
+            for (let j = 0; j <= ny; j++) {
+                const next = new Map();
+                if (j < ny) {
+                    let i = 0;
+                    while (i < nx) {
+                        if (!keep[j * nx + i]) { i++; continue; }
+                        let e = i; while (e < nx && keep[j * nx + e]) e++;
+                        const k = `${i}:${e}`;
+                        next.set(k, open.has(k) ? open.get(k) : { i0: i, i1: e, j0: j });
+                        cells += e - i; i = e;
+                    }
+                }
+                for (const [k, r] of open) if (!next.has(k) || next.get(k) !== r) rects.push([r.i0 * res, r.j0 * res, r.i1 * res, j * res]);
+                open = next;
+            }
+            fills.push({ zone: z, rects, connected, islands, cells });
+        });
+        cache.set(pcb, { key, fills });
+        return fills;
     }
 
     // ---------------------------------------------------------------- ratsnest
@@ -313,6 +567,13 @@ class Pcb {
             const r = c.k === "track" ? c.it.w / 2 : c.k === "via" ? c.it.d / 2 : Pcb.padRadius(c.it);
             for (const p of pts) if (!inside(p[0], p[1], r)) { issues.push({ type: "edge", msg: `${c.label} is outside the board or closer than ${R.edge} mm to its edge`, x: p[0], y: p[1] }); break; }
         }
+        for (const part of pcb.parts) if (part.pkg && String(part.pkg).startsWith("user:") && part.kind !== "M" && (part.nodes || []).length > part.fp.pads.length) issues.push({ type: "pins", msg: `${part.ref}: footprint ${part.fp.name} has ${part.fp.pads.length} pad(s) but the part has ${part.nodes.length} pin(s)`, x: part.x, y: part.y });
+        const zs = pcb.zones || [];
+        zs.forEach((z, i) => {
+            if (!pads.some(p => String(p.net) === String(z.net))) issues.push({ type: "zone", msg: `pour ${z.id} (${z.layer}.Cu) is on net ${z.net}, which has no pad on the board`, x: z.pts[0][0], y: z.pts[0][1] });
+            for (let k = 0; k < i; k++) { const o = zs[k]; if (o.layer === z.layer && String(o.net) !== String(z.net) && z.pts.some(q => Pcb.inPoly(q[0], q[1], o.pts)) ) issues.push({ type: "zone", msg: `pours ${o.id} and ${z.id} (different nets) overlap on ${z.layer}.Cu; the earlier one wins`, x: z.pts[0][0], y: z.pts[0][1] }); }
+        });
+        for (const f of Pcb.fillZones(pcb)) for (const p of f.islands) issues.push({ type: "zone", msg: `${p.part.ref}.${p.i + 1} is inside pour ${f.zone.id} but cut off from it (islanded by clearance to other nets)`, x: p.x, y: p.y });
         for (const l of Pcb.ratsnest(pcb, conn)) issues.push({ type: "unrouted", msg: `net ${l.net}: ${l.a.part.ref}.${l.a.i + 1} to ${l.b.part.ref}.${l.b.i + 1} is not routed`, x: l.a.x, y: l.a.y });
         return issues;
     }
@@ -496,6 +757,7 @@ class Pcb {
         const at = (x, y) => `X${f(x)}Y${f(Y(y))}`;
         const side = layer.endsWith("B") && layer !== "Edge" ? "B" : "F";
         const padAp = (p, grow) => aperture(p.shape === "round" ? `C,${(p.w + grow).toFixed(4)}` : `R,${(p.w + grow).toFixed(4)}X${(p.h + grow).toFixed(4)}`);
+        const regions = [];
         const groups = new Map();
         const add = (a, c) => { if (!groups.has(a)) groups.set(a, []); groups.get(a).push(c); };
         const draw = (a, pts) => add(a, [`${at(pts[0][0], pts[0][1])}D02*`, ...pts.slice(1).map(p => `${at(p[0], p[1])}D01*`)].join("\n"));
@@ -503,6 +765,7 @@ class Pcb {
             for (const p of Pcb.pads(pcb)) if (p.layers.includes(layer)) add(padAp(p, 0), `${at(p.x, p.y)}D03*`);
             for (const v of pcb.vias) add(aperture(`C,${v.d.toFixed(4)}`), `${at(v.x, v.y)}D03*`);
             for (const t of pcb.tracks) if (t.layer === layer) draw(aperture(`C,${t.w.toFixed(4)}`), t.pts);
+            for (const fz of Pcb.fillZones(pcb)) if (fz.zone.layer === layer) for (const [x1, y1, x2, y2] of fz.rects) regions.push(`G36*\n${at(x1, y1)}D02*\nG01*\n${at(x2, y1)}D01*\n${at(x2, y2)}D01*\n${at(x1, y2)}D01*\n${at(x1, y1)}D01*\nG37*`);
         } else if (layer === "MaskF" || layer === "MaskB") {
             for (const p of Pcb.pads(pcb)) if (p.layers.includes(side)) add(padAp(p, 0.1), `${at(p.x, p.y)}D03*`);     // vias stay covered (tented)
         } else if (layer === "PasteF") {
@@ -514,7 +777,7 @@ class Pcb {
             const a = aperture("C,0.1000"), { w, h } = pcb.outline;
             draw(a, [[0, 0], [w, 0], [w, h], [0, h], [0, 0]]);
         }
-        body.push("G01*");
+        body.push("G01*", ...regions);
         for (const [a, cs] of groups) body.push(`D${a}*`, ...cs);
         for (const [def, n] of ap) out.push(`%ADD${n}${def.startsWith("C") ? "C" : "R"},${def.slice(2)}*%`);
         out.push(...body, "M02*");

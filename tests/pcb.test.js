@@ -127,4 +127,89 @@ for (const seed of [5, 9]) {
     check("the nine-file ZIP is valid", /No errors detected/.test(zt2) && /z-F_Paste\.gtp/.test(zt2), zt2.slice(0, 120));
     fs.unlinkSync(tmp2);
 }
+// ---- user-defined footprints
+{
+    const text = "# a 3-pin through-hole part\nfootprint MY_TO\npad 1 -2 0 1.6 1.6 rect drill 0.9\npad 2 0 0 1.6 1.6 drill 0.9\npad 3 2 0 1.6 1.6 drill 0.9\nline -3 -1.5 3 -1.5 3 1.5 -3 1.5 -3 -1.5\ncircle 0 3 0.5\nmap 2 1 0\n";
+    const def = Pcb.parseFootprint(text);
+    check("a footprint text is parsed into pads, silk and a pin map", def.name === "MY_TO" && def.pads.length === 3 && def.pads[0].shape === "rect" && !def.pads[0].smd && def.silk.length === 2 && def.pinMap.join() === "2,1,0");
+    check("and written back the same way", Pcb.parseFootprint(Pcb.footprintText(def)).pads.map(p => [p.x, p.y, p.w, p.drill].join()).join("|") === def.pads.map(p => [p.x, p.y, p.w, p.drill].join()).join("|"));
+    const smdText = Pcb.parseFootprint("footprint MY_SMD\npad 1 -1 0 1 1.2\npad 2 1 0 1 1.2\n");
+    check("a pad without a drill is surface-mount", smdText.pads.every(p => p.smd) && Pcb.userFootprint(smdText).smd);
+    for (const [bad, re] of [["pad 1 0 0 1 1", /first line/], ["footprint X\npad 1 0 0", /pad needs/], ["footprint X\npad 1 0 0 1 1 drill 0.95", /copper ring/], ["footprint X\nfoo", /unknown word/], ["footprint X", /at least one pad/], ["footprint X\npad 1 0 0 1 1\nmap 0 1", /map lists/], ["footprint a b/c\npad 1 0 0 1 1", /name may use/]])
+        check(`a bad footprint is refused: ${bad.split("\n").pop().slice(0, 28)}`, (() => { try { Pcb.parseFootprint(bad); return false; } catch (e) { return re.test(e.message); } })(), bad);
+    const pb = Pcb.blank(40, 30); pb.footprints.MY_TO = def;
+    Pcb.sync(pb, [{ name: "Q1", kind: "Q", nodes: ["10", "11", "12"] }]);
+    check("user footprints are offered for every kind", Pcb.packages("Q", pb.footprints).some(x => x[0] === "user:MY_TO") && Pcb.packages("V", pb.footprints).length === 1);
+    Pcb.setPackage(pb.parts[0], "user:MY_TO", pb.footprints);
+    check("a part using it gets the user's pads and pin order", pb.parts[0].fp.name === "MY_TO" && pb.parts[0].nets.join() === "12,11,10" && pb.parts[0].pkg === "user:MY_TO", pb.parts[0].nets);
+    Pcb.sync(pb, [{ name: "Q1", kind: "Q", nodes: ["10", "11", "12"] }]);
+    check("it survives a re-sync", pb.parts[0].fp.name === "MY_TO");
+    delete pb.footprints.MY_TO; Pcb.sync(pb, [{ name: "Q1", kind: "Q", nodes: ["10", "11", "12"] }]);
+    check("deleting it falls back to the default footprint", pb.parts[0].fp.name === "TO-92" && pb.parts[0].pkg === undefined);
+    const few = Pcb.blank(40, 30); few.footprints.TWO = Pcb.parseFootprint("footprint TWO\npad 1 -1 0 1.6 1.6 drill 0.9\npad 2 1 0 1.6 1.6 drill 0.9\n");
+    Pcb.sync(few, [{ name: "Q2", kind: "Q", nodes: ["1", "2", "3"] }]); Pcb.setPackage(few.parts[0], "user:TWO", few.footprints); few.parts[0].x = 20; few.parts[0].y = 15;
+    check("the rule check notes a footprint with fewer pads than the part has pins", Pcb.drc(few).some(i => i.type === "pins"));
+    const mod = `(footprint "Resistor_SMD:R_0805" (layer "F.Cu")
+      (fp_line (start -0.5 -1) (end 0.5 -1) (layer "F.SilkS") (width 0.12))
+      (fp_line (start -0.5 -1) (end 0.5 -1) (layer "F.Fab") (width 0.1))
+      (fp_circle (center 0 0) (end 0.5 0) (layer "F.SilkS"))
+      (pad "2" smd roundrect (at 1 0 90) (size 1.0 1.45) (layers "F.Cu" "F.Paste" "F.Mask"))
+      (pad "1" smd roundrect (at -1 0) (size 1.0 1.45) (layers "F.Cu" "F.Paste" "F.Mask"))
+      (pad "3" thru_hole circle (at 0 3) (size 1.7 1.7) (drill 1.0) (layers "*.Cu" "*.Mask")))`;
+    // the KiCad reader lives in kicad-import.js
+    const kcode = fs.readFileSync(path.join(__dirname, "..", "js/ui/kicad-import.js"), "utf8");
+    const { KicadImporter: KI } = new Function(kcode + "\nreturn { KicadImporter };")();
+    const P2 = new Function("KicadImporter", src + "\nreturn { Pcb };")(KI).Pcb;
+    const kf = P2.importKicadFootprint(mod);
+    check("a KiCad .kicad_mod imports: name, pads sorted by number, SMD vs through-hole, silk layer only", kf.name === "R_0805" && kf.pads.map(p => p.n).join() === "1,2,3" && kf.pads[0].smd && !kf.pads[2].smd && kf.pads[2].drill === 1 && kf.silk.length === 2, JSON.stringify(kf.pads.map(p => [p.n, p.w, p.h, p.smd])));
+    check("a pad rotated 90° swaps its size", kf.pads[1].w === 1.45 && kf.pads[1].h === 1.0);
+    check("a non-footprint file is refused", (() => { try { P2.importKicadFootprint("(kicad_sch)"); return false; } catch (e) { return /not a KiCad footprint/.test(e.message); } })());
+}
+// ---- copper pours
+{
+    const pc = Pcb.blank(40, 30);
+    Pcb.sync(pc, [{ name: "R1", kind: "R", nodes: ["1", "0"] }, { name: "R2", kind: "R", nodes: ["2", "0"] }, { name: "R3", kind: "R", nodes: ["1", "2"] }]);
+    pc.parts[0].x = 10; pc.parts[0].y = 8; pc.parts[1].x = 10; pc.parts[1].y = 22; pc.parts[2].x = 30; pc.parts[2].y = 15; pc.parts.forEach(p => { p.placed = true; });
+    pc.zones.push({ id: 1, layer: "B", net: "0", pts: [[0.5, 0.5], [39.5, 0.5], [39.5, 29.5], [0.5, 29.5]], thermal: true });
+    const ratsBefore = Pcb.ratsnest(pc).map(l => l.net).sort().join();
+    check("a pour joins the pads of its net inside it: net 0 no longer needs a track", !ratsBefore.includes("0") && ratsBefore === "1,2", ratsBefore);
+    const t0 = Date.now(), fills = Pcb.fillZones(pc), ms = Date.now() - t0;
+    const f = fills[0], area = f.rects.reduce((a, r) => a + (r[2] - r[0]) * (r[3] - r[1]), 0);
+    console.log(`       pour: ${f.rects.length} rectangles, ${area.toFixed(0)} mm2 in ${ms} ms`);
+    check("the fill covers most of the board and connects both ground pads", area > 700 && f.connected.length === 2 && f.islands.length === 0, [area, f.connected.length, f.islands.length]);
+    const inFill = (x, y) => f.rects.some(r => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]);
+    const pads = Pcb.pads(pc), foreign = pads.find(p => p.net === "1" && p.part.ref === "R1");
+    check("no fill inside the 0.2 mm clearance of a pad of another net, fill resumes beyond it", !inFill(foreign.x + 0.9 + 0.1, foreign.y) && !inFill(foreign.x, foreign.y + 0.9 + 0.1) && inFill(foreign.x + 0.9 + 0.45, foreign.y + 3), foreign);
+    const own = pads.find(p => p.net === "0" && p.part.ref === "R1");
+    check("a pad of the pour's own net gets thermal relief: ring open except four spokes", !inFill(own.x + 1.0, own.y + 0.7) && inFill(own.x + 1.1, own.y) && inFill(own.x, own.y + 1.1) && inFill(own.x + 2.5, own.y), [inFill(own.x + 1.0, own.y + 0.7), inFill(own.x + 1.1, own.y)]);
+    // a track of another net on the same layer is cleared
+    pc.tracks.push({ id: 50, layer: "B", w: 0.3, pts: [[20, 3], [20, 27]] });
+    const f2 = Pcb.fillZones(pc)[0], in2 = (x, y) => f2.rects.some(r => x >= r[0] && x <= r[2] && y >= r[1] && y <= r[3]);
+    check("a track of another net is cleared by 0.2 mm: nothing on it or within 0.2 of its edge, fill beyond", !in2(20, 15) && !in2(20.3, 15) && !in2(19.7, 15) && in2(20.6, 15) && in2(19.4, 15), [in2(20, 15), in2(20.3, 15), in2(20.6, 15)]);
+    check("with the track in the way the fill is cached per board state and recomputed on change", Pcb.fillZones(pc)[0] === f2 && Pcb.fillZones(pc)[0] !== f);
+    // a floating track right across the board splits the pour; the ground pad on the far side is cut off
+    const wall = Pcb.blank(40, 30);
+    Pcb.sync(wall, [{ name: "R1", kind: "R", nodes: ["0", "1"] }, { name: "R2", kind: "R", nodes: ["0", "2"] }]);
+    wall.parts[0].x = 10; wall.parts[0].y = 8; wall.parts[1].x = 10; wall.parts[1].y = 24; wall.parts.forEach(p => { p.placed = true; });
+    wall.zones.push({ id: 1, layer: "B", net: "0", pts: [[0.5, 0.5], [39.5, 0.5], [39.5, 29.5], [0.5, 29.5]], thermal: false });
+    wall.tracks.push({ id: 8, layer: "B", w: 0.5, pts: [[0, 16], [40, 16]] });
+    const wi = Pcb.drc(wall).filter(i => i.type === "zone");
+    check("a pour split by other copper reports exactly one cut-off pad", wi.length === 1 && /cut off/.test(wi[0].msg), JSON.stringify(wi));
+    wall.tracks = [];
+    check("and without the wall nothing is reported", Pcb.drc(wall).filter(i => i.type === "zone").length === 0);
+    const gb = Pcb.gerber(pc, "B");
+    check("the back copper file carries the pour as G36/G37 regions", (gb.match(/G36\*/g) || []).length === (gb.match(/G37\*/g) || []).length && (gb.match(/G36\*/g) || []).length > 0);
+    check("a zone on another net with no pad is reported", (() => { const z = Pcb.blank(20, 20); z.parts.length = 0; Pcb.sync(z, [{ name: "R1", kind: "R", nodes: ["a", "b"] }]); z.parts[0].x = 10; z.parts[0].y = 10; z.zones.push({ id: 3, layer: "F", net: "zzz", pts: [[1, 1], [19, 1], [19, 19], [1, 19]] }); return Pcb.drc(z).some(i => i.type === "zone" && /no pad/.test(i.msg)); })());
+}
+// ---- routing with pours present
+{
+    const els3 = [{ name: "V1", kind: "V", nodes: ["1", "0"] }, { name: "R1", kind: "R", nodes: ["1", "2"] }, { name: "R2", kind: "R", nodes: ["2", "0"] }, { name: "C1", kind: "C", nodes: ["2", "0"] }, { name: "R3", kind: "R", nodes: ["1", "0"] }];
+    const g = Pcb.blank(50, 40); Pcb.sync(g, els3); Pcb.autoPlace(g, { fit: true });
+    g.zones.push({ id: 90, layer: "B", net: "0", thermal: true, pts: [[0.5, 0.5], [g.outline.w - 0.5, 0.5], [g.outline.w - 0.5, g.outline.h - 0.5], [0.5, g.outline.h - 0.5]] });
+    const before = Pcb.ratsnest(g).length;
+    const rr3 = Pcb.autoRoute(g), iss3 = Pcb.drc(g);
+    check(`with a ground pour only the signal nets are routed (${before} airwires before, ${rr3.routed} routed) and the board is clean`, rr3.failed === 0 && iss3.length === 0 && Pcb.ratsnest(g).every(() => false), JSON.stringify(iss3.slice(0, 3)));
+    const fz = Pcb.fillZones(g)[0];
+    check("the pour clears the new tracks and still reaches every ground pad", fz.islands.length === 0 && fz.connected.length === 4, [fz.connected.length, fz.islands.length]);
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

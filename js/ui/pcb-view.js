@@ -14,6 +14,8 @@ class PcbView {
         this.sel = null;                 // { kind: "part" | "track" | "via", ref }
         this.draft = null;               // track being routed: { layer, pts }
         this.issues = [];
+        this.fills = [];
+        this.zdraft = null;
         this.undoStack = [];
         this.view = { s: 8, ox: 20, oy: 20 };
         this.mouse = { x: 0, y: 0 };
@@ -43,6 +45,12 @@ class PcbView {
                 <label title="Track width (mm)">Track <input id="pcbTrack" type="number" min="0.1" max="5" step="0.05"></label>
                 <label title="Copper clearance (mm)">Clearance <input id="pcbClr" type="number" min="0.05" max="2" step="0.05"></label>
                 <span class="sep"></span>
+                <button class="tb-btn txt" data-tool="zone" title="Draw a copper pour: click the corners, Enter or double-click to finish (Z)">Pour</button>
+                <label title="Net of the pour you draw">Net <select id="pcbZoneNet"></select></label>
+                <label title="Thermal relief on the pour's own pads"><input type="checkbox" id="pcbThermal" checked> Thermal</label>
+                <button class="tb-btn txt" data-a="pourboard" title="Pour the whole board on the active layer with the chosen net">Pour board</button>
+                <button class="tb-btn txt" data-a="footprints" title="Define your own footprints, or import a KiCad .kicad_mod">Footprints…</button>
+                <span class="sep"></span>
                 <button class="tb-btn txt" data-a="drc" title="Check clearances, shorts, board edge, track width and unrouted nets">Check rules</button>
                 <button class="tb-btn txt" data-a="export" title="Download Gerber (F.Cu, B.Cu, edge) and Excellon drill files as a ZIP">Export Gerber…</button>
                 <span class="grow"></span>
@@ -52,7 +60,32 @@ class PcbView {
                 <canvas id="pcbCanvas" tabindex="0"></canvas>
                 <div class="pcb-side"><div id="pcbIssues" class="pcb-issues"></div></div>
             </div>
-            <div class="pcb-status" id="pcbStatus"></div>`;
+            <div class="pcb-status" id="pcbStatus"></div>
+            <div id="pcbFpEd" class="pcb-fped hidden">
+                <div class="pcb-fped-box">
+                    <div class="pcb-fped-head"><b>User footprints</b><span class="grow"></span><button class="tb-btn" data-fp="close" title="Close">✕</button></div>
+                    <div class="pcb-fped-body">
+                        <div class="pcb-fped-left">
+                            <select id="fpList" size="8"></select>
+                            <button class="tb-btn txt" data-fp="new">New</button>
+                            <button class="tb-btn txt" data-fp="import">Import .kicad_mod…</button>
+                            <input type="file" id="fpFile" accept=".kicad_mod,.mod,.txt" class="hidden">
+                            <label>Template <select id="fpTpl"><option value="">(choose)</option><option value="smd2">2-pad SMD</option><option value="th3">3-pin through-hole</option><option value="dual">Dual row, 8 pins</option></select></label>
+                        </div>
+                        <div class="pcb-fped-mid">
+                            <textarea id="fpText" spellcheck="false" rows="14"></textarea>
+                            <div class="pcb-note" id="fpHelp">pad N X Y W H [round|rect] [drill D] (a drill makes it through-hole) · line X Y X Y … · circle X Y R · map I J K … (pad i takes pin map[i], counting from 0) · mm, y down</div>
+                            <div class="pcb-fped-err" id="fpErr"></div>
+                        </div>
+                        <canvas id="fpPreview" width="300" height="240"></canvas>
+                    </div>
+                    <div class="pcb-fped-foot">
+                        <button class="tb-btn txt" data-fp="save">Save</button>
+                        <button class="tb-btn txt" data-fp="use" title="Give the selected part this footprint">Use on selected part</button>
+                        <button class="tb-btn txt" data-fp="delete">Delete</button>
+                    </div>
+                </div>
+            </div>`;
         document.body.appendChild(root);
         this.cv = root.querySelector("#pcbCanvas");
         this.ctx = this.cv.getContext("2d");
@@ -65,9 +98,12 @@ class PcbView {
     // ---------------------------------------------------------------- open / close
     open() {
         if (!this.editor.pcb) this.editor.pcb = Pcb.blank();
+        this.pcb.zones = this.pcb.zones || [];
+        this.pcb.footprints = this.pcb.footprints || {};
         this.root.classList.remove("hidden");
         this.isOpen = true;
         this.sync(true);
+        this.fills = Pcb.fillZones(this.pcb);
         this.fit();
         this.fields();
         this.cv.focus();
@@ -92,7 +128,14 @@ class PcbView {
 
     // ---------------------------------------------------------------- actions
     snapshot() { this.undoStack.push(JSON.stringify(this.pcb)); if (this.undoStack.length > 60) this.undoStack.shift(); }
-    changed() { this.doc.emit(); this.draw(); }
+    changed() { this.doc.emit(); this.scheduleFill(); this.draw(); }
+
+    // the pours are recomputed shortly after the board stops changing (a fill takes tens of milliseconds)
+    scheduleFill() {
+        clearTimeout(this.fillTimer);
+        if (!(this.pcb.zones || []).length) { this.fills = []; return; }
+        this.fillTimer = setTimeout(() => { this.fills = Pcb.fillZones(this.pcb); this.draw(); }, 120);
+    }
 
     undo() {
         if (!this.undoStack.length) return;
@@ -153,12 +196,27 @@ class PcbView {
             case "rotate": if (this.sel && this.sel.kind === "part") { this.snapshot(); this.sel.ref.rot = (this.sel.ref.rot + 90) % 360; this.changed(); } break;
             case "delete":
                 if (this.sel && this.sel.kind === "track") { this.snapshot(); p.tracks = p.tracks.filter(t => t !== this.sel.ref); this.sel = null; this.changed(); }
+                else if (this.sel && this.sel.kind === "zone") { this.snapshot(); p.zones = p.zones.filter(z => z !== this.sel.ref); this.sel = null; this.changed(); }
                 else if (this.sel && this.sel.kind === "via") { this.snapshot(); p.vias = p.vias.filter(v => v !== this.sel.ref); this.sel = null; this.changed(); }
                 break;
             case "undo": this.undo(); break;
+            case "pourboard": this.addZone([[0.5, 0.5], [p.outline.w - 0.5, 0.5], [p.outline.w - 0.5, p.outline.h - 0.5], [0.5, p.outline.h - 0.5]]); break;
+            case "footprints": this.openFootprints(); break;
             case "drc": this.runDrc(); break;
             case "export": this.exportGerber(); break;
         }
+    }
+
+    addZone(pts) {
+        const net = this.root.querySelector("#pcbZoneNet").value;
+        if (!net) { this.say("There are no nets with pads to pour yet.", true); return; }
+        this.snapshot();
+        this.pcb.zones = this.pcb.zones || [];
+        const z = { id: this.pcb.nextId++, layer: this.layer, net, pts, thermal: this.root.querySelector("#pcbThermal").checked };
+        this.pcb.zones.push(z);
+        this.sel = { kind: "zone", ref: z };
+        this.say(`Pour ${z.id}: ${z.layer}.Cu, net ${net === "0" ? "GND" : net}. Moving or routing refills it; Check rules reports pads it cuts off.`);
+        this.changed();
     }
 
     runDrc() {
@@ -222,7 +280,7 @@ class PcbView {
         this.root.querySelector("#pcbPkg").addEventListener("change", (e) => {
             if (!this.sel || this.sel.kind !== "part") return;
             this.snapshot();
-            Pcb.setPackage(this.sel.ref, e.target.value);
+            Pcb.setPackage(this.sel.ref, e.target.value, this.pcb.footprints);
             this.say(`${this.sel.ref.ref} is now ${this.sel.ref.fp.name}; its pads moved, so route it again.`);
             this.changed();
         });
@@ -239,11 +297,11 @@ class PcbView {
         cv.addEventListener("pointerdown", (e) => this.down(e));
         cv.addEventListener("pointermove", (e) => this.move(e));
         cv.addEventListener("pointerup", (e) => this.up(e));
-        cv.addEventListener("dblclick", () => { if (this.draft) this.finishTrack(); });
+        cv.addEventListener("dblclick", () => { if (this.draft) this.finishTrack(); else if (this.zdraft) this.finishZone(); });
         this.root.addEventListener("keydown", (e) => this.key(e));
     }
 
-    setTool(t) { this.tool = t; if (t !== "route") this.draft = null; this.fields(); this.draw(); }
+    setTool(t) { this.tool = t; if (t !== "route") this.draft = null; if (t !== "zone") this.zdraft = null; this.fields(); this.draw(); }
 
     pos(e) { const r = this.cv.getBoundingClientRect(); return { px: e.clientX - r.left, py: e.clientY - r.top }; }
 
@@ -255,6 +313,8 @@ class PcbView {
             const q = p.parts[i], swap = (Math.round(q.rot / 90) % 2) !== 0, w = swap ? q.fp.h : q.fp.w, h = swap ? q.fp.w : q.fp.h;
             if (Math.abs(x - q.x) <= w / 2 && Math.abs(y - q.y) <= h / 2) return { kind: "part", ref: q };
         }
+        // a pour is picked by its outline (so the rest of a board-wide pour still pans)
+        for (const z of p.zones || []) for (let i = 0; i < z.pts.length; i++) { const a = z.pts[i], b = z.pts[(i + 1) % z.pts.length]; if (Pcb.segDist(x, y, a[0], a[1], b[0], b[1]) <= 0.7) return { kind: "zone", ref: z }; }
         return null;
     }
 
@@ -264,6 +324,14 @@ class PcbView {
         if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) { this.pan = { px, py, ox: this.view.ox, oy: this.view.oy }; this.cv.setPointerCapture(e.pointerId); return; }
         if (e.button !== 0) return;
         if (this.tool === "route") { this.routeClick(w, e); return; }
+        if (this.tool === "zone") {
+            const q = [Math.round(w.x * 2) / 2, Math.round(w.y * 2) / 2];
+            this.zdraft = this.zdraft || { pts: [] };
+            const last = this.zdraft.pts[this.zdraft.pts.length - 1];
+            if (!last || last[0] !== q[0] || last[1] !== q[1]) this.zdraft.pts.push(q);
+            this.draw();
+            return;
+        }
         const h = this.hit(w.x, w.y);
         this.sel = h;
         if (h && h.kind === "part") { this.snapshot(); this.drag = { part: h.ref, dx: h.ref.x - w.x, dy: h.ref.y - w.y, moved: false }; this.cv.setPointerCapture(e.pointerId); }
@@ -319,6 +387,12 @@ class PcbView {
         return { x: last[0] + Math.sign(dx) * m, y: last[1] + Math.sign(dy) * m };
     }
 
+    finishZone() {
+        const d = this.zdraft;
+        this.zdraft = null;
+        if (d && d.pts.length >= 3) this.addZone(d.pts); else { this.say("A pour needs at least three corners.", d && d.pts.length > 0); this.draw(); }
+    }
+
     finishTrack() {
         const d = this.draft;
         this.draft = null;
@@ -345,8 +419,10 @@ class PcbView {
         if (e.target && /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) { if (e.key === "Escape") e.target.blur(); return; }
         const k = e.key.toLowerCase();
         if (e.ctrlKey && k === "z") { this.undo(); e.preventDefault(); }
-        else if (k === "escape") { if (this.draft) { this.draft = null; this.draw(); } else this.close(); }
+        else if (k === "escape") { if (this.draft) { this.draft = null; this.draw(); } else if (this.zdraft) { this.zdraft = null; this.draw(); } else if (!this.root.querySelector("#pcbFpEd").classList.contains("hidden")) this.closeFootprints(); else this.close(); }
         else if (k === "enter" && this.draft) this.finishTrack();
+        else if (k === "enter" && this.zdraft) this.finishZone();
+        else if (k === "z" && !e.ctrlKey) this.setTool("zone");
         else if (k === "s") this.setTool("select");
         else if (k === "t") this.setTool("route");
         else if (k === "v") this.viaHere();
@@ -359,13 +435,112 @@ class PcbView {
         e.stopPropagation();
     }
 
+    // nets for the pour: every net that has a pad
+    zoneNetField() {
+        const el = this.root.querySelector("#pcbZoneNet"), nets = [...new Set(Pcb.pads(this.pcb).map(p => p.net).filter(Boolean))].sort((a, b) => (a === "0" ? -1 : b === "0" ? 1 : String(a).localeCompare(String(b), undefined, { numeric: true })));
+        const key = nets.join("|");
+        if (el.dataset.key === key) return;
+        const cur = el.value;
+        el.dataset.key = key;
+        el.innerHTML = nets.map(n => `<option value="${n}">${n === "0" ? "GND (0)" : n}</option>`).join("");
+        if (nets.includes(cur)) el.value = cur;
+    }
+
+
+    // ---------------------------------------------------------------- user footprints
+    static TEMPLATES = {
+        smd2: "footprint MY_SMD2\npad 1 -1.2 0 1 1.4\npad 2 1.2 0 1 1.4\nline -0.6 -1 0.6 -1\nline -0.6 1 0.6 1\n",
+        th3: "footprint MY_TH3\npad 1 -2.54 0 1.7 1.7 rect drill 1\npad 2 0 0 1.7 1.7 drill 1\npad 3 2.54 0 1.7 1.7 drill 1\nline -3.5 -2 3.5 -2 3.5 2 -3.5 2 -3.5 -2\n",
+        dual: "footprint MY_DUAL8\n" + [0, 1, 2, 3].map(i => `pad ${i + 1} -3.6 ${(i - 1.5) * 1.27} 1.5 0.6`).join("\n") + "\n" + [3, 2, 1, 0].map((r, i) => `pad ${i + 5} 3.6 ${(r - 1.5) * 1.27} 1.5 0.6`).join("\n") + "\nline -1.8 -2.8 1.8 -2.8 1.8 2.8 -1.8 2.8 -1.8 -2.8\n"
+    };
+
+    openFootprints(name) {
+        const ed = this.root.querySelector("#pcbFpEd");
+        ed.classList.remove("hidden");
+        if (!this.fpBound) {
+            this.fpBound = true;
+            ed.querySelectorAll("[data-fp]").forEach(b => b.onclick = () => this.fpAction(b.dataset.fp));
+            ed.querySelector("#fpList").onchange = (e) => this.fpLoad(e.target.value);
+            ed.querySelector("#fpText").oninput = () => this.fpPreview();
+            ed.querySelector("#fpTpl").onchange = (e) => { if (e.target.value) { ed.querySelector("#fpText").value = PcbView.TEMPLATES[e.target.value]; e.target.value = ""; this.fpPreview(); } };
+            ed.querySelector("#fpFile").onchange = (e) => {
+                const f = e.target.files[0]; if (!f) return;
+                const r = new FileReader();
+                r.onload = () => { try { const def = Pcb.importKicadFootprint(String(r.result)); ed.querySelector("#fpText").value = Pcb.footprintText(def); this.fpPreview(); this.say(`Imported ${def.name}: ${def.pads.length} pad(s). Check the pin order, then Save.`); } catch (er) { this.fpError(er.message); } };
+                r.readAsText(f); e.target.value = "";
+            };
+        }
+        this.fpList(name);
+        if (!name && !ed.querySelector("#fpText").value) ed.querySelector("#fpText").value = PcbView.TEMPLATES.smd2;
+        this.fpPreview();
+    }
+
+    closeFootprints() { this.root.querySelector("#pcbFpEd").classList.add("hidden"); this.cv.focus(); }
+
+    fpList(select) {
+        const el = this.root.querySelector("#fpList"), names = Object.keys(this.pcb.footprints || {}).sort();
+        el.innerHTML = names.map(n => `<option>${n}</option>`).join("");
+        if (select && names.includes(select)) { el.value = select; this.fpLoad(select); }
+    }
+
+    fpLoad(name) { const d = this.pcb.footprints[name]; if (d) { this.root.querySelector("#fpText").value = Pcb.footprintText(d); this.fpPreview(); } }
+
+    fpError(msg) { this.root.querySelector("#fpErr").textContent = msg || ""; }
+
+    fpPreview() {
+        const text = this.root.querySelector("#fpText").value, cv = this.root.querySelector("#fpPreview"), c = cv.getContext("2d");
+        c.setTransform(1, 0, 0, 1, 0, 0); c.fillStyle = "#16352a"; c.fillRect(0, 0, cv.width, cv.height);
+        let def;
+        try { def = Pcb.parseFootprint(text); this.fpError(""); } catch (e) { this.fpError(e.message); return; }
+        const fp = Pcb.userFootprint(def), sc = Math.min((cv.width - 20) / fp.w, (cv.height - 20) / fp.h, 40);
+        c.translate(cv.width / 2, cv.height / 2); c.scale(sc, sc);
+        c.strokeStyle = "#f5f5f5"; c.lineWidth = 0.12; c.lineJoin = "round";
+        for (const l of fp.silk) { c.beginPath(); l.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]))); c.stroke(); }
+        fp.pads.forEach((pd, i) => {
+            c.fillStyle = pd.smd ? "#d9877a" : "#c8a84b";
+            if (pd.shape === "round") { c.beginPath(); c.arc(pd.x, pd.y, Math.min(pd.w, pd.h) / 2, 0, 7); c.fill(); } else c.fillRect(pd.x - pd.w / 2, pd.y - pd.h / 2, pd.w, pd.h);
+            if (pd.drill) { c.fillStyle = "#10151c"; c.beginPath(); c.arc(pd.x, pd.y, pd.drill / 2, 0, 7); c.fill(); }
+            c.fillStyle = "#000"; c.font = "0.7px sans-serif"; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText(String(pd.n), pd.x, pd.y);
+        });
+    }
+
+    fpAction(a) {
+        const ed = this.root.querySelector("#pcbFpEd"), text = ed.querySelector("#fpText");
+        if (a === "close") return this.closeFootprints();
+        if (a === "new") { text.value = PcbView.TEMPLATES.smd2; ed.querySelector("#fpList").value = ""; return this.fpPreview(); }
+        if (a === "import") return ed.querySelector("#fpFile").click();
+        if (a === "delete") {
+            const name = ed.querySelector("#fpList").value;
+            if (!name) return this.fpError("Pick a footprint in the list to delete.");
+            this.snapshot();
+            delete this.pcb.footprints[name];
+            for (const part of this.pcb.parts) if (part.pkg === `user:${name}`) Pcb.setPackage(part, undefined, this.pcb.footprints);
+            this.fpList(); this.say(`Deleted ${name}; parts that used it are back on their default footprint.`);
+            this.changed(); return;
+        }
+        let def;
+        try { def = Pcb.parseFootprint(text.value); } catch (e) { return this.fpError(e.message); }
+        if (a === "save" || a === "use") {
+            this.snapshot();
+            this.pcb.footprints = this.pcb.footprints || {};
+            this.pcb.footprints[def.name] = def;
+            for (const part of this.pcb.parts) if (part.pkg === `user:${def.name}`) Pcb.setPackage(part, part.pkg, this.pcb.footprints);
+            if (a === "use") {
+                if (this.sel && this.sel.kind === "part") { Pcb.setPackage(this.sel.ref, `user:${def.name}`, this.pcb.footprints); this.say(`${this.sel.ref.ref} now uses ${def.name}; route it again.`); }
+                else { this.fpError("Select a part on the board first."); }
+            } else this.say(`Saved footprint ${def.name} in the design.`);
+            this.fpList(def.name); this.fpError(""); this.changed();
+        }
+    }
+
     // the Footprint list follows the selected part
     packageField() {
         const el = this.root.querySelector("#pcbPkg"), part = this.sel && this.sel.kind === "part" ? this.sel.ref : null;
-        const key = part ? `${part.ref}|${part.kind}|${part.pkg || ""}` : "";
+        const key = part ? `${part.ref}|${part.kind}|${part.pkg || ""}|${Object.keys(this.pcb.footprints || {}).join()}` : "";
+        this.zoneNetField();
         if (el.dataset.key === key) return;
         el.dataset.key = key;
-        const list = part ? Pcb.packages(part.kind) : [];
+        const list = part ? Pcb.packages(part.kind, this.pcb.footprints) : [];
         el.innerHTML = list.map(([id, label]) => `<option value="${id}">${label}</option>`).join("");
         el.disabled = list.length < 2;
         if (part && list.length) el.value = part.pkg && list.some(x => x[0] === part.pkg) ? part.pkg : list[0][0];
@@ -395,6 +570,23 @@ class PcbView {
             c.beginPath(); t.pts.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]))); c.stroke();
         };
         const other = this.layer === "F" ? "B" : "F";
+        // copper pours: filled copper, then the outline of the selected pour
+        for (const lay of [other, this.layer]) for (const fz of this.fills) {
+            if (fz.zone.layer !== lay) continue;
+            c.globalAlpha = lay === this.layer ? 0.5 : 0.2; c.fillStyle = colour[lay];
+            for (const [x1, y1, x2, y2] of fz.rects) c.fillRect(x1, y1, x2 - x1, y2 - y1);
+        }
+        c.globalAlpha = 1;
+        for (const z of p.zones || []) {
+            const on = this.sel && this.sel.ref === z;
+            c.strokeStyle = on ? "#ffe066" : colour[z.layer]; c.globalAlpha = on ? 1 : 0.5; c.lineWidth = lw(on ? 2 : 1); c.setLineDash([lw(6), lw(4)]);
+            c.beginPath(); z.pts.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]))); c.closePath(); c.stroke(); c.setLineDash([]);
+        }
+        c.globalAlpha = 1;
+        if (this.zdraft && this.zdraft.pts.length) {
+            c.strokeStyle = "#ffffff"; c.lineWidth = lw(1.5);
+            c.beginPath(); this.zdraft.pts.forEach((q, i) => (i ? c.lineTo(q[0], q[1]) : c.moveTo(q[0], q[1]))); c.lineTo(Math.round(this.mouse.x * 2) / 2, Math.round(this.mouse.y * 2) / 2); c.stroke();
+        }
         for (const t of p.tracks) if (t.layer === other) drawTrack(t, 0.4);
         for (const t of p.tracks) if (t.layer === this.layer) drawTrack(t, 0.95);
         if (this.sel && this.sel.kind === "track") drawTrack(this.sel.ref, 0.9, "#ffe066");
