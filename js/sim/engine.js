@@ -13,6 +13,7 @@
 class SimCircuit {
     constructor() {
         this.nodeIndex = new Map();
+        this.lower = new Map();
         this.names = [];
         this.elements = [];
         this.size = 0;
@@ -23,11 +24,22 @@ class SimCircuit {
     node(name) {
         name = String(name);
         if (name === "0" || name.toLowerCase() === "gnd") return -1;
-        if (!this.nodeIndex.has(name)) {
-            this.nodeIndex.set(name, this.names.length);
-            this.names.push(name);
+        // node names are case-insensitive, as in SPICE: the first spelling seen is the one reported
+        const key = this.nodeIndex.has(name) ? name : (this.lower.get(name.toLowerCase()) || name);
+        if (!this.nodeIndex.has(key)) {
+            this.nodeIndex.set(key, this.names.length);
+            this.lower.set(key.toLowerCase(), key);
+            this.names.push(key);
         }
-        return this.nodeIndex.get(name);
+        return this.nodeIndex.get(key);
+    }
+
+    // index of an existing node (case-insensitive), or undefined
+    lookup(name) {
+        name = String(name);
+        if (this.nodeIndex.has(name)) return this.nodeIndex.get(name);
+        const key = this.lower.get(name.toLowerCase());
+        return key === undefined ? undefined : this.nodeIndex.get(key);
     }
 
     internalNode(label) {
@@ -221,7 +233,7 @@ class SimEngine {
         this.operatingPoint();
         const src = c.elements.find(e => e.name === input && (e instanceof VoltageSource || e instanceof CurrentSource));
         if (!src) throw new Error(`The transfer function needs an input source; "${input}" is not a voltage or current source.`);
-        const idx = (name) => { const i = c.nodeIndex.get(String(name)); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
+        const idx = (name) => { const i = c.lookup(name); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
         const op = idx(out[0]), om = out.length > 1 ? idx(out[1]) : -1;
         if (op < 0 && om < 0) throw new Error("The transfer function output must be a node other than ground.");
         const n = c.nodeCount;
@@ -267,7 +279,7 @@ class SimEngine {
             if (el.name.includes(".")) continue;
             for (const s of el.noiseSources(kT)) if (s.psd > 0) sources.push({ ...s, name: `${el.name} ${s.label}` });
         }
-        const idx = (name) => { const i = c.nodeIndex.get(String(name)); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
+        const idx = (name) => { const i = c.lookup(name); return name === "0" || String(name).toLowerCase() === "gnd" || i === undefined ? -1 : i; };
         const [op, om] = [idx(out[0]), out.length > 1 ? idx(out[1]) : -1];
         if (op < 0 && om < 0) throw new Error("The noise output must be a node other than ground.");
         const src = input ? c.elements.find(e => e.name === input && (e instanceof VoltageSource || e instanceof CurrentSource)) : null;
@@ -501,7 +513,7 @@ class TransientRun {
     // current voltage of a node / current through an element, for live displays
     voltage(node) {
         if (node === "0") return 0;
-        const i = this.c.nodeIndex.get(String(node));
+        const i = this.c.lookup(node);
         return i === undefined ? 0 : this.x[i];
     }
 

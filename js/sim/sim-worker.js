@@ -37,7 +37,7 @@ class SimWorker {
     }
 
     // plain-data copy of the neutral element list (no editor objects)
-    static plain(elements) { return elements.map(e => ({ ...e, comp: undefined })); }
+    static plain(elements) { return elements.map(e => ({ ...e, comp: undefined, def: e.def ? { ...e.def, _deck: undefined } : undefined })); }
 
     static run(elements, kind, args, options, progress) {
         if (SimWorker.job) return Promise.reject(new Error("A simulation is already running."));

@@ -36,6 +36,7 @@
  "js/ui/spice-import.js",
  "js/ui/catalog.js",
  "js/cad/parts.js",
+ "js/cad/subckt-library.js",
  "js/ui/dialogs.js",
  "js/ui/erc-dialog.js",
  "js/ui/document.js",

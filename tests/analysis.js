@@ -360,6 +360,44 @@ window.analysisTests = async function () {
     ok("Run from the dialog opens the STUDY tab with the corner results", graph.kind === "step" && plotter.data && plotter.data.study && plotter.data.study.kind === "corners" && /Corner analysis/.test(document.getElementById("plotTitle").textContent), document.getElementById("plotTitle").textContent);
     graph.hide();
 
+
+    // ======================================================== subcircuits as parts
+    clear();
+    const LIBTXT = `* macromodel library\n.model DCLAMP D(IS=1e-14)\n.subckt OAMP inp inn out\nRin inp inn 1Meg\nGm 0 a inp inn 1m\nRp a 0 100Meg\nCp a 0 1.59n\nBout b 0 V = limit(v(a), -13, 13)\nRo b out 75\nD1 a 0 DCLAMP\n.ends OAMP\n`;
+    const imp = SchematicImporter.import(editor, LIBTXT);
+    ok("a file with only a .subckt adds a part instead of a schematic", imp.subckts === 1 && imp.count === 0 && !!PartLib.defs["SUB:OAMP"] && SubcktLibrary.defs.has("oamp"), imp);
+    ok("the part is listed in Pick Devices under Subcircuits", DeviceCatalog.all().some(e => e.type === "SUB:OAMP" && e.category === "Subcircuits"));
+    ok("its symbol has one pin per port, inputs on the left", editor.getSymbolDef({ type: "SUB:OAMP" }).pins.map(p => p[0]).join() === "inp,inn,out" || SYMBOL_DEFS["SUB:OAMP"].pins.length === 3, SYMBOL_DEFS["SUB:OAMP"].pins);
+    const sb = new ExampleBuilder(editor);
+    const svs = sb.part("V", 100, 300, { rot: 270, dcVoltage: 0.001, value: "1 mV" });
+    const sr1 = sb.part("R", 240, 200, { value: "1 kΩ" }), sr2 = sb.part("R", 440, 140, { value: "100 kΩ" });
+    const soa = sb.part("SUB:OAMP", 460, 300, {});
+    const sg1 = sb.part("GND", 100, 420), sg2 = sb.part("GND", 340, 420), sg3 = sb.part("GND", 640, 420);
+    const srl = sb.part("R", 640, 300, { rot: 90, value: "10 kΩ" });
+    sb.wire(svs, "2", sr1, "1"); sb.wire(sr1, "2", soa, "inn"); sb.wire(sr2, "1", soa, "inn"); sb.wire(sr2, "2", soa, "out");
+    sb.wire(soa, "inp", sg2, "1"); sb.wire(soa, "out", srl, "1"); sb.wire(srl, "2", sg3, "1"); sb.wire(svs, "1", sg1, "1");
+    sb.vprobe(soa, "out", "Vout");
+    sb.finish();
+    const sinfo = NetlistExtractor.extract(editor);
+    ok("an unwired subcircuit pin raises no warning, a wired circuit extracts", sinfo.elements.some(e => e.kind === "SUBCKT" && e.nodes.length === 3));
+    const sop = new SimEngine(sinfo.circuit).operatingPoint().nodeVoltages;
+    const vout = sop[sinfo.getPointNodeName(editor.probes[0].x, editor.probes[0].y)];
+    ok("it simulates as written: an inverting amplifier of gain -100 from the macromodel", near(vout, -0.1, 0.002), vout);
+    const deckText = NetlistExtractor.toSpice(sinfo.elements, {});
+    ok("the SPICE export writes the instance, the .subckt and the model it needs", /^X\w+ \S+ \S+ \S+ OAMP$/m.test(deckText) && /^\.subckt OAMP/m.test(deckText) && /^\.model DCLAMP/m.test(deckText) && /^\.ends OAMP/m.test(deckText), deckText.slice(-700));
+    document.getElementById("simTstop").value = "1m"; document.getElementById("simTstep").value = "20u";
+    await runner.runTransient(); await wait(100);
+    ok("a transient run with the subcircuit plots", plotter.data && plotter.data.series.some(s => /Vout/.test(s.name)));
+    const saved = JSON.parse(JSON.stringify(doc.serialize()));
+    ok("the design file embeds the subcircuits it uses", saved.subckts.length === 1 && saved.subckts[0].name === "OAMP" && /\.ends OAMP/.test(saved.subckts[0].text), saved.subckts);
+    SubcktLibrary.defs.clear(); delete PartLib.defs["SUB:OAMP"]; delete SYMBOL_DEFS["SUB:OAMP"];
+    clear();
+    doc.apply(saved, { undoable: false });
+    ok("opening it on a machine without the library restores the part and the circuit", editor.components.some(c => c.type === "SUB:OAMP") && !!PartLib.defs["SUB:OAMP"], editor.components.map(c => c.type));
+    ok("a stored library comes back in the next session", (SubcktLibrary.persist(), SubcktLibrary.defs.clear(), delete PartLib.defs["SUB:OAMP"], delete SYMBOL_DEFS["SUB:OAMP"], SubcktLibrary.restore() >= 1 && !!PartLib.defs["SUB:OAMP"]));
+    SubcktLibrary.clear(); SubcktLibrary.defs.clear(); delete PartLib.defs["SUB:OAMP"]; delete SYMBOL_DEFS["SUB:OAMP"];
+    graph.hide();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

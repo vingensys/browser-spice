@@ -6,6 +6,7 @@
 
     Theme.restore();
     SimModelLibrary.restore();
+    SubcktLibrary.restore();
     Dialog.init();
 
     const editor = new SchematicEditor($("schematic"));
@@ -183,7 +184,7 @@
 
     C("lib.pick", "Pick Devices…", { icon: "pick", keys: "P", global: true, run: () => PickDialog.open(pane) });
     C("lib.remove", "Remove Selected Device from List", { run: () => pane.removeSelected() });
-    C("lib.reset", "Forget Imported Models", { run() { SimModelLibrary.clear(); runner.toast("Imported models will be gone after you reload the page.", "info"); } });
+    C("lib.reset", "Forget Imported Models", { run() { SimModelLibrary.clear(); SubcktLibrary.clear(); runner.toast("Imported models will be gone after you reload the page.", "info"); } });
 
     C("help.keys", "Keyboard & Mouse", { icon: "help", run: () => ShortcutsDialog.open() });
     C("help.about", "About Browser SPICE", { run: () => AboutDialog.open() });
@@ -431,9 +432,9 @@
             try {
                 live.stop();
                 const r = SchematicImporter.import(editor, evt.target.result);
-                if (r.models) {
+                if (r.models || r.subckts) {
                     pane.render();
-                    runner.toast(`Added ${r.models} model(s). Press P to pick them.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");
+                    runner.toast(`Added ${[r.models ? `${r.models} model(s)` : "", r.subckts ? `${r.subckts} subcircuit(s)` : ""].filter(Boolean).join(" and ")}. Press P to pick them.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");
                 } else {
                     afterLoad();
                     doc.name = null; doc.updateTitle();

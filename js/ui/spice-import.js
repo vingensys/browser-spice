@@ -34,8 +34,9 @@ class SchematicImporter {
         if (!parts.length) {
             // a model-only file (vendor .lib / .mod): add its models to the part pickers
             const lib = SimModelLibrary.register(deck);
-            if (!lib.added.length) throw new Error("No supported components or models were found in that file.");
-            return { count: 0, models: lib.added.length, skipped: lib.skipped, title: deck.title, warnings: lib.skipped.length ? [`skipped ${lib.skipped.join(", ")}`] : [], deck };
+            const subs = SubcktLibrary.importText(text);
+            if (!lib.added.length && !subs.added.length) throw new Error("No supported components, models or subcircuits were found in that file.");
+            return { count: 0, models: lib.added.length, subckts: subs.added.length, skipped: lib.skipped, title: deck.title, warnings: lib.skipped.length ? [`skipped ${lib.skipped.join(", ")}`] : [], deck };
         }
 
         editor.saveState();

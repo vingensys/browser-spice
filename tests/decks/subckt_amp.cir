@@ -1,0 +1,26 @@
+Op-amp macromodel subcircuit in an inverting amplifier with a nested stage and a clamp
+V1 in 0 SIN(0 0.05 1k) AC 1
+R1 in m 1k
+R2 m o 20k
+RL o 0 10k
+X1 0 m o OAMP
+.model DCLAMP D(IS=1e-14)
+.subckt buf i out
+Rb i 0 1Meg
+Eb out 0 i 0 1
+.ends buf
+.subckt OAMP inp inn out
+Rin inp inn 1Meg
+Gm 0 a inp inn 1m
+Rp a 0 100Meg
+Cp a 0 1.59n
+Bout b 0 V = max(min(v(a), 13), -13)
+Ro b out 75
+D1 a 0 DCLAMP
+X2 a z buf
+Rz z 0 1k
+.ends OAMP
+.op
+.ac dec 10 10 1Meg
+.tran 5u 3m
+.end

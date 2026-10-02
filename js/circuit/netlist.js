@@ -444,6 +444,7 @@ class NetlistExtractor {
                 case "REG": c.add(new Regulator(e.name, e.nodes, p)); break;
                 case "FF": c.add(new FlipFlop(e.name, e.nodes, e.ff, p)); break;
                 case "DIGITAL": c.add(new DigitalIC(e.name, e.nodes, LOGIC_ICS[e.ic], p)); break;
+                case "SUBCKT": SpiceParser.addSubckt(c, e.def, e.nodes, e.name); break;
                 case "BSRC": c.add(new BSource(e.name, e.nodes, { mode: e.params.mode, expr: e.params.expr })); break;
                 case "CCCS": c.add(new CCCS(e.name, e.nodes, { ctrl: e.ctrl, gain: p.gain, vsat: p.vsat })); break;
             }
@@ -512,6 +513,7 @@ class NetlistExtractor {
         const subckts = new Set();
         const extra = [];
         let uses555 = false;
+        const userSubckts = new Map();
 
         for (const e of els) {
             const name = NetlistExtractor.spiceName(e);
@@ -638,6 +640,12 @@ class NetlistExtractor {
                         `B${nm}_I ${n[0]} ${n[2]} I=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}+${f(p.iq)}`);
                     break;
                 }
+                case "SUBCKT": {
+                    const nm = `X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")}`;
+                    lines.push(`${nm} ${n.join(" ")} ${e.def.name}`);
+                    userSubckts.set(e.def.name.toLowerCase(), e.def);
+                    break;
+                }
                 case "BSRC": {
                     const ex = Expr.toSpice(p.expr);
                     if (ex.unsupported.length) lines.push(`* ${e.name}: ngspice has no ${ex.unsupported.join(", ")}() function`);
@@ -685,6 +693,15 @@ class NetlistExtractor {
                     `Ro b out ${f(m.ro)}`,
                     `.ends OPAMP_${model}`
                 );
+            }
+        }
+
+        if (userSubckts.size) {
+            lines.push("", "* subcircuits");
+            const seen = new Set(), mseen = new Set();
+            for (const d of userSubckts.values()) {
+                for (const m of d.models || []) { const k = m.toLowerCase(); if (!mseen.has(k)) { mseen.add(k); lines.push(m); } }
+                if (!seen.has(d.name.toLowerCase())) { seen.add(d.name.toLowerCase()); lines.push(d.text); }
             }
         }
 

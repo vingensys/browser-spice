@@ -113,7 +113,8 @@ class SpiceParser {
 
             if (head === ".end") break;
             if (head === ".subckt") {
-                current = { name: tok[1], ports: tok.slice(2).filter(t => !t.includes("=")), elements: [] };
+                const ps = tok.slice(2), stop = ps.findIndex(t => t.includes("=") || /:$/.test(t));
+                current = { name: tok[1], ports: (stop < 0 ? ps : ps.slice(0, stop)), elements: [] };
                 deck.subckts[current.name] = current;
                 continue;
             }
@@ -326,6 +327,23 @@ class SpiceParser {
         const warnings = [...deck.warnings];
         const circuit = new SimCircuit();
         const els = SpiceParser.flatten(deck, deck.elements, "", null, warnings);
+        SpiceParser.addElements(circuit, els, deck, warnings);
+        return { circuit, warnings };
+    }
+
+    // Add a stored subcircuit (a schematic part) to a circuit: `def` = { name, ports, text, models: [".model ..." lines] },
+    // `nodes` the nets on its ports in order, `prefix` the instance name that makes its inner names unique.
+    static addSubckt(circuit, def, nodes, prefix, warnings = []) {
+        if (!def._deck) def._deck = SpiceParser.parse(`* ${def.name}\n${(def.models || []).join("\n")}\n${def.text}\n.end`);
+        const deck = def._deck, sub = deck.subckts[def.name.toLowerCase()];
+        if (!sub) throw new Error(`The subcircuit ${def.name} could not be read.`);
+        const map = new Map(sub.ports.map((p, i) => [p, nodes[i] === undefined ? "0" : nodes[i]]));
+        const els = SpiceParser.flatten(deck, sub.elements, String(prefix).toLowerCase(), map, warnings);
+        SpiceParser.addElements(circuit, els, deck, warnings);
+    }
+
+    // create the engine elements for a flat list of parsed elements
+    static addElements(circuit, els, deck, warnings) {
         const model = (name, what) => {
             const m = deck.models[name];
             if (!m) warnings.push(`model ${name} for ${what} not found, using defaults`);
@@ -383,6 +401,5 @@ class SpiceParser {
                 }
             }
         }
-        return { circuit, warnings };
     }
 }

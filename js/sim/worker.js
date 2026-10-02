@@ -4,7 +4,7 @@
 
 const stamp = self.location.search || "";
 for (const f of ["utils/complex.js", "utils/units.js", "sim/linalg.js", "sim/devices.js", "sim/logic-ics.js", "sim/expression.js", "sim/devices-extra.js",
-    "sim/models.js", "sim/models-extra.js", "sim/models-parts.js", "sim/engine.js", "circuit/netlist.js"]) importScripts(`../${f}${stamp}`);
+    "sim/models.js", "sim/models-extra.js", "sim/models-parts.js", "sim/engine.js", "analysis/measure.js", "sim/spice-parser.js", "circuit/netlist.js"]) importScripts(`../${f}${stamp}`);
 
 const pack = (z) => [z.re, z.im];
 

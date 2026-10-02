@@ -33,7 +33,7 @@ against Proteus / ngspice, **P3** polish.
 | Logic ICs cannot be exported to SPICE | P3 | They run in the built-in engine only. |
 | ~~No parametric sweep, Monte Carlo, noise, Fourier~~ | P2 | **Done** (see README). `.measure` and `.tf` are done too. Still missing: `.sens`, flicker noise. |
 | ~~BJT has no Gummel-Poon~~ | P2 | **Done**: full Gummel-Poon (VAR, IKF, IKR, ISE/NE, ISC/NC, RB, RC, RE, base-charge-scaled transit time with transcapacitance), checked against ngspice in a reference deck and in the random-circuit test. Still open: MOSFET is level 1 with no body node or Meyer capacitances, JFET has constant capacitances, no `IRB`/`XTF` effects. |
-| `.include` / `.lib` and `.subckt` libraries cannot be loaded as hierarchy; `.subckt` is flattened; no B-source expression parser | P2 | |
+| `.include` / `.lib` and `.subckt` libraries cannot be loaded as hierarchy; `.subckt` is flattened | P2 | **Partly done**: a `.subckt` in an imported file becomes a part (see README); a schematic is still one flat sheet, and `.include` files cannot be fetched from a path. |
 | SCR, TRIAC and flip-flops have no SPICE export, so ngspice cannot run designs that use them | P2 | |
 | Regulators have no current limit; relay export is approximate | P3 | |
 | Optocoupler / controlled sources are idealised (no frequency response) | P3 | |

@@ -23,6 +23,7 @@ const { SimCircuit, SimEngine, Resistor, Capacitor, Inductor, VoltageSource, Cur
     JFET, Transformer, Relay, Fuse, Thyristor, Regulator, FlipFlop, CCCS, DigitalIC, LOGIC_ICS } = S;
 
 const { BSource, Expr, SpiceParser } = S;
+S.__src_subckt = fs.readFileSync(path.join(root, 'js/cad/subckt-library.js'), 'utf8');
 let passed = 0, failed = 0;
 const failures = [];
 function test(name, fn) {
@@ -1155,6 +1156,48 @@ test("tf: an input that draws no current has infinite input resistance; a bad so
     near(r.gain, 2, 1e-6); near(r.rout, 0, 1e-3);
     let msg = ""; try { eng.tf({ out: ["out"], input: "R0" }); } catch (e) { msg = e.message; }
     if (!/not a voltage or current source/.test(msg)) throw new Error(msg);
+});
+
+
+console.log("subcircuit parts");
+const LIB = `* op-amp macromodel library
+.model DCLAMP D(IS=1e-14)
+.subckt gainstage in out PARAMS: g=2
+Gm 0 a in 0 1m
+Rp a 0 {1k}
+Bo out 0 V = 10*v(a)
+.ends gainstage
+.subckt OAMP inp inn out
+Rin inp inn 1Meg
+Gm 0 a inp inn 1m
+Rp a 0 100Meg
+Cp a 0 1.59n
+Bout b 0 V = limit(v(a), -13, 13)
+Ro b out 75
+D1 a 0 DCLAMP
+X1 inp aux gainstage
+.ends OAMP
+`;
+test("subcircuit parts: extraction keeps ports, nested subcircuits and the models a block uses", () => {
+    const SubcktLibrary = new Function("SpiceParser", "PartLib", "logicICGeometry", S.__src_subckt + "\nreturn SubcktLibrary;")(S.SpiceParser, { add() { } }, () => ({ symbol: {} }));
+    const defs = SubcktLibrary.extract(LIB);
+    if (defs.length !== 2) throw new Error("expected 2 blocks, got " + defs.length);
+    const oamp = defs.find(d => d.name === "OAMP");
+    if (oamp.ports.join() !== "inp,inn,out") throw new Error(oamp.ports.join());
+    if (!/\.subckt gainstage/i.test(oamp.text)) throw new Error("the nested subcircuit travels with its user");
+    if (oamp.models.length !== 1 || !/DCLAMP/.test(oamp.models[0])) throw new Error(JSON.stringify(oamp.models));
+    if (defs.find(d => d.name === "gainstage").ports.join() !== "in,out") throw new Error("PARAMS: must end the port list");
+});
+test("subcircuit parts: an expanded instance simulates like the written-out circuit", () => {
+    const SubcktLibrary = new Function("SpiceParser", "PartLib", "logicICGeometry", S.__src_subckt + "\nreturn SubcktLibrary;")(S.SpiceParser, { add() { } }, () => ({ symbol: {} }));
+    const def = SubcktLibrary.extract(LIB).find(d => d.name === "OAMP");
+    const c = new SimCircuit();
+    c.add(new VoltageSource("V1", ["a", "0"], vdc(0.001))); c.add(new Resistor("R1", ["a", "m"], { r: 1000 })); c.add(new Resistor("R2", ["m", "o"], { r: 100000 }));
+    c.add(new Resistor("RP", ["p", "0"], { r: 1 })); c.add(new Resistor("RL", ["o", "0"], { r: 10000 }));
+    S.SpiceParser.addSubckt(c, def, ["p", "m", "o"], "U1", []);
+    const op = new SimEngine(c).operatingPoint().nodeVoltages;
+    rel(op.o, -0.1, 0.01, "inverting gain of -100 at 1 mV");     // open-loop gain 1e5 / 1.0 makes it ideal
+    if (!Object.keys(op).some(k => k.toLowerCase().startsWith("u1."))) throw new Error("inner nodes are prefixed with the instance name");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

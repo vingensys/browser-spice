@@ -38,6 +38,7 @@ class DocumentStore {
             probes: ed.probes.map(p => this.strip(p)),
             titleBlock: ed.titleBlock,
             measures: ed.measures,
+            subckts: SubcktLibrary.used(ed),
             nextId: ed.nextId,
             view: { zoom: ed.zoom, panX: ed.panX, panY: ed.panY },
             settings: this.runner.settings()
@@ -66,6 +67,8 @@ class DocumentStore {
     apply(state, { undoable = true } = {}) {
         if (!state || typeof state !== "object" || !Array.isArray(state.components)) throw new Error("this is not a Browser SPICE design file");
         const notes = [];
+        // subcircuits the design uses travel with it
+        if (Array.isArray(state.subckts)) SubcktLibrary.register(state.subckts, { persist: false });
 
         const comps = [];
         for (const c of state.components) {
