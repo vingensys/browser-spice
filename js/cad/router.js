@@ -482,6 +482,7 @@ class SchematicRouter {
     // Re-validate / repair wires (all, or just the given ones). Pin-attached wires
     // go first so junction wires can snap onto their updated targets.
     refreshWires(only = null) {
+        this._hlDirty = true;                // a highlighted net must be recomputed after any change
         const list = only ? this.wires.filter(w => only.has(w)) : this.wires;
         const direct = list.filter(w => w.start.type !== "wire" && w.end.type !== "wire");
         const junctions = list.filter(w => w.start.type === "wire" || w.end.type === "wire");

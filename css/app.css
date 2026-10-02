@@ -527,3 +527,16 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 /* text annotation / title block fields */
 .property textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 60px; background: var(--ui-input); border: 1px solid var(--ui-border); padding: 4px 6px; font-family: system-ui; }
 .property .checkrow { display: flex; align-items: center; gap: 6px; }
+
+/* electrical rule check */
+.erc { width: 640px; max-width: 80vw; }
+.erc-head { margin-bottom: 8px; display: flex; gap: 12px; align-items: baseline; }
+.erc-head .err { color: #d32f2f; } .erc-head .warn { color: #c77700; } .erc-head .ok { color: #2e7d32; } .erc-head .dim { color: var(--ui-dim); margin-left: auto; font-size: 11px; }
+.erc-list { max-height: 360px; overflow: auto; border: 1px solid var(--ui-border); background: var(--ui-input); }
+.erc-row { display: flex; gap: 8px; padding: 4px 8px; cursor: pointer; border-bottom: 1px solid var(--ui-border); align-items: baseline; }
+.erc-row:hover { background: var(--ui-select); color: #fff; }
+.erc-row.err .erc-icon { color: #d32f2f; } .erc-row.warn .erc-icon { color: #e69500; }
+.erc-row:hover .erc-icon { color: #fff; }
+.erc-text { flex: 1; line-height: 1.35; }
+.erc-rule { font-family: Consolas, monospace; font-size: 10px; color: var(--ui-dim); }
+.erc-row:hover .erc-rule { color: #dfe8ff; }

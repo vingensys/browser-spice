@@ -46,6 +46,10 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
 - **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
 
+**Net highlighting**: press **H** over a pin or wire (or right-click it > Highlight Net, or Design > Highlight Net) and every wire and pin of that net lights up while the rest fades; the status bar names the net and its pins. Nets joined by a port or label show under its name. **Esc** clears it, and it follows edits.
+
+**Electrical rule check** (Design > Electrical Rule Check): lists problems with a click-to-go list, **Mark on Sheet** puts a **!** on each, and **F4** steps through them. Rules: missing ground; a voltage source shorted or in a loop with other voltage sources (an error: Play and the analyses refuse with that explanation instead of a singular-matrix message); inductors or windings directly across a source; nets with no DC path to ground; unconnected pins; wires ending in mid air; single-pin nets; duplicate designators; parts with all pins on one net; outputs tied to ground or a supply and two outputs on one net (three-state buses are fine); an LED across a supply with no resistor; probes on ground; power ports that disagree on voltage.
+
 **Notes and title block**: press **A** (or Tool > Place Text, or right-click the sheet > Add Text Here), click, and type; notes can be multi-line, sized, coloured, bold / italic, aligned and rotated with **R**. They sit on top of everything (they never block parts or wires) and are ignored by the simulator. **Design > Title Block…** fills the ISIS-style block in the sheet's corner (title, company, document number, revision, author, date, sheet); the title also heads the exported `.cir`.
 
 **Your work is kept**
@@ -92,6 +96,7 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 - `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops, logic ICs), `logic-ics` (the 74xx / 4000 state machines), `models`, `models-extra` / `models-parts` (library), `model-library`, `engine`, `spice-parser`, `ngspice-backend`
 - `js/cad/` editor internals: `symbols` (pins and bodies), `parts` (the added parts: symbol, properties, netlist, library entries), `router` (A* + rubber-band repair), `symbol-draw`
 - `js/visualization/` schematic editor, waveform plotter and the graph maths (`plot-math`)
+- `js/circuit/erc.js` the electrical rule check; `js/cad/netview.js` net highlight, rule marks and jump-to
 - `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
 - `js/ui/` the ISIS-style shell: `theme`, `commands` (one registry for menus, toolbars and keys), `menubar`, `toolbars`, `statusbar`, `overview`, `device-list` + `catalog` (device pane, Pick Devices), `dialogs`, `graph-window`, `live-sim`, `properties`, `sim-runner`, `spice-import`, `icons`
 - `js/examples.js`, `js/app.js` (composes the shell and defines the commands)
@@ -122,6 +127,7 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/ui.js')).text());          await uiTests();       // menus, dialogs, device list, live simulation
 (0, eval)(await (await fetch('tests/parts.js')).text());       await partsTests();    // part library, mirror / flip, sources, exports, live displays
 (0, eval)(await (await fetch('tests/graph.js')).text());       await graphTests();    // cursors, measurements, CSV / PNG export, true time axis
+(0, eval)(await (await fetch('tests/erc.js')).text());         await ercTests();      // rule check rules, dialog, net highlighting
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each

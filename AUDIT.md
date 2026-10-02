@@ -20,9 +20,9 @@ against Proteus / ngspice, **P3** polish.
 | ~~No text annotation / title block~~ | P2 | **Done**: multi-line text notes (size, colour, bold / italic, alignment, rotation) and a title block. Still missing: lines / boxes / circles, images, hyperlinks. |
 | No multi-sheet or hierarchical designs, no buses | P2 | Everything is one flat sheet. Net labels and power ports exist (same name = same net). |
 | ~~No autosave / unsaved-changes warning~~ | P1 | **Done**: autosave to browser storage with restore, dirty tracking, Save / Don't Save / Cancel prompts. Remaining: autosave is per browser profile (no cloud), and two tabs on the same address overwrite each other's copy. |
-| No wire / net labels shown on wires, no net highlighting or cross-probing | P2 | |
+| ~~No net highlighting~~ | P2 | **Done** (H / right-click). Still missing: net names drawn on the wires and cross-probing with graphs. |
 | Grid and snap size are fixed (20 px = 0.1 in) | P3 | |
-| ERC is basic (unconnected pins, no ground) | P2 | No shorted outputs, floating nets, duplicate names, missing supplies. |
+| ~~ERC is basic~~ | P2 | **Done**: 15 rules (see README), results list with go-to, marks on the sheet, F4 next issue, and fatal ones stop the simulator with a clear message. Still missing: bus / net-class rules, voltage-level mismatches between logic families, polarised-capacitor checks. |
 | Auto-router can still make long detours around ICs when pins are on the far side | P3 | Example layouts were tidied by hand. |
 | No component search by keyboard on the sheet, no recent-designs list | P3 | |
 
@@ -72,5 +72,5 @@ against Proteus / ngspice, **P3** polish.
 1. ~~Autosave and an unsaved-changes prompt (P1)~~ done.
 2. ~~Graph cursors, readouts and CSV export~~ done.
 3. ~~Counters, shift registers and a 74xx set~~ done.
-4. ~~Text annotation and title block~~ done; net highlighting still open.
-5. ERC rules, then CI for the test suites.
+4. ~~Text annotation, title block, net highlighting~~ done.
+5. ~~ERC rules~~ done; CI for the test suites is next.

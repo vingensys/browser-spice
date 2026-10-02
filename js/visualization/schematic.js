@@ -113,9 +113,14 @@ class SchematicEditor {
 
             const pos = this.getMousePosition(e);
             const probe = this.findProbe(pos.x, pos.y);
+            const pinHit = probe ? null : this.findTerminal(pos.x, pos.y, 7);
             const comp = probe ? null : this.findComponent(pos.x, pos.y);
             let kind = "empty";
-            if (probe) {
+            if (pinHit) {
+                this.clearSelection();
+                this.contextPin = { comp: pinHit.component, pin: pinHit.terminal.name };
+                kind = "pin";
+            } else if (probe) {
                 this.selectProbe(probe);
                 kind = "probe";
             } else if (comp) {
@@ -202,7 +207,7 @@ class SchematicEditor {
     }
 
     notify() {
-        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.selectedProbe ? this.selectedProbe.id : ""}|${this.wiring}|${this.pasteMode}|${this.dragObject}`;
+        const key = `${this.tool}|${this.selection.map(c => c.id).join(",")}|${this.selectedWire ? this.selectedWire.id : ""}|${this.selectedProbe ? this.selectedProbe.id : ""}|${this.wiring}|${this.pasteMode}|${this.dragObject}|${this.netHighlight ? this.netHighlight.id : ""}`;
         if (key === this._notifyKey) return;
         this._notifyKey = key;
         if (typeof this.onChange === "function") this.onChange();
@@ -225,6 +230,7 @@ class SchematicEditor {
 
     // Call BEFORE a change: records the state to return to on undo.
     saveState() {
+        if (this.ercMarks) this.ercMarks = null;
         const snap = this.snapshot();
         if (this.historyStack.length > 0 && this.historyStack[this.historyStack.length - 1] === snap) return;
 
@@ -1527,6 +1533,7 @@ class SchematicEditor {
             if (this.pasteMode) this.cancelPaste();
             else if (this.dragObject) this.cancelDragObject();
             else if (this.wiring) this.cancelWire();
+            else if (this.netHighlight || this.ercMarks) { this.netHighlight = null; this.ercMarks = null; this.draw(); }
             else if (this.tool !== "select") this.setTool("select");
             else { this.clearSelection(); this.draw(); }
             this.notify();
@@ -1560,6 +1567,12 @@ class SchematicEditor {
         if ((key === "x" || key === "y") && !event.ctrlKey && !event.metaKey) {
             event.preventDefault();
             this.mirrorSelected(key);
+            return;
+        }
+
+        if (key === "h" && !isCtrl) {
+            event.preventDefault();
+            this.toggleHighlightAt(this.mouseInside ? this.mouse.x : undefined, this.mouseInside ? this.mouse.y : undefined);
             return;
         }
 

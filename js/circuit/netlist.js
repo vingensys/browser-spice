@@ -123,13 +123,24 @@ class NetlistExtractor {
         const hasGround = groundRoots.size > 0;
 
         const rootToName = new Map();
+        const idToRoot = new Map();
         let counter = 1;
         const nameForKey = (key) => {
             const root = ds.find(key);
             if (groundRoots.has(root)) return "0";
-            if (!rootToName.has(root)) rootToName.set(root, String(counter++));
+            if (!rootToName.has(root)) { const id = String(counter++); rootToName.set(root, id); idToRoot.set(id, root); }
             return rootToName.get(root);
         };
+
+        // a name for people: the label / port name when the net has one, otherwise N<id>
+        const rootToLabel = new Map();
+        for (const [name, key] of labelled) rootToLabel.set(ds.find(key), name);
+        const displayName = (id) => {
+            if (id === "0") return "GND";
+            const root = idToRoot.get(id);
+            return root !== undefined && rootToLabel.has(root) ? rootToLabel.get(root) : `N${id}`;
+        };
+        const wireNode = (wire) => (wire.route && wire.route.length ? nameForKey(vertexKey(wire, 0)) : null);
 
         const terminalNode = (comp, pin) => {
             const key = terminalNodeKeys.get(`${comp.id}:${pin}`);
@@ -154,7 +165,7 @@ class NetlistExtractor {
             }
         }
 
-        return { terminalNode, getPointNodeName, hasGround, wired };
+        return { terminalNode, getPointNodeName, hasGround, wired, wireNode, displayName, labelled };
     }
 
     // ---- element list --------------------------------------------------------

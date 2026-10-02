@@ -47,11 +47,18 @@ class SimRunner {
 
     // build the netlist, warn about suspicious wiring
     prepare() {
+        this.rejectImpossible();
         const info = NetlistExtractor.extract(this.editor);
         if (info.warnings.length) {
             this.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}${info.warnings.length > 3 ? " …" : ""}`, "warn");
         }
         return info;
+    }
+
+    // a loop of ideal voltage sources has no solution: say so in plain words instead of a singular-matrix error
+    rejectImpossible() {
+        const fatal = ErcChecker.fatal(this.editor);
+        if (fatal.length) throw new Error(`${fatal[0].text}${fatal.length > 1 ? ` (${fatal.length - 1} more problem(s): see Design > Electrical Rule Check)` : ""}`);
     }
 
     async guard(fn) {

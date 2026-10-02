@@ -58,33 +58,14 @@
     // --------------------------------------------------------------- electrical rules
 
     function runErc() {
-        const nets = NetlistExtractor.nets(editor);
-        const issues = [];
-        if (!nets.hasGround) issues.push(["err", "There is no ground symbol on the sheet."]);
-
-        const names = new Map();
-        const pinCount = new Map();
-        for (const c of editor.components) {
-            names.set(c.name, (names.get(c.name) || 0) + 1);
-            if (c.type === "GND") continue;
-            for (const t of editor.getTerminals(c)) {
-                const wired = nets.wired.has(`${c.id}:${t.name}`);
-                const quiet = PartLib.defs[c.type] && PartLib.defs[c.type].quietPins;
-                if (!wired && c.type !== "NODEIC" && !quiet) issues.push(["warn", `${c.name}: pin ${t.name} is not connected.`]);
-                const net = nets.terminalNode(c, t.name);
-                if (net && net !== "0") pinCount.set(net, (pinCount.get(net) || 0) + 1);
-            }
-            if (c.type === "V" && nets.terminalNode(c, "1") === nets.terminalNode(c, "2")) {
-                issues.push(["err", `${c.name}: both terminals are on the same net (short circuit).`]);
-            }
-        }
-        for (const [name, n] of names) if (n > 1 && name !== "GND") issues.push(["warn", `Reference ${name} is used by ${n} parts.`]);
-        for (const [net, n] of pinCount) if (n === 1) issues.push(["warn", `Net ${net} has only one connection.`]);
-
-        AppLog.add("info", `Electrical rules check: ${issues.length ? issues.length + " issue(s)" : "no problems found"}.`);
-        issues.forEach(([lvl, text]) => AppLog.add(lvl, text));
-        MessagesDialog.open();
+        const result = ErcChecker.run(editor);
+        const errs = result.issues.filter(i => i.level === "err").length, warns = result.issues.length - errs;
+        AppLog.add("info", `Electrical rules check: ${result.issues.length ? `${errs} error(s), ${warns} warning(s)` : "no problems found"}.`);
+        result.issues.forEach(i => AppLog.add(i.level, i.text));
+        ErcDialog.open(editor, result, { onRerun: runErc });
+        return result;
     }
+    window.runErc = runErc;
 
     // ---------------------------------------------------------------------- commands
 
@@ -164,6 +145,11 @@
         editor.draw(); editor.notify();
         editor.onEdit(c);
     } });
+    C("design.ercnext", "Next ERC Issue", { keys: "F4", global: true, enabled: () => !!(ErcDialog.last && ErcDialog.last.issues.length), run: () => ErcDialog.next(editor) });
+    C("net.highlight", "Highlight Net", { keys: "H", run: () => editor.toggleHighlightAt(editor.mouseInside ? editor.mouse.x : undefined, editor.mouseInside ? editor.mouse.y : undefined) });
+    C("net.highlightpin", "Highlight Net", { run: () => { if (editor.contextPin) editor.highlightNet(editor.contextPin); } });
+    C("net.highlightwire", "Highlight Net", { enabled: () => !!editor.selectedWire, run: () => { if (editor.selectedWire) editor.highlightNet({ wire: editor.selectedWire }); } });
+    C("net.clear", "Clear Net Highlight", { enabled: () => !!editor.netHighlight, run: () => editor.clearHighlight() });
     C("design.titleblock", "Title Block…", { icon: "", run: () => openTitleBlock() });
     C("tool.vprobe", "Voltage Probe", { icon: "vprobe", checked: toolIs("vProbe"), run: () => editor.setTool("vProbe") });
     C("tool.iprobe", "Current Probe", { icon: "iprobe", checked: toolIs("iProbe"), run: () => editor.setTool("iProbe") });
@@ -232,7 +218,7 @@
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
-        { title: "Design", items: ["design.titleblock", "design.settings", "design.erc"] },
+        { title: "Design", items: ["design.titleblock", "design.settings", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.sweep", "graph.dc", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
@@ -285,6 +271,7 @@
         else if (editor.tool === "wire") text = "Wire tool: click a pin or wire to start.";
         else if (editor.tool === "vProbe") text = "Click a wire or pin to attach a voltage probe.";
         else if (editor.tool === "iProbe") text = "Click a component to attach a current probe.";
+        else if (editor.netHighlight) text = editor.netHighlight.summary + ". Esc clears.";
         else if (editor.pasteMode) text = "Click to place the pasted block. Esc or right-click cancels.";
         else if (editor.dragObject) text = "Move the pointer, click to drop the object. Esc puts it back.";
         else if (editor.isPlacing()) text = "Click to place (keeps placing). R rotates, right-click or Esc to stop.";
@@ -331,7 +318,8 @@
         part: [["edit.properties", "Edit Properties"], "part.toggle", "edit.drag", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
             "edit.cut", "edit.copy", "-", "probe.addI"],
         multi: ["edit.cut", "edit.copy", "edit.drag", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
-        wire: [["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
+        wire: ["net.highlightwire", ["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
+        pin: ["net.highlightpin", "probe.addV"],
         probe: ["probe.rename", ["edit.delete", "Delete Probe"]],
         empty: ["edit.paste", "text.here", "-", "edit.undo", "edit.redo", "-", "edit.selectall", "-", "view.zoomin", "view.zoomout", "view.fit", "-", "lib.pick", "tool.wire", ["edit.tidy", "Tidy All Wires"]]
     };

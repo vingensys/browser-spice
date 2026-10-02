@@ -233,9 +233,11 @@ window.uiTests = async function () {
         let m = menu();
         ok("part menu: edit, delete, rotate, mirror, current probe", ["Edit Properties", "Delete Object", "Rotate Clockwise", "Rotate 180°", "Mirror Left-Right", "Mirror Top-Bottom", "Add Current Probe"].every(x => m.includes(x)), m);
         ok("right-click selects the part under the pointer", editor.selection.length === 1 && editor.selection[0] === q);
-        const w = editor.wires[0], mid = w.route[Math.floor(w.route.length / 2)];
+        const w = editor.wires[0];
+        let sg = [w.route[0], w.route[1]]; for (let i = 0; i < w.route.length - 1; i++) if (Math.hypot(w.route[i + 1].x - w.route[i].x, w.route[i + 1].y - w.route[i].y) > Math.hypot(sg[1].x - sg[0].x, sg[1].y - sg[0].y)) sg = [w.route[i], w.route[i + 1]];
+        const mid = { x: (sg[0].x + sg[1].x) / 2, y: (sg[0].y + sg[1].y) / 2 };   // the middle of a segment (a vertex may be a pin)
         rc(mid.x, mid.y); m = menu();
-        ok("wire menu: delete wire, redraw, voltage probe", ["Delete Wire", "Redraw Wire", "Add Voltage Probe Here"].every(x => m.includes(x)) && !m.includes("Rotate Clockwise"), m);
+        ok("wire menu: delete wire, redraw, voltage probe", ["Highlight Net", "Delete Wire", "Redraw Wire", "Add Voltage Probe Here"].every(x => m.includes(x)) && !m.includes("Rotate Clockwise"), m);
         const pr = editor.probes[0];
         rc(pr.x, pr.y); m = menu();
         ok("probe menu: rename and delete", m.includes("Rename Probe") && m.includes("Delete Probe") && m.length === 2, m);
