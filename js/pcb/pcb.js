@@ -1130,7 +1130,7 @@ class Pcb {
         for (const p of Pcb.pads(pcb)) if (p.drill) holes.push([p.drill, p.x, p.y]);
         for (const v of pcb.vias) holes.push([v.drill, v.x, v.y]);
         for (const [d] of holes) if (!tools.has(d)) tools.set(d, tools.size + 1);
-        const out = ["M48", "; Browser SPICE", "METRIC,TZ", ...[...tools].map(([d, n]) => `T${n}C${d.toFixed(3)}`), "%", "G90", "G05"];
+        const out = ["M48", "; Browser SPICE", "METRIC,TZ", ...[...tools].map(([d, n]) => `T${n}C${d.toFixed(3)}`), "%"];
         for (const [d, n] of tools) { out.push(`T${n}`); for (const h of holes) if (h[0] === d) out.push(`X${h[1].toFixed(3)}Y${(pcb.outline.h - h[2]).toFixed(3)}`); }
         out.push("M30");
         return out.join("\n") + "\n";
