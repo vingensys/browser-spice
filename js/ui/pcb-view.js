@@ -409,15 +409,7 @@ class PcbView {
     get shoving() { return this.mode === "shove"; }
 
     // the net a track starting here belongs to: the pad, via or track it starts on (null when it starts on bare board)
-    netAt(x, y) {
-        for (const g of Pcb.connectivity(this.pcb, false)) {
-            if (!g.net || g.net === "!") continue;
-            if (g.pads.some(p => Math.abs(x - p.x) <= p.w / 2 + 0.05 && Math.abs(y - p.y) <= p.h / 2 + 0.05)) return g.net;
-            if (g.vias.some(v => Math.hypot(x - v.x, y - v.y) <= v.d / 2 + 0.05)) return g.net;
-            if (g.tracks.some(t => t.layer === this.layer && t.pts.some((q, i) => i + 1 < t.pts.length && Pcb.segDist(x, y, q[0], q[1], t.pts[i + 1][0], t.pts[i + 1][1]) <= t.w / 2 + 0.05))) return g.net;
-        }
-        return null;
-    }
+    netAt(x, y) { return Pcb.netAt(this.pcb, this.layer, x, y); }
 
     routeClick(w, e) {
         const free = e.shiftKey;

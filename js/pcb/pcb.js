@@ -453,6 +453,49 @@ class Pcb {
         return fills;
     }
 
+    // the net a track starting at (x, y) on `layer` belongs to: the pad, via or track it starts on (null on bare board)
+    static netAt(pcb, layer, x, y) {
+        for (const g of Pcb.connectivity(pcb, false)) {
+            if (!g.net || g.net === "!") continue;
+            if (g.pads.some(p => p.layers.includes(layer) && Math.abs(x - p.x) <= p.w / 2 + 0.05 && Math.abs(y - p.y) <= p.h / 2 + 0.05)) return g.net;
+            if (g.vias.some(v => Math.hypot(x - v.x, y - v.y) <= v.d / 2 + 0.05)) return g.net;
+            if (g.tracks.some(t => t.layer === layer && t.pts.some((q, i) => i + 1 < t.pts.length && Pcb.segDist(x, y, q[0], q[1], t.pts[i + 1][0], t.pts[i + 1][1]) <= t.w / 2 + 0.05))) return g.net;
+        }
+        return null;
+    }
+
+    // an SVG picture of the board: outline, pours, tracks (front red, back blue), pads, vias, silkscreen
+    static svg(pcb, { layers = "all", scale = 10 } = {}) {
+        const W = pcb.outline.w, H = pcb.outline.h, o = [];
+        const f = (v) => Number(v.toFixed(3));
+        const pts = (l) => l.map(q => `${f(q[0])},${f(q[1])}`).join(" ");
+        o.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${f(W * scale)}" height="${f(H * scale)}">`);
+        o.push(`<rect width="${W}" height="${H}" fill="#1a3d2b"/>`);
+        const show = (l) => layers === "all" || layers === l;
+        const colour = { F: "#d9534f", B: "#4a90d9" };
+        for (const l of ["B", "F"]) {
+            if (!show(l)) continue;
+            for (const fz of Pcb.fillZones(pcb)) if (fz.zone.layer === l) { o.push(`<g fill="${colour[l]}" fill-opacity="0.45">`); for (const [x1, y1, x2, y2] of fz.rects) o.push(`<rect x="${f(x1)}" y="${f(y1)}" width="${f(x2 - x1)}" height="${f(y2 - y1)}"/>`); o.push("</g>"); }
+            for (const t of pcb.tracks) if (t.layer === l) o.push(`<polyline points="${pts(t.pts)}" fill="none" stroke="${colour[l]}" stroke-width="${t.w}" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.9"/>`);
+        }
+        for (const p of Pcb.pads(pcb)) {
+            if (layers !== "all" && !p.layers.includes(layers)) continue;
+            const fill = p.smd ? (p.layers[0] === "F" ? "#d9877a" : "#7aa8d9") : "#c8a84b";
+            o.push(p.shape === "round" ? `<circle cx="${f(p.x)}" cy="${f(p.y)}" r="${f(Math.min(p.w, p.h) / 2)}" fill="${fill}"/>` : `<rect x="${f(p.x - p.w / 2)}" y="${f(p.y - p.h / 2)}" width="${f(p.w)}" height="${f(p.h)}" fill="${fill}"/>`);
+            if (p.drill) o.push(`<circle cx="${f(p.x)}" cy="${f(p.y)}" r="${f(p.drill / 2)}" fill="#10151c"/>`);
+        }
+        for (const v of pcb.vias) o.push(`<circle cx="${f(v.x)}" cy="${f(v.y)}" r="${f(v.d / 2)}" fill="#9aa4b0"/><circle cx="${f(v.x)}" cy="${f(v.y)}" r="${f(v.drill / 2)}" fill="#10151c"/>`);
+        for (const side of ["B", "F"]) {
+            if (!show(side)) continue;
+            o.push(`<g fill="none" stroke="${side === "F" ? "#f5f5f5" : "#96bee6"}" stroke-width="0.15" stroke-linecap="round" stroke-linejoin="round">`);
+            for (const l of Pcb.silk(pcb, side)) o.push(`<polyline points="${pts(l)}"/>`);
+            o.push("</g>");
+        }
+        o.push(`<rect width="${W}" height="${H}" fill="none" stroke="#d8c85a" stroke-width="0.2"/>`);
+        o.push("</svg>");
+        return o.join("\n");
+    }
+
     // ---------------------------------------------------------------- ratsnest
     // For every net the joined groups are linked by a minimum spanning tree over the closest pad pairs
     static ratsnest(pcb, conn = Pcb.connectivity(pcb)) {
@@ -879,7 +922,8 @@ class Pcb {
             return false;
         };
         const work = new Map();
-        for (const t of pcb.tracks) if (t !== replace) work.set(t, { pts: t.pts.map(q => [q[0], q[1]]), fixed: new Set([...(anchored(t, 0) ? [0] : []), ...(anchored(t, t.pts.length - 1) ? ["end"] : [])]), moved: false, by: [] });
+        for (const t of pcb.tracks) if (t !== replace) work.set(t, { pts: t.pts.map(q => [q[0], q[1]]), own: null, fixed: new Set([...(anchored(t, 0) ? [0] : []), ...(anchored(t, t.pts.length - 1) ? ["end"] : [])]), moved: false, by: [] });
+        for (const wk of work.values()) wk.own = new Set(wk.pts);          // the vertices the user drew: the tidy-up never removes them
         const vw = new Map(pcb.vias.map(v => [v, { x: v.x, y: v.y, moved: false, movable: viaMovable(v) }]));
         const queue = starters.map(st => ({ ...st, self: null }));
         let steps = 0, blocked = null;
@@ -909,7 +953,7 @@ class Pcb {
                 const to = awayFrom(P, st.x, st.y, Dv);
                 const old = [st.x, st.y];
                 st.x = to[0]; st.y = to[1]; st.moved = true;
-                for (const [t, wk] of work) for (const i of [0, wk.pts.length - 1]) if (Math.hypot(wk.pts[i][0] - old[0], wk.pts[i][1] - old[1]) <= tolOf(v)) { wk.pts[i] = [to[0], to[1]]; wk.moved = true; wk.follow = true; }
+                for (const [t, wk] of work) for (const i of [0, wk.pts.length - 1]) if (Math.hypot(wk.pts[i][0] - old[0], wk.pts[i][1] - old[1]) <= tolOf(v)) { wk.pts[i] = [to[0], to[1]]; wk.own.add(wk.pts[i]); wk.moved = true; wk.follow = true; }
                 for (const l of ["F", "B"]) queue.push({ layer: l, pts: [[st.x, st.y], [st.x, st.y]], w: v.d, net: netOf.get(v), self: v, round: true });
                 for (const [t, wk] of work) if (wk.follow) { wk.follow = false; queue.push({ layer: t.layer, pts: wk.pts, w: t.w, net: netOf.get(t), self: t }); }
             }
@@ -967,7 +1011,9 @@ class Pcb {
                         if (d >= D - 1e-6) continue;
                         const isEnd = i === pts.length - 1, fixed = (i === 0 && wk.fixed.has(0)) || (isEnd && wk.fixed.has("end"));
                         if (fixed) { blocked = `an end of track ${t.id} is fixed on a pad, via or junction and sits inside the keep-out of the new copper`; break; }
+                        const was = wk.own.has(pts[i]);
                         pts[i] = awayFrom(P, pts[i][0], pts[i][1], D);
+                        if (was) wk.own.add(pts[i]);          // a pushed original stays a vertex of the track
                         movedAny = true;
                     }
                     if (blocked) break;
@@ -985,6 +1031,7 @@ class Pcb {
             while (again) {
                 again = false;
                 for (let i = 1; i + 1 < wk.pts.length; i++) {
+                    if (wk.own.has(wk.pts[i])) continue;
                     const a = wk.pts[i - 1], b = wk.pts[i + 1];
                     if (wk.by.every(pu => segDistP(pu.pts, a, b) >= pu.D - 1e-6 && !crosses(pu.pts, a, b))) { wk.pts.splice(i, 1); again = true; break; }
                 }

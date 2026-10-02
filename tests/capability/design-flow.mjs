@@ -12,7 +12,7 @@ const near = (a, b, tol) => Math.abs(a - b) <= tol * Math.max(1, Math.abs(b));
 const init = await rpc("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "check", version: "0" } });
 check("protocol", "initialize handshake", init.result.serverInfo.name === "browser-spice", init.result.instructions.slice(0, 60));
 const list = await rpc("tools/list", {});
-check("protocol", "tools/list exposes the six tools", list.result.tools.length === 6, list.result.tools.map(t => t.name).join(", "));
+check("protocol", "tools/list exposes the six SPICE tools and seven PCB tools", list.result.tools.length === 13, list.result.tools.map(t => t.name).join(", "));
 check("protocol", "unknown tool is a clean error", (await rpc("tools/call", { name: "nope", arguments: {} })).error !== undefined);
 check("protocol", "bad deck gives isError, not a crash", (await call("simulate", { netlist: "garbage\nR1 1" })).err === true);
 

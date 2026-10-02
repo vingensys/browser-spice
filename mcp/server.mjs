@@ -19,7 +19,7 @@ const fail = (id, code, message) => send({ jsonrpc: "2.0", id, error: { code, me
 function handle(msg) {
     const { id, method, params } = msg;
     if (method === "initialize") {
-        return reply(id, { protocolVersion: PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "browser-spice", version: "1.0.0" }, instructions: "Simulate SPICE decks with the Browser SPICE engine. Start with check_deck, then simulate. Values accept SI suffixes (1k, 4.7u, 2meg)." });
+        return reply(id, { protocolVersion: PROTOCOL, capabilities: { tools: {} }, serverInfo: { name: "browser-spice", version: "1.0.0" }, instructions: "Simulate SPICE decks with the Browser SPICE engine. Start with check_deck, then simulate. Values accept SI suffixes (1k, 4.7u, 2meg). For a PCB: pcb_create from a deck, pcb_route, pcb_check, pcb_render to look, pcb_export for Gerber." });
     }
     if (method === "notifications/initialized" || (typeof method === "string" && method.startsWith("notifications/"))) return;
     if (method === "ping") return reply(id, {});

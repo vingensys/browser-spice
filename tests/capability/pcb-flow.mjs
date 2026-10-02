@@ -1,0 +1,46 @@
+// An assistant designs a board end to end through the MCP PCB tools: deck -> footprints -> place -> route -> check ->
+// look at it -> Gerber, with the traps an engineer meets (pin order, no-ground net, a pour, a rule change).
+import { spawn, spawnSync } from "node:child_process";
+import readline from "node:readline";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+const srv = spawn("node", [new URL("../../mcp/server.mjs", import.meta.url).pathname], { stdio: ["pipe", "pipe", "inherit"] });
+const rl = readline.createInterface({ input: srv.stdout });
+const pending = new Map(); let nextId = 1;
+rl.on("line", l => { const m = JSON.parse(l); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+const rpc = (method, params) => new Promise(res => { const id = nextId++; pending.set(id, res); srv.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"); });
+const call = async (name, args) => { const r = await rpc("tools/call", { name, arguments: args }); const text = r.result.content[0].text; return r.result.isError ? { error: text } : JSON.parse(text); };
+let pass = 0, fail = 0; const row = (ok, s, d = "") => { ok ? pass++ : fail++; console.log((ok ? "PASS  " : "FAIL  ") + s + (ok ? "" : "\n        -> " + d)); };
+await rpc("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "c", version: "0" } });
+
+const deck = "Power stage\nVIN in 0 DC 12\nL1 in sw 100u\nM1 sw g 0 0 IRF540\nVG g 0 PULSE(0 10 0 20n 20n 5u 10u)\nD1 sw out 1N5819\nC1 out 0 100u\nRL out 0 50\nR1 g gg 100\n.end";
+const c = await call("pcb_create", { netlist: deck, packages: { C1: "radial", R1: "0805" } });
+row(c.parts === 8 && c.unrouted_connections >= 7, `boost power stage -> ${c.parts} footprints placed on ${c.board_mm.width} x ${c.board_mm.height} mm, ${c.unrouted_connections} connections to route`, JSON.stringify(c).slice(0, 200));
+const m1 = c.parts_list.find(p => p.ref === "M1");
+row(m1.footprint === "TO-220" && m1.nets.join() === "g,sw,GND", `the MOSFET is a TO-220 with its pins in package order G D S (${m1.nets})`, JSON.stringify(m1));
+const r = await call("pcb_route", { board_id: c.board_id });
+row(r.failed === 0, `auto-route: ${r.routed}/${r.total} connections, ${r.tracks} tracks, ${r.vias} vias in ${r.ms} ms`, JSON.stringify(r));
+let k = await call("pcb_check", { board_id: c.board_id });
+row(k.clean, "rule check clean after routing", JSON.stringify(k).slice(0, 300));
+const gp = await call("pcb_edit", { board_id: c.board_id, actions: [{ op: "pour", layer: "B", net: "0" }] });
+k = await call("pcb_check", { board_id: c.board_id });
+row(gp.applied === 1 && gp.results[0].pads_connected >= 3 && k.clean, `back-side ground pour (${gp.results[0].copper_mm2} mm2, ${gp.results[0].pads_connected} pads joined) and the board is still clean`, JSON.stringify([gp, k.counts]).slice(0, 300));
+const tight = await call("pcb_edit", { board_id: c.board_id, actions: [{ op: "rules", clearance: 1.5 }] });
+k = await call("pcb_check", { board_id: c.board_id });
+row(!k.clean && k.counts.clearance > 0, `tightening the clearance to 1.5 mm is caught (${k.counts.clearance} clearance violations)`, JSON.stringify(k.counts));
+const refused = await call("pcb_export", { board_id: c.board_id });
+row(/rule violation/.test(refused.error || ""), "export refuses a board that violates the rules", JSON.stringify(refused).slice(0, 200));
+await call("pcb_edit", { board_id: c.board_id, actions: [{ op: "rules", clearance: 0.2 }] });
+const svgFile = path.join(os.tmpdir(), `flow-${process.pid}.svg`);
+const rend = await call("pcb_render", { board_id: c.board_id, file: svgFile });
+row(fs.existsSync(svgFile) && /<svg/.test(fs.readFileSync(svgFile, "utf8")) && /fill-opacity/.test(fs.readFileSync(svgFile, "utf8")), `SVG picture written (${rend.svg_bytes} bytes) with tracks, pads and the pour`, JSON.stringify(rend));
+const dir = path.join(os.tmpdir(), `flow-gerber-${process.pid}`);
+const ex = await call("pcb_export", { board_id: c.board_id, name: "power", directory: dir });
+const z = spawnSync("unzip", ["-t", path.join(dir, "power-gerber.zip")], { encoding: "utf8" });
+row(ex.clean && ex.files.length >= 8 && (z.error || /No errors detected/.test(z.stdout)), `Gerber export: ${ex.files.length} files, ${ex.zip_bytes} byte ZIP${z.error ? " (unzip not installed)" : " passes unzip -t"}`, JSON.stringify(ex).slice(0, 300) + z.stdout);
+const gbl = fs.readFileSync(path.join(dir, "power-B_Cu.gbl"), "utf8");
+row((gbl.match(/G36\*/g) || []).length > 20 && (gbl.match(/G36\*/g) || []).length === (gbl.match(/G37\*/g) || []).length, `the back copper file carries the pour as ${(gbl.match(/G36\*/g) || []).length} regions`, gbl.slice(0, 200));
+fs.rmSync(dir, { recursive: true }); fs.unlinkSync(svgFile);
+console.log(`\n${pass} passed, ${fail} failed`);
+srv.stdin.end();

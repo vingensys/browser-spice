@@ -303,4 +303,6 @@ const TOOLS = [
     }
 ];
 
+TOOLS.push(...require("./pcb-tools.cjs").TOOLS);
+
 module.exports = { TOOLS, simulate, sweep, monteCarlo, checkDeck, compareNgspice, listModels };

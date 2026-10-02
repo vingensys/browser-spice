@@ -28,7 +28,7 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
     await test("tools/list describes every tool with a schema", async () => {
         const r = await rpc("tools/list", {});
         const names = r.result.tools.map(t => t.name).sort().join();
-        if (names !== "check_deck,compare_with_ngspice,list_models,monte_carlo,simulate,sweep") throw new Error(names);
+        if (!names.includes("simulate") || !names.includes("pcb_create")) throw new Error(names);
         if (!r.result.tools.every(t => t.description.length > 20 && t.inputSchema.type === "object")) throw new Error("schemas");
     });
     await test("operating point of a divider", async () => {
@@ -127,6 +127,131 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
             if (boost.operatingPoint.worst_deviation_percent_of_full_scale > 0.05 || boost.transient.worst_mean_deviation_percent_of_range > 1) throw new Error(JSON.stringify(boost).slice(0, 400));
         });
     }
+    // ---------------------------------------------------------------- PCB tools
+    const AMP = "amp\nVCC vcc 0 DC 12\nVIN in 0 SIN(0 0.01 1k)\nCIN in b 10u\nR1 vcc b 47k\nR2 b 0 10k\nRC vcc c 2.2k\nRE e 0 470\nCE e 0 100u\nQ1 c b e 2N2222\nCOUT c out 10u\nRL out 0 10k\n.end";
+    let board;
+    await test("tools/list now also offers the seven PCB tools", async () => {
+        const r = await rpc("tools/list", {});
+        const names = r.result.tools.map(t => t.name);
+        for (const n of ["pcb_create", "pcb_edit", "pcb_route", "pcb_check", "pcb_describe", "pcb_render", "pcb_export"]) if (!names.includes(n)) throw new Error("missing " + n);
+    });
+    await test("pcb_create turns a deck into placed footprints with nets (transistor in package order E B C)", async () => {
+        board = await call("pcb_create", { netlist: AMP, packages: { R1: "0805", R2: "0805", RC: "0805" } });
+        if (board.parts !== 11 || board.unrouted_connections < 10) throw new Error(JSON.stringify(board).slice(0, 300));
+        const q = board.parts_list.find(p => p.ref === "Q1"), r1 = board.parts_list.find(p => p.ref === "R1");
+        if (q.footprint !== "TO-92" || q.nets.join() !== "e,b,c") throw new Error("Q1 " + JSON.stringify(q));
+        if (r1.footprint !== "0805") throw new Error("R1 " + JSON.stringify(r1));
+        if (board.parts_list.find(p => p.ref === "R2").nets.join() !== "b,GND") throw new Error("ground should be shown as GND");
+    });
+    await test("pcb_route completes every connection and pcb_check is clean", async () => {
+        const r = await call("pcb_route", { board_id: board.board_id });
+        if (r.failed !== 0 || r.still_unrouted.length) throw new Error(JSON.stringify(r));
+        const k = await call("pcb_check", { board_id: board.board_id });
+        if (!k.clean) throw new Error(JSON.stringify(k).slice(0, 400));
+    });
+    await test("pcb_describe returns parts with pad nets, nets with pads, and tracks", async () => {
+        const d = await call("pcb_describe", { board_id: board.board_id, include: ["parts", "nets", "tracks", "pours"] });
+        if (!d.nets.GND || !d.nets.GND.includes("RE.2") || d.unrouted.length || !d.track_list.length || d.parts_list[0].pads.length < 2) throw new Error(JSON.stringify(d).slice(0, 300));
+    });
+    await test("pcb_edit is all-or-nothing: a failing action undoes the whole call, with the reason", async () => {
+        const before = (await call("pcb_describe", { board_id: board.board_id, include: [] })).tracks;
+        const r = await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "clear_routing" }, { op: "move", ref: "NOPE", x: 1, y: 1 }] });
+        if (!r.error === undefined && r.failed_at !== 1) throw new Error(JSON.stringify(r));
+        if (r.failed_at !== 1 || !/no part NOPE/.test(r.error) || !r.results[0].rolled_back) throw new Error(JSON.stringify(r));
+        if ((await call("pcb_describe", { board_id: board.board_id, include: [] })).tracks !== before) throw new Error("the routing was lost");
+    });
+    await test("pcb_edit: move a part, flip an SMD part, change a package and a rule; the rule check then sees the open connections", async () => {
+        const r = await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "move", ref: "RL", x: 40, y: 12, rot: 90 }, { op: "flip", ref: "R1" }, { op: "package", ref: "RE", package: "1206" }, { op: "rules", clearance: 0.25 }] });
+        if (r.applied !== 4 || r.board.rules_mm.clearance !== 0.25) throw new Error(JSON.stringify(r));
+        const k = await call("pcb_check", { board_id: board.board_id });
+        if (k.clean || !k.counts.unrouted) throw new Error("moving parts should leave connections to route: " + JSON.stringify(k.counts));
+        const bad = await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "flip", ref: "Q1" }] });
+        if (!/through-hole/.test(bad.error)) throw new Error(JSON.stringify(bad));
+        await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "rules", clearance: 0.2 }, { op: "clear_routing" }] });
+        const rr = await call("pcb_route", { board_id: board.board_id });
+        if (rr.failed) throw new Error(JSON.stringify(rr));
+    });
+    await test("pcb_edit track: 'shove' pushes another net's track aside, leaving the rules clean", async () => {
+        const b = await call("pcb_create", { netlist: "t\nV1 a 0 1\nV2 c 0 1\nR1 a b 1k\nR2 c d 1k\n.end", width: 40, height: 30, auto_place: false });
+        const id = b.board_id;
+        await call("pcb_edit", { board_id: id, actions: [{ op: "move", ref: "V1", x: 5, y: 8 }, { op: "move", ref: "V2", x: 10, y: 22 }, { op: "move", ref: "R1", x: 20, y: 6 }, { op: "move", ref: "R2", x: 20, y: 24 }] });
+        const d0 = await call("pcb_describe", { board_id: id, include: ["parts"] });
+        const pad = (ref, n) => d0.parts_list.find(p => p.ref === ref).pads[n - 1];
+        const a1 = pad("V1", 1), a2 = pad("R1", 1), c1 = pad("V2", 1), c2 = pad("R2", 1);
+        await call("pcb_edit", { board_id: id, actions: [{ op: "track", layer: "F", points: [[a1.x, a1.y], [a1.x, 14], [a2.x, 14], [a2.x, a2.y]], mode: "off" }] });
+        const r = await call("pcb_edit", { board_id: id, actions: [{ op: "track", layer: "F", points: [[c1.x, c1.y], [c1.x, 14.4], [c2.x, 14.4], [c2.x, c2.y]], mode: "shove" }] });
+        if (r.error || !(r.results[0].pushed_tracks > 0)) throw new Error(JSON.stringify(r).slice(0, 400));
+        const k = await call("pcb_check", { board_id: id });
+        const bad = Object.keys(k.counts).filter(t => ["clearance", "short", "edge"].includes(t));
+        if (bad.length) throw new Error(JSON.stringify(k.issues).slice(0, 300));
+    });
+    await test("pcb_edit track: 'walk' goes round a pad in the way (0/45/90 degrees), 'off' lets it through and the check says so", async () => {
+        const mk = async () => {
+            const b = await call("pcb_create", { netlist: "t\nV2 c 0 1\nR1 x y 1k\nR2 c d 1k\n.end", width: 40, height: 30, auto_place: false });
+            await call("pcb_edit", { board_id: b.board_id, actions: [{ op: "move", ref: "V2", x: 10, y: 22 }, { op: "move", ref: "R1", x: 17, y: 24.3 }, { op: "move", ref: "R2", x: 20, y: 24 }] });
+            const d = await call("pcb_describe", { board_id: b.board_id, include: ["parts"] });
+            return [b.board_id, d.parts_list.find(p => p.ref === "V2").pads[0], d.parts_list.find(p => p.ref === "R2").pads[0]];
+        };
+        const [id, from, to] = await mk();
+        const r = await call("pcb_edit", { board_id: id, actions: [{ op: "track", layer: "F", points: [[from.x, from.y], [to.x, to.y]], mode: "walk" }] });
+        if (r.error || r.results[0].points < 3) throw new Error(JSON.stringify(r).slice(0, 400));
+        const k = await call("pcb_check", { board_id: id });
+        if (Object.keys(k.counts).some(t => ["clearance", "short", "edge"].includes(t))) throw new Error(JSON.stringify(k.issues).slice(0, 300));
+        const [id2, f2, t2] = await mk();
+        await call("pcb_edit", { board_id: id2, actions: [{ op: "track", layer: "F", points: [[f2.x, f2.y], [t2.x, t2.y]], mode: "off" }] });
+        const k2 = await call("pcb_check", { board_id: id2 });
+        if (!(k2.counts.short || k2.counts.clearance)) throw new Error("a track straight through a pad should be reported: " + JSON.stringify(k2.counts));
+    });
+    await test("pcb_edit pour: a ground pour fills, joins the ground pads and reports what it cuts off", async () => {
+        const id = (await call("pcb_create", { netlist: AMP })).board_id;
+        const r = await call("pcb_edit", { board_id: id, actions: [{ op: "pour", layer: "B", net: "0" }] });
+        const z = r.results[0];
+        if (!z.ok || z.copper_mm2 < 300 || z.pads_connected < 3 || z.pads_cut_off.length) throw new Error(JSON.stringify(r));
+        await call("pcb_route", { board_id: id });
+        const k = await call("pcb_check", { board_id: id });
+        if (!k.clean) throw new Error(JSON.stringify(k).slice(0, 300));
+        const bad = await call("pcb_edit", { board_id: id, actions: [{ op: "pour", layer: "F", net: "nosuch" }] });
+        if (!/no pad/.test(bad.error)) throw new Error(JSON.stringify(bad));
+    });
+    await test("pcb_edit define_footprint: a user footprint is used by a part, with a clear error for a bad definition", async () => {
+        const id = (await call("pcb_create", { netlist: "f\nV1 a 0 1\nR1 a b 1k\nR2 b 0 1k\n.end" })).board_id;
+        const r = await call("pcb_edit", { board_id: id, actions: [{ op: "define_footprint", definition: "footprint WIDE\npad 1 -3 0 1.2 1.2\npad 2 3 0 1.2 1.2\nline -2 -1 2 -1 2 1 -2 1 -2 -1\n" }, { op: "package", ref: "R1", package: "user:WIDE" }] });
+        if (r.applied !== 2 || r.results[1].footprint !== "WIDE") throw new Error(JSON.stringify(r));
+        const bad = await call("pcb_edit", { board_id: id, actions: [{ op: "define_footprint", definition: "footprint X\npad 1 0" }] });
+        if (!/pad needs/.test(bad.error)) throw new Error(JSON.stringify(bad));
+    });
+    await test("pcb_create reads a KiCad schematic too", async () => {
+        const kicad = require("fs").readFileSync(path.join(__dirname, "kicad", "divider.kicad_sch"), "utf8");
+        const k = await call("pcb_create", { kicad });
+        if (k.parts !== 3 || !k.parts_list.some(p => p.nets.includes("mid"))) throw new Error(JSON.stringify(k).slice(0, 300));
+    });
+    await test("pcb_render gives an SVG (and can write it to a file)", async () => {
+        const r = await call("pcb_render", { board_id: board.board_id });
+        if (!/^<svg/.test(r.svg) || !/<polyline/.test(r.svg) || !/<circle/.test(r.svg)) throw new Error(r.svg.slice(0, 200));
+        const f = path.join(require("os").tmpdir(), `mcp-board-${process.pid}.svg`);
+        const w = await call("pcb_render", { board_id: board.board_id, layer: "B", file: f });
+        if (!require("fs").existsSync(f) || w.svg) throw new Error(JSON.stringify(w)); require("fs").unlinkSync(f);
+    });
+    await test("pcb_export writes Gerber / Excellon files and a valid ZIP; a board with violations is refused unless forced", async () => {
+        const dir = path.join(require("os").tmpdir(), `mcp-gerber-${process.pid}`);
+        const r = await call("pcb_export", { board_id: board.board_id, name: "amp", directory: dir });
+        const names = r.files.map(f => f.name);
+        for (const n of ["amp-F_Cu.gtl", "amp-B_Cu.gbl", "amp-Edge_Cuts.gm1", "amp.drl", "amp-F_Silkscreen.gto", "amp-F_Mask.gts"]) if (!names.includes(n)) throw new Error("missing " + n);
+        if (!r.clean || !/G04/.test(require("fs").readFileSync(path.join(dir, "amp-F_Cu.gtl"), "utf8"))) throw new Error(JSON.stringify(r));
+        const z = spawnSync("unzip", ["-t", path.join(dir, "amp-gerber.zip")], { encoding: "utf8" });
+        if (!z.error && !/No errors detected/.test(z.stdout)) throw new Error(z.stdout);
+        require("fs").rmSync(dir, { recursive: true });
+        const id = (await call("pcb_create", { netlist: AMP })).board_id;
+        await call("pcb_edit", { board_id: id, actions: [{ op: "move", ref: "R1", x: 10, y: 10 }, { op: "move", ref: "R2", x: 10, y: 10.5 }] });
+        const refused = await call("pcb_export", { board_id: id });
+        if (!/rule violation/.test(refused.error)) throw new Error(JSON.stringify(refused).slice(0, 200));
+        const forced = await call("pcb_export", { board_id: id, force: true, zip_base64: true });
+        if (forced.clean || !forced.zip_base64) throw new Error("force should export anyway");
+    });
+    await test("an unknown board id says what boards exist", async () => {
+        const r = await call("pcb_check", { board_id: "zzz" });
+        if (!/no board "zzz"/.test(r.error)) throw new Error(JSON.stringify(r));
+    });
     server.stdin.end();
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);
