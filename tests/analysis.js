@@ -186,6 +186,12 @@ window.analysisTests = async function () {
     ok("an empty sheet has nothing to export", Exporter.renderImage(editor) === null && Exporter.bomCsv(editor).split("\r\n").filter(Boolean).length === 1);
 
 
+    // ======================================================== library parts imported without a .model card keep their polarity
+    clear();
+    SchematicImporter.import(editor, "pol\nV1 in 0 12\nM1 d g in in IRF9540\nM2 d2 g2 0 0 IRF540\nQ1 c b e BC557\nQ2 c2 b2 e2 2N2222\nR1 d 0 1k\nR2 g 0 1k\nR3 d2 in 1k\nR4 g2 in 1k\nR5 c 0 1k\nR6 b 0 1k\nR7 e in 1k\nR8 c2 in 1k\nR9 b2 in 1k\nR10 e2 0 1k\n.end");
+    ok("a library P-channel MOSFET with no card is placed as a PMOS (not an N-channel stand-in)", byName("M1") && byName("M1").type === "PMOS" && byName("M2").type === "NMOS", editor.components.map(c => c.name + ":" + c.type));
+    ok("a library PNP with no card is placed as a PNP", byName("Q1").type === "BJT_PNP" && byName("Q2").type === "BJT_NPN", editor.components.map(c => c.name + ":" + c.type));
+
     // ======================================================== behavioural sources in the schematic
     clear();
     SchematicImporter.import(editor, "bsrc\nV1 in 0 2\nR1 in 0 1k\nB1 out 0 V = 3*v(in) + v(in,0)*0.5\nR2 out 0 10k\nB2 x 0 I = -v(out)/1k\nR3 x 0 1k\n.end");

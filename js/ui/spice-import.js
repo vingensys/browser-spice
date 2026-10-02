@@ -219,7 +219,7 @@ class SchematicImporter {
             }
             case "Q": {
                 const m = deck.models[e.model];
-                const type = m && m.type === "pnp" ? "BJT_PNP" : "BJT_NPN";
+                const type = m ? (m.type === "pnp" ? "BJT_PNP" : "BJT_NPN") : (typeof SIM_MODELS !== "undefined" && SIM_MODELS.BJT_PNP && SIM_MODELS.BJT_PNP[e.model.toUpperCase()] ? "BJT_PNP" : "BJT_NPN");    // no card: the built-in library knows its own polarity
                 return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.bjtParams(m) : undefined } };
             }
             case "B": {
@@ -248,7 +248,7 @@ class SchematicImporter {
             }
             case "M": {
                 const m = deck.models[e.model];
-                const type = m && m.type === "pmos" ? "PMOS" : "NMOS";
+                const type = m ? (m.type === "pmos" ? "PMOS" : "NMOS") : (typeof SIM_MODELS !== "undefined" && SIM_MODELS.PMOS && SIM_MODELS.PMOS[e.model.toUpperCase()] ? "PMOS" : "NMOS");    // no card: the built-in library knows its own polarity
                 if (e.nodes.length > 3 && String(e.nodes[3]).toLowerCase() === String(e.nodes[2]).toLowerCase()) base.nodes = e.nodes.slice(0, 3);     // body on the source: leave the B pin open
                 return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? SpiceParser.mosParams(m, e.w, e.l, e) : undefined } };
             }
