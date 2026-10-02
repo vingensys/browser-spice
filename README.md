@@ -180,6 +180,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
 - `tests/fuzz.test.js` generates seeded random circuits (resistor networks with diodes, BJTs incl. Gummel-Poon, MOSFETs, capacitors, an inductor, sine / pulse and behavioural sources) and compares engine and ngspice on operating point, transient and AC. `FUZZ_N=500 FUZZ_SEED=7 node tests/fuzz.test.js` runs more; `FUZZ_PRINT=<seed>` prints one circuit's deck. It found several engine problems, now fixed (numerical damping of LC resonances, singular inductor / source loops, `log()` and `^` semantics, Newton failures treated as fatal).
 - `tests/noise.ngspice.test.js`, `tests/tf.ngspice.test.js`, `tests/measure.ngspice.test.js` noise (incl. flicker), `.tf` and 21 `.measure`s against ngspice.
 - `tests/mcp.test.js` the MCP server over its stdio protocol.
+- `tests/capability/` (`npm run capability`) an assistant-style check of the whole engine through the MCP server: design-flow circuits against analytic values, power electronics and library parts against native ngspice, and decks exported by the web app run back through MCP and ngspice.
 - `tests/pcb.shove.test.js` push-and-shove invariants on random boards.
 - `tests/pcb.test.js` the PCB kernel: footprints (built-in, user, KiCad), pours, ratsnest, autorouter, DRC, Gerber / Excellon / ZIP.
 - `tests/kicad.test.js` KiCad schematic / netlist import.

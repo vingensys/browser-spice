@@ -706,6 +706,7 @@ class NetlistExtractor {
         let uses555 = false;
         const userSubckts = new Map();
         const thyristors = new Map();
+        const bodyModels = [];
 
         for (const e of els) {
             const name = NetlistExtractor.spiceName(e);
@@ -767,7 +768,7 @@ class NetlistExtractor {
                     if (p.bodyDiode) {
                         const bd = p.bodyDiode, dm = `BD_${name}`;
                         lines.push(e.pol > 0 ? `D${name}_BD ${n[2]} ${n[1]} ${dm}` : `D${name}_BD ${n[1]} ${n[2]} ${dm}`);
-                        extra.push(`.model ${dm} D(IS=${f(bd.is)} N=${f(bd.n === undefined ? 1 : bd.n)}${bd.rs ? ` RS=${f(bd.rs)}` : ""})`);
+                        bodyModels.push(`.model ${dm} D(IS=${f(bd.is)} N=${f(bd.n === undefined ? 1 : bd.n)}${bd.rs ? ` RS=${f(bd.rs)}` : ""})`);
                     }
                     break;
                 case "OPAMP": {
@@ -896,6 +897,7 @@ class NetlistExtractor {
         const rails = extra.filter(l => !l.startsWith(".model")), swModels = extra.filter(l => l.startsWith(".model"));
         if (rails.length) lines.push("", "* op-amp supply rails", ...rails);
         if (swModels.length) lines.push("", "* relay contact models", ...swModels);
+        if (bodyModels.length) lines.push("", "* MOSFET body diodes", ...bodyModels);
 
         if (models.size) {
             lines.push("", "* device models");
