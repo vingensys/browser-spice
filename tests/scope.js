@@ -32,11 +32,11 @@ window.scopeTests = async function () {
     const wire = editor.wires.find(w => w.route.length > 2);
     const seg = (() => { let b = [wire.route[0], wire.route[1]]; for (let i = 0; i < wire.route.length - 1; i++) if (Math.hypot(wire.route[i + 1].x - wire.route[i].x, wire.route[i + 1].y - wire.route[i].y) > Math.hypot(b[1].x - b[0].x, b[1].y - b[0].y)) b = [wire.route[i], wire.route[i + 1]]; return b; })();
     const mid = { x: (seg[0].x + seg[1].x) / 2, y: (seg[0].y + seg[1].y) / 2 };
-    click(mid.x, mid.y + 9);                                          // not quite on the wire: still attaches
+    click(mid.x, mid.y + 6 / editor.zoom);                            // a few pixels off the wire: still attaches
     ok("a click near a wire (not exactly on it) places a voltage probe", editor.probes.length === nProbes + 1 && editor.probes[nProbes].anchor && editor.probes[nProbes].anchor.type === "wire", editor.probes.length);
     ok("the probe tool stays armed for the next one", editor.tool === "vProbe");
     const pin = editor.getTerminalPosition(editor.components.find(c => c.type === "BJT_NPN"), editor.getTerminals(editor.components.find(c => c.type === "BJT_NPN")).find(t => t.name === "E"));
-    click(pin.x + 8, pin.y + 6);
+    click(pin.x + 8 / editor.zoom, pin.y + 6 / editor.zoom);
     ok("a click near a pin places one on the pin", editor.probes.length === nProbes + 2 && editor.probes[nProbes + 1].anchor.type === "terminal", editor.probes[nProbes + 1] && editor.probes[nProbes + 1].anchor);
     const before = editor.probes.length; notices.length = 0;
     click(30, 30);
