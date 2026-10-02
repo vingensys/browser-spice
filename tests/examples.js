@@ -136,6 +136,14 @@ window.exampleTests = function () {
         near(avg, 9.7, 0.6, "Vout");
     });
 
+    check("buck-closed-loop: the loop regulates to 5 V, and the saved probes come with it", () => {
+        const { info, sim } = load("buck-closed-loop");
+        if (editor.probes.length !== 2 || !editor.probes.every(p => p.anchor)) throw new Error("expected two anchored probes, got " + JSON.stringify(editor.probes.map(p => p.label)));
+        const r = sim.transient({ tStop: 1.45e-3, tStep: 50e-9, uic: true });
+        const t = tail(r.nodeHistories[nodeOf(info, "RLOAD", "1")], 0.1);
+        near(t.reduce((a, b) => a + b, 0) / t.length, 5, 0.05, "Vout");
+    });
+
     check("psu: bridge + reservoir + 7805 give a steady 5 V", () => {
         const { info, sim } = load("psu");
         const r = sim.transient({ tStop: 0.08, tStep: 1e-4, uic: true });

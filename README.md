@@ -52,7 +52,7 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 - **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
 - **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
-- **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
+- **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, a closed-loop buck converter (type III compensator, probes on Vout and the error amplifier), power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
 
 **Probes** have their own list (the **PROBES** pane, via the probe buttons or Tool > Voltage / Current Probe). They stay armed so you can drop several; clicks only need to be near a wire or pin, and a current probe goes on a part or on the wire right next to it. Double-click a probe to rename it, pick its trace colour, or set it to "live only" (shown on the sheet but not plotted).
 

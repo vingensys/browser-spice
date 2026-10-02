@@ -9,6 +9,7 @@ Editor and instruments
 Engine (all cross-checked against ngspice)
 - Behavioural B sources, Gummel-Poon BJT, level-1 MOSFET with body effect and capacitances, JFET depletion capacitances.
 - Noise (thermal, shot, flicker), `.tf`, `.measure`, sensitivity.
+- New example: closed-loop buck converter (12 V to 5 V, IRF9540, type III compensator, input feed-forward) with saved probes; it checks the regulation and matches ngspice. ERC no longer reports a behavioural voltage source's output as having no DC path to ground.
 - Fix: importing a SPICE deck whose MOSFET / BJT names a built-in library part but has no `.model` card (e.g. `IRF9540`, `BC557`) now keeps the part's polarity; it used to place an N-channel / NPN and substitute the default model (found by importing a buck converter into the app).
 - Fixes found by the random-circuit test: LC damping, singular DC loops, `log` / `^` semantics, Newton robustness.
 

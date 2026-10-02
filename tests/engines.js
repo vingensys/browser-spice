@@ -60,6 +60,7 @@ window.engineTests = async function () {
         "scr-lamp": { tol: { op: 0.05, tran: 0.06 }, opts: { skipOp: true } }, // behavioural latch vs the exact switching instant
         "ripple-counter": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },   // master-slave macromodel vs the exact-edge flip-flop
         "logic-analyser": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },
+        "buck-closed-loop": { tol: { op: 0.01, tran: 0.15 } },        // sample-by-sample rms of the 200 kHz switch node is dominated by edge timing (about 10 %); the means agree to 0.4 %
         "boost": { tol: { op: 0.01, tran: 0.2 } }                        // switching ripple is phase sensitive
     };
     for (const ex of EXAMPLES) {

@@ -443,6 +443,17 @@ const EXAMPLES = [
             b.wire(c, "2", g, "1"); b.wire(rl, "2", g, "1"); b.wire(vg, "1", g, "1"); b.wire(vin, "1", g, "1");
             b.vprobe(d, "2", "V(out)"); b.vprobe(m, "D", "V(sw)");
         }
+    },
+    {
+        id: "buck-closed-loop",
+        name: "Buck converter, closed loop (12 V to 5 V)",
+        note: "Voltage-mode PWM buck (IRF9540 high side, 1N5819, 47 µH, 22 µF) with a type III compensator and input-voltage feed-forward. Soft-starts to 5 V, then a 0.5 A load step at 1.5 ms and its release at 2.5 ms. Run Graph > Analogue Analysis (3.5 ms; a few seconds): Vout and the error amplifier are probed. About 211 mV droop on the load step.",
+        settings: { tStop: "3.5m", tStep: "50n" },
+        design: EXAMPLE_BUCK_DESIGN,
+        build(b) {
+            const d = JSON.parse(JSON.stringify(EXAMPLE_BUCK_DESIGN));
+            b.ed.components = d.components; b.ed.wires = d.wires; b.ed.probes = d.probes; b.ed.nextId = d.nextId;
+        }
     }
 ];
 
@@ -491,6 +502,9 @@ function loadExampleById(editor, id) {
             if (input) input.value = v;
         }
     }
+
+    // a design-based example also carries its run options (uic, integration method)
+    if (ex.design && ex.design.settings && typeof doc !== "undefined" && doc) doc.applySettings(ex.design.settings);
 
     // push the example's suggested run settings into the toolbar
     for (const [key, value] of Object.entries(ex.settings || {})) {

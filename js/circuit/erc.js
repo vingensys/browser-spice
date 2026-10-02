@@ -176,6 +176,7 @@ class ErcChecker {
             switch (el.kind) {
                 case "R": case "L": case "V": case "SW": case "FUSE": join(el.nodes[0], el.nodes[1]); break;
                 case "E": join(el.nodes[0], el.nodes[1]); break;
+                case "BSRC": if (el.params && el.params.mode !== "I") join(el.nodes[0], el.nodes[1]); break;       // a behavioural voltage source fixes its output against its minus pin
                 case "D": case "Q": case "J": case "REG": case "SCR": case "TRIAC": all(el); break;
                 case "M": join(el.nodes[1], el.nodes[2]); break;                      // the gate is insulated
                 case "T": join(el.nodes[0], el.nodes[1]); join(el.nodes[2], el.nodes[3]); break;

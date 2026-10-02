@@ -62,7 +62,7 @@ try {
         ]);
         total += result.total; failed += result.failed;
         console.log(`${result.failed ? "FAIL" : "ok  "} ${name.padEnd(12)} ${result.total - result.failed}/${result.total}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
-        for (const f of result.failures || []) console.log(`       - ${f.name}${f.extra !== undefined ? ` ${JSON.stringify(f.extra).slice(0, 300)}` : ""}${f.error ? ` ${f.error}` : ""}`);
+        for (const f of result.failures || []) console.log(`       - ${f.name !== undefined ? f.name : f.id}${f.extra !== undefined ? ` ${JSON.stringify(f.extra).slice(0, 300)}` : ""}${f.error ? ` ${f.error}` : ""}${f.name === undefined && f.tran !== undefined ? ` op ${f.op}% tran ${f.tran}%` : ""}`);
     }
     // offline: a visited copy of the app keeps working without a network (service worker)
     {
