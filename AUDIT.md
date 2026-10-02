@@ -63,8 +63,7 @@ against Proteus / ngspice, **P3** polish.
 
 ## 6. Engineering
 - ~~Tests are run by hand; there is no CI.~~ **Done**: GitHub Actions runs the node and the headless-Chrome suites on every push.
-- The ngspice WebAssembly engine cannot be interrupted, so a malformed deck freezes the page. Invalid values are now
-  refused before sending, but a pathological circuit can still hang it. (P2)
+- ~~The ngspice WebAssembly engine cannot be interrupted.~~ **Done**: it runs in a module worker; Cancel (or Esc) terminates it and the next run starts a fresh one. (When the page is not served over http(s) it falls back to the main thread.)
 - Large circuits: the sparse solver is fast (about 2 ms per step at 1,100 unknowns), but the editor's router and
   redraw have not been profiled beyond a few hundred parts. (P3)
 

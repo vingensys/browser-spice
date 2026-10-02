@@ -118,7 +118,9 @@ class SimRunner {
         if (!NgspiceBackend.simulation) this.toast("Loading ngspice (first use only)…", "info");
         const t = this.settings().temp;
         const deck = NetlistExtractor.toSpice(info.elements, { analysis: (t !== 27 ? `.temp ${t}\n` : "") + analysis });
-        const res = await NgspiceBackend.run(deck);
+        const busy = this.busyShow("ngspice");
+        let res;
+        try { res = await NgspiceBackend.run(deck); } finally { busy.done(); }
         const problems = NgspiceBackend.problems(res);
         if (problems.length) this.toast(`ngspice: ${problems[0]}`, "warn");
         return res;

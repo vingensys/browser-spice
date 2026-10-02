@@ -398,6 +398,26 @@ window.analysisTests = async function () {
     SubcktLibrary.clear(); SubcktLibrary.defs.clear(); delete PartLib.defs["SUB:OAMP"]; delete SYMBOL_DEFS["SUB:OAMP"];
     graph.hide();
 
+
+    // ======================================================== ngspice on a worker
+    ok("ngspice can run on a worker in this page", NgspiceBackend.workerAvailable());
+    const ngQuick = await NgspiceBackend.run("rc\nV1 in 0 DC 5\nR1 in out 1k\nR2 out 0 1k\n.op\n.end\n");
+    ok("a deck runs on the worker and returns its data", NgspiceBackend.worker !== null && ngQuick.data.some(d => /out/.test(d.name) && Math.abs(d.values[0] - 2.5) < 1e-6), ngQuick.data.map(d => d.name));
+    const runaway = NgspiceBackend.run("rc\nV1 in 0 PULSE(0 1 0 1n 1n 1u 2u)\nR1 in out 1k\nC1 out 0 1n\n.tran 1p 10\n.end\n");
+    await wait(400);
+    const tc = performance.now(); NgspiceBackend.cancel();
+    let cwhy = ""; try { await runaway; } catch (e) { cwhy = e.message; }
+    ok("a runaway ngspice run is cancelled at once and the page stays alive", cwhy === "Cancelled" && performance.now() - tc < 500 && NgspiceBackend.worker === null, cwhy);
+    const ngAgain = await NgspiceBackend.run("rc\nV1 in 0 DC 3\nR1 in out 1k\nR2 out 0 2k\n.op\n.end\n");
+    ok("the next run starts a fresh worker and works", ngAgain.data.some(d => /out/.test(d.name) && Math.abs(d.values[0] - 2) < 1e-6));
+    // through the app: the solver option + Cancel button
+    clear(); loadExampleById(editor, "rc-ladder");
+    document.getElementById("simEngine").value = "ngspice"; document.getElementById("simTstop").value = "50m"; document.getElementById("simTstep").value = "100u";
+    await runner.runTransient(); await wait(200);
+    ok("the Simulate button with the ngspice solver plots through the worker", plotter.data && plotter.data.series.length === 3 && /ngspice/.test(document.getElementById("plotTitle").textContent), document.getElementById("plotTitle").textContent);
+    document.getElementById("simEngine").value = "builtin";
+    graph.hide();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

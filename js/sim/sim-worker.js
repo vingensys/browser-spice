@@ -51,6 +51,7 @@ class SimWorker {
     }
 
     static cancel() {
+        if (typeof NgspiceBackend !== "undefined" && NgspiceBackend.cancel()) return true;
         const job = SimWorker.job;
         if (!job) return false;
         SimWorker.job = null;

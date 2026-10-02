@@ -11,9 +11,54 @@ const NGSPICE_LOCAL = (typeof document !== "undefined" && document.currentScript
     ? new URL("../../vendor/ngspice/eecircuit-engine.mjs", document.currentScript.src).href
     : null;
 
+const NGSPICE_WORKER = (typeof document !== "undefined" && document.currentScript)
+    ? new URL("ngspice-worker.js", document.currentScript.src).href
+    : null;
+
 class NgspiceBackend {
     static simulation = null;
     static loading = null;
+    static worker = null;
+    static job = null;
+    static workerFailed = false;
+
+    // in a browser page served over http(s): run ngspice in a module worker (cancellable)
+    static workerAvailable() {
+        return typeof Worker !== "undefined" && !!NGSPICE_WORKER && !NgspiceBackend.workerFailed && typeof location !== "undefined" && /^https?:/.test(location.protocol);
+    }
+
+    static workerRun(deck) {
+        return new Promise((resolve, reject) => {
+            if (NgspiceBackend.job) { reject(new Error("ngspice is already running.")); return; }
+            let w = NgspiceBackend.worker;
+            if (!w) {
+                try { w = NgspiceBackend.worker = new Worker(`${NGSPICE_WORKER}?b=${Date.now()}`, { type: "module" }); }
+                catch (e) { NgspiceBackend.workerFailed = true; reject(Object.assign(e, { workerFailed: true })); return; }
+            }
+            const job = NgspiceBackend.job = { resolve, reject };
+            w.onmessage = (e) => {
+                if (NgspiceBackend.job !== job) return;
+                NgspiceBackend.job = null;
+                if (e.data.error !== undefined) reject(new Error(e.data.error)); else resolve({ ...e.data.res, log: e.data.log, errors: e.data.errors });
+            };
+            w.onerror = (e) => {
+                if (NgspiceBackend.job !== job) return;
+                NgspiceBackend.job = null; NgspiceBackend.worker = null; NgspiceBackend.workerFailed = true;
+                reject(Object.assign(new Error(e.message || "The ngspice worker could not start."), { workerFailed: true }));
+            };
+            w.postMessage({ deck });
+        });
+    }
+
+    // stop a running ngspice job (terminates its worker; the next run starts a fresh one)
+    static cancel() {
+        const job = NgspiceBackend.job;
+        if (!job) return false;
+        NgspiceBackend.job = null;
+        if (NgspiceBackend.worker) { NgspiceBackend.worker.terminate(); NgspiceBackend.worker = null; }
+        job.reject(new Error("Cancelled"));
+        return true;
+    }
 
     static async load() {
         if (NgspiceBackend.simulation) return NgspiceBackend.simulation;
@@ -48,6 +93,19 @@ class NgspiceBackend {
         // card makes it spin forever and freezes the page, so refuse such decks up front
         const bad = deck.match(/^.*\b(undefined|NaN|Infinity)\b.*$/m);
         if (bad) throw new Error(`The exported netlist has an invalid value, not sent to ngspice: ${bad[0].trim()}`);
+        if (NgspiceBackend.workerAvailable()) {
+            try {
+                const res = await NgspiceBackend.workerRun(deck);
+                if (!res || !res.data || !res.data.length) {
+                    const fatal = (res.log || []).filter(l => /error|fatal|abort/i.test(l)).slice(0, 2).join("; ");
+                    throw new Error("ngspice produced no data" + (((res.errors || []).length || fatal) ? `: ${((res.errors || []).slice(0, 2).join("; ") || fatal)}` : "."));
+                }
+                res.log = (res.log || []).filter(l => l.trim());
+                return res;
+            } catch (e) {
+                if (!e.workerFailed) throw e;               // otherwise fall back to the main thread below
+            }
+        }
         const sim = await NgspiceBackend.load();
         const log = [];
         const saved = { error: console.error, warn: console.warn, log: console.log };
