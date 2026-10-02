@@ -1,0 +1,15 @@
+BJT with current-crowded base resistance (RBM, IRB) and bias-dependent transit time (XTF, VTF, ITF)
+VCC vcc 0 DC 12
+VIN in 0 SIN(0 0.05 20k) AC 0.05
+CIN in b 10u
+R1 vcc b 15k
+R2 b 0 3.3k
+RC vcc c 330
+RE e 0 22
+CE e 0 220u
+Q1 c b e QX
+.model QX NPN(IS=1e-14 BF=150 BR=3 VAF=70 IKF=0.05 RB=120 RBM=20 IRB=0.2m RC=2 RE=0.5 CJE=10p CJC=5p TF=0.5n XTF=4 VTF=3 ITF=0.05 TR=15n)
+.op
+.ac dec 10 100 500Meg
+.tran 2u 400u
+.end

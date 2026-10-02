@@ -1,0 +1,10 @@
+Saturating switch with a large XTF: the transit time grows with the collector-base bias
+VCC vcc 0 DC 5
+VIN in 0 PULSE(0 5 1u 5n 5n 4u 10u)
+RB in b 2.2k
+RC vcc c 220
+Q1 c b 0 QS
+.model QS NPN(IS=2e-14 BF=120 BR=2 VAF=60 IKF=0.1 CJE=6p CJC=3p TF=0.3n XTF=8 VTF=2 ITF=0.08 TR=30n RB=60 RBM=15 IRB=1m)
+.op
+.tran 5n 12u
+.end

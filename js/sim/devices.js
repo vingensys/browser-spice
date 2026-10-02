@@ -699,9 +699,11 @@ class BJT extends NonlinearElement {
         this.p = Object.assign({
             is: 1e-16, bf: 100, br: 1, nf: 1, nr: 1, vaf: 0, var: 0, ikf: 0, ikr: 0, ise: 0, ne: 1.5, isc: 0, nc: 2, rb: 0, rc: 0, re: 0,
             cje: 0, vje: 0.75, mje: 0.33, cjc: 0, vjc: 0.75, mjc: 0.33, tf: 0, tr: 0, fc: 0.5,
-            eg: 1.11, xti: 3, xtb: 0, kf: 0, af: 1
+            eg: 1.11, xti: 3, xtb: 0, kf: 0, af: 1, xtf: 0, vtf: 0, itf: 0, irb: 0
         }, p);
+        if (this.p.rbm === undefined || this.p.rbm > this.p.rb) this.p.rbm = this.p.rb;       // RBM defaults to RB (no bias dependence)
         this.p0 = this.p;
+        this.qbLast = 1; this.ibLast = 0;
         this.setTemperature(27);
         this.vbe = 0;
         this.vbc = 0;
@@ -784,17 +786,42 @@ class BJT extends NonlinearElement {
         };
     }
 
-    // B-E and B-C stored charge (NPN-equivalent coordinates) and capacitance dQ/dV:
-    // depletion + diffusion (transit time * junction current)
+    // B-E and B-C stored charge (NPN-equivalent coordinates), capacitance dQ/dV and, for B-E, the transcapacitance
+    // dQbe/dVbc: depletion + diffusion (transit time * junction current). The transit time grows with bias as in
+    // SPICE3 / ngspice: TF * (1 + XTF * exp(Vbc / 1.44 VTF) * (If / (If + ITF))^2), and the charge is scaled by qb.
     charges(vbe, vbc, m) {
-        const { cje, vje, mje, cjc, vjc, mjc, tf, tr, fc, is } = this.p;
+        const { cje, vje, mje, cjc, vjc, mjc, tf, tr, fc, is, xtf, vtf, itf } = this.p;
         const iF = is * (safeExp(vbe / this.vtf) - 1);
         const iR = is * (safeExp(vbc / this.vtr) - 1);
+        let argtf = 0, arg2 = 0, arg3 = 0;
+        if (tf > 0 && vbe > 0 && xtf) {
+            argtf = xtf;
+            const vinv = vtf ? 1 / (1.44 * vtf) : 0;
+            if (vtf) argtf *= safeExp(vbc * vinv);
+            arg2 = argtf;
+            if (itf) { const t = iF / (iF + itf); argtf *= t * t; arg2 = argtf * (3 - 2 * t); }
+            arg3 = iF * argtf * vinv;
+        }
+        const iFmod = (iF * (1 + argtf)) / m.qb;
         return [
-            // the forward transit charge is scaled by the base charge qb (as in SPICE3 with XTF = 0)
-            { q: depletionCharge(vbe, cje, vje, mje, fc) + (tf * iF) / m.qb, c: depletionCap(vbe, cje, vje, mje, fc) + (tf * (m.gF - (iF * m.dqbe) / m.qb)) / m.qb },
-            { q: depletionCharge(vbc, cjc, vjc, mjc, fc) + tr * iR, c: depletionCap(vbc, cjc, vjc, mjc, fc) + tr * m.gR }
+            { q: depletionCharge(vbe, cje, vje, mje, fc) + tf * iFmod,
+              c: depletionCap(vbe, cje, vje, mje, fc) + (tf * (m.gF * (1 + arg2) - iFmod * m.dqbe)) / m.qb,
+              cx: (tf * (arg3 - iFmod * m.dqbc)) / m.qb },
+            { q: depletionCharge(vbc, cjc, vjc, mjc, fc) + tr * iR, c: depletionCap(vbc, cjc, vjc, mjc, fc) + tr * m.gR, cx: 0 }
         ];
+    }
+
+    // base resistance with current crowding (IRB) and the base-charge dependence (RB - RBM modulated by 1/qb), as in
+    // SPICE3: it follows the previous iteration's base current and qb
+    baseResistance() {
+        const { rb, rbm, irb } = this.p;
+        if (!(rb > 0)) return 0;
+        const rpr = rbm, rpi = rb - rbm;
+        if (rpi <= 0) return rb;
+        if (!(irb > 0)) return rpr + rpi / this.qbLast;
+        const x = Math.max(Math.abs(this.ibLast) / irb, 1e-9);
+        const z = (-1 + Math.sqrt(1 + 14.59025 * x)) / (2.4317 * Math.sqrt(x)), t = Math.tan(z);
+        return rpr + (3 * rpi * (t - z)) / (z * t * t);
     }
 
     capacitances(vbe, vbc, m) {
@@ -805,7 +832,7 @@ class BJT extends NonlinearElement {
         const [b, c, e] = this.nn;
         const p = this.pol;
         const rp = this.p;
-        if (rp.rb > 0) ctx.sys.addG(this.n[0], b, 1 / rp.rb);
+        if (rp.rb > 0) { this.rbb = this.baseResistance(); ctx.sys.addG(this.n[0], b, 1 / this.rbb); }
         if (rp.rc > 0) ctx.sys.addG(this.n[1], c, 1 / rp.rc);
         if (rp.re > 0) ctx.sys.addG(this.n[2], e, 1 / rp.re);
 
@@ -820,6 +847,7 @@ class BJT extends NonlinearElement {
         const m = this.eval(vbe, vbc);
         this.ic = p * m.ic;
         this.ib = p * m.ib;
+        this.qbLast = m.qb; this.ibLast = m.ib;
 
         // terminal order: B, C, E.  Derivatives w.r.t. (vbe, vbc) -> node voltages.
         const dB = [m.dIb_dbe, m.dIb_dbc];
@@ -850,11 +878,15 @@ class BJT extends NonlinearElement {
             const ch = this.charges(vbe, vbc, m);
             [[b, e, vbe], [b, c, vbc]].forEach(([n1, n2, vnpn], i) => {
                 const st = this.cs[i];
-                const geq = kk * ch[i].c;
+                const geq = kk * ch[i].c, gx = kk * ch[i].cx;
                 // current in NPN coordinates; terminal current flips sign for PNP
                 const iAct = p * (kk * (ch[i].q - st.qPrev) - (trap ? st.iPrev : 0));
-                const ieqc = iAct - geq * (p * vnpn);
+                let ieqc = iAct - geq * (p * vnpn);
                 ctx.sys.addG(n1, n2, geq);
+                if (gx) {                                   // dQbe / dVbc: a current b -> e driven by V(b) - V(c)
+                    ieqc -= p * gx * vbc;
+                    ctx.sys.add(b, b, gx); ctx.sys.add(b, c, -gx); ctx.sys.add(e, b, -gx); ctx.sys.add(e, c, gx);
+                }
                 ctx.sys.rhs(n1, -ieqc);
                 ctx.sys.rhs(n2, ieqc);
                 st.kk = kk;
@@ -867,7 +899,7 @@ class BJT extends NonlinearElement {
         const [b, c, e] = this.nn, rp = this.p;
         const out = [{ p: c, n: e, psd: 2 * SIM.Q * Math.abs(this.ic), label: "collector shot" }, { p: b, n: e, psd: 2 * SIM.Q * Math.abs(this.ib), label: "base shot" }];
         if (rp.kf > 0) out.push({ p: b, n: e, psd: 0, flicker: rp.kf * Math.pow(Math.abs(this.ib), rp.af === undefined ? 1 : rp.af), label: "flicker" });
-        if (rp.rb > 0) out.push({ p: this.n[0], n: b, psd: 4 * kT / rp.rb, label: "rb thermal" });
+        if (rp.rb > 0) out.push({ p: this.n[0], n: b, psd: 4 * kT / (this.rbb || rp.rb), label: "rb thermal" });
         if (rp.rc > 0) out.push({ p: this.n[1], n: c, psd: 4 * kT / rp.rc, label: "rc thermal" });
         if (rp.re > 0) out.push({ p: this.n[2], n: e, psd: 4 * kT / rp.re, label: "re thermal" });
         return out;
@@ -875,19 +907,19 @@ class BJT extends NonlinearElement {
 
     stampAC(ac, omega) {
         const rp = this.p;
-        if (rp.rb > 0) ac.addY(this.n[0], this.nn[0], 1 / rp.rb, 0);
+        if (rp.rb > 0) ac.addY(this.n[0], this.nn[0], 1 / (this.rbb || rp.rb), 0);
         if (rp.rc > 0) ac.addY(this.n[1], this.nn[1], 1 / rp.rc, 0);
         if (rp.re > 0) ac.addY(this.n[2], this.nn[2], 1 / rp.re, 0);
         this.stampACJacobian(ac);
         if (!this.hasCaps) return;
         const [b, c, e] = this.nn;
         const m = this.eval(this.vbe, this.vbc);
-        const [cbe, cbc] = this.capacitances(this.vbe, this.vbc, m);
-        ac.addY(b, e, 0, omega * cbe);
-        ac.addY(b, c, 0, omega * cbc);
-        // the transit charge tf*cbe/qb also depends on vbc through the Early effect: a transcapacitance
+        const ch = this.charges(this.vbe, this.vbc, m);
+        ac.addY(b, e, 0, omega * ch[0].c);
+        ac.addY(b, c, 0, omega * ch[1].c);
+        // the transit charge also depends on vbc (Early effect, XTF / VTF): a transcapacitance
         if (this.p.tf > 0) {
-            const cx = (-this.p.tf * m.cbe * m.dqbc) / (m.qb * m.qb);
+            const cx = ch[0].cx;
             if (cx) { ac.add(b, b, 0, omega * cx); ac.add(b, c, 0, -omega * cx); ac.add(e, b, 0, -omega * cx); ac.add(e, c, 0, omega * cx); }
         }
     }

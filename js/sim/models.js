@@ -90,11 +90,16 @@ function simModelCardFromParams(kind, name, p) {
         if (p.ise) parts.push(`ISE=${f(p.ise)}`, `NE=${f(p.ne === undefined ? 1.5 : p.ne)}`);
         if (p.isc) parts.push(`ISC=${f(p.isc)}`, `NC=${f(p.nc === undefined ? 2 : p.nc)}`);
         if (p.rb) parts.push(`RB=${f(p.rb)}`);
+        if (p.rbm !== undefined && p.rbm !== p.rb) parts.push(`RBM=${f(p.rbm)}`);
+        if (p.irb) parts.push(`IRB=${f(p.irb)}`);
         if (p.rc) parts.push(`RC=${f(p.rc)}`);
         if (p.re) parts.push(`RE=${f(p.re)}`);
         if (p.cje) parts.push(`CJE=${f(p.cje)}`, `VJE=${f(p.vje || 0.75)}`, `MJE=${f(p.mje || 0.33)}`);
         if (p.cjc) parts.push(`CJC=${f(p.cjc)}`, `VJC=${f(p.vjc || 0.75)}`, `MJC=${f(p.mjc || 0.33)}`);
         if (p.tf) parts.push(`TF=${f(p.tf)}`);
+        if (p.xtf) parts.push(`XTF=${f(p.xtf)}`);
+        if (p.vtf) parts.push(`VTF=${f(p.vtf)}`);
+        if (p.itf) parts.push(`ITF=${f(p.itf)}`);
         if (p.tr) parts.push(`TR=${f(p.tr)}`);
         if (p.kf) parts.push(`KF=${f(p.kf)}`, `AF=${f(p.af === undefined ? 1 : p.af)}`);
         return `.model ${name} ${t}(${parts.join(" ")})`;
