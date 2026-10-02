@@ -34,5 +34,16 @@ for (const [id, [body, tran, expectOp]] of Object.entries(D)) {
   const floating = id === "psu";   // floating secondary nodes: any level within the current tolerance is a DC solution, so only the waveforms are compared
   row((floating || n.json.operatingPoint.worst_deviation_percent_of_full_scale < 0.5) && t && t.worst_mean_deviation_percent_of_range < 1.5 && (!floating || t.worst_rms_deviation_percent_of_range < 2), `${id}: native ngspice agrees${floating ? " on the waveforms with Gear integration, rms below 2% (the floating-node OP is not compared)" : ""} (OP ${n.json.operatingPoint.worst_deviation_percent_of_full_scale}% of full scale; transient mean ${t && t.worst_mean_deviation_percent_of_range}%, rms ${t && t.worst_rms_deviation_percent_of_range}% of range at ${t && t.at_node})`);
 }
+// the supply with 1 Mohm bleeds on the secondary (a defined DC level): the whole run differs from ngspice by about 3 % rms, all of it
+// in the first diode commutations (~7 ms, where the bridge chatters on its reverse recovery and the two engines disagree about
+// the phase); after the start-up the waveforms agree to hundredths of a percent
+{
+  const psu = D["psu"][0] + "RB1 2 0 1meg\nRB2 3 0 1meg\n";
+  const deck = psu + ".op\n.tran 50u 80m\n.end";
+  const all = await call("compare_with_ngspice", { netlist: deck, ngspice_method: "gear" });
+  const late = await call("compare_with_ngspice", { netlist: deck, ngspice_method: "gear", after: 8e-3 });
+  row(late.json.operatingPoint.worst_deviation_percent_of_full_scale < 0.01, `psu + 1 Mohm bleeds: with a defined DC level the operating points agree (${late.json.operatingPoint.worst_deviation_percent_of_full_scale}% of full scale)`);
+  row(all.json.transient.worst_rms_deviation_percent_of_range < 5 && late.json.transient.worst_rms_deviation_percent_of_range < 0.5 && late.json.transient.worst_mean_deviation_percent_of_range < 0.2, `psu + 1 Mohm bleeds: rms ${all.json.transient.worst_rms_deviation_percent_of_range}% over the whole run, ${late.json.transient.worst_rms_deviation_percent_of_range}% once past the start-up chatter (after 8 ms), means within ${late.json.transient.worst_mean_deviation_percent_of_range}%`, JSON.stringify([all.json.transient, late.json.transient]).slice(0, 300));
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 srv.stdin.end();

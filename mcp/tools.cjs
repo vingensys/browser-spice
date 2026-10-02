@@ -244,7 +244,8 @@ function compareNgspice(args) {
     const dev = nodes.filter(n => n in ng).map(n => ({ node: n, builtin: round(op[n]), ngspice: round(ng[n]) }));
     res.operatingPoint = { worst_deviation_percent_of_full_scale: round(100 * Math.max(0, ...dev.map(d => Math.abs(d.builtin - d.ngspice) / span)), 4), nodes: dev.slice(0, 20) };
     const read = (file, k) => fs.existsSync(file) ? fs.readFileSync(file, "utf8").trim().split("\n").map(l => l.trim().split(/\s+/).map(Number)).filter(r => r.every(Number.isFinite)) : null;
-    const rows = tr && read(`${tmp}/t.txt`);
+    const t0 = Number(args.after) > 0 ? Number(args.after) : 0;          // ignore the start-up before this time (seconds) in the transient comparison
+    const rows = tr && (read(`${tmp}/t.txt`) || []).filter(x => x[0] >= t0);
     if (rows && rows.length) {
         const r = new SimEngine(circuit, { temp: deck.temp === undefined ? 27 : deck.temp }).transient({ tStop: tr.tStop, tStep: tr.tStep, uic: tr.uic, nodeIC: deck.ic });
         let worst = 0, worstNode = "", worstMean = 0;
@@ -255,7 +256,8 @@ function compareNgspice(args) {
             const rms = Math.sqrt(acc / rows.length) / range; if (rms > worst) { worst = rms; worstNode = n; }
             // the time average of each waveform: robust against small timing differences of fast edges
             const avg = (xs, vs) => { let a = 0; for (let i = 1; i < xs.length; i++) a += 0.5 * (vs[i] + vs[i - 1]) * (xs[i] - xs[i - 1]); return a / (xs[xs.length - 1] - xs[0]); };
-            const mean = Math.abs(avg(r.timePoints, r.nodeHistories[n]) - avg(rows.map(x => x[0]), ys)) / range; worstMean = Math.max(worstMean, mean);
+            const k0 = r.timePoints.findIndex(t => t >= t0), bt = r.timePoints.slice(k0 < 0 ? 0 : k0), bv = r.nodeHistories[n].slice(k0 < 0 ? 0 : k0);
+            const mean = Math.abs(avg(bt, bv) - avg(rows.map(x => x[0]), ys)) / range; worstMean = Math.max(worstMean, mean);
             per.push({ node: n, rms_deviation_percent_of_range: round(100 * rms, 4), mean_deviation_percent_of_range: round(100 * mean, 4) });
         });
         res.transient = { worst_rms_deviation_percent_of_range: round(100 * worst, 4), at_node: worstNode, worst_mean_deviation_percent_of_range: round(100 * worstMean, 4), nodes: per, note: "rms compares sample by sample and is dominated by the timing of fast switching edges; the mean compares the time averages" };
@@ -294,7 +296,7 @@ const TOOLS = [
     },
     {
         name: "compare_with_ngspice", description: "Cross-check the deck against native ngspice (if installed): operating point, and transient when the deck has a .tran card. Returns the worst deviations.",
-        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, ngspice_method: { type: "string", enum: ["trap", "gear"], description: "Integration method ngspice uses (default trap). Its trapezoidal rule rings on nodes that only diode leakage holds (a floating transformer secondary between rectifier conductions) when the step is coarse; gear damps that, so use gear to compare such circuits." } } },
+        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, after: { type: "number", description: "Ignore the transient before this time (seconds) when comparing: a circuit can chatter chaotically at its first diode commutations, where two correct engines disagree about the phase." }, ngspice_method: { type: "string", enum: ["trap", "gear"], description: "Integration method ngspice uses (default trap). Its trapezoidal rule rings on nodes that only diode leakage holds (a floating transformer secondary between rectifier conductions) when the step is coarse; gear damps that, so use gear to compare such circuits." } } },
         run: compareNgspice
     },
     {
