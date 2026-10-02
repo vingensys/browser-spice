@@ -43,6 +43,8 @@
  "js/ui/graph-window.js",
  "js/ui/live-sim.js",
  "js/ui/op-overlay.js",
+ "js/analysis/study.js",
+ "js/ui/study-dialog.js",
  "js/ui/scope.js",
  "js/examples.js",
  "js/app.js"

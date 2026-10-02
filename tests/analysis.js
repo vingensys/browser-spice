@@ -7,7 +7,7 @@ window.analysisTests = async function () {
     const near = (a, b, tol) => Math.abs(a - b) <= tol;
     const wait = (ms) => new Promise(r => setTimeout(r, ms));
     const clear = () => {
-        live.stop(); ScopeWindow.closeAll(); Dialog.close("t");
+        plotter.cache = {}; live.stop(); ScopeWindow.closeAll(); Dialog.close("t");
         editor.setTool("select");
         editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1; editor.titleBlock = SchematicEditor.defaultTitleBlock();
         editor.historyStack = []; editor.futureStack = []; editor.clearSelection(); editor.resetView();
@@ -92,6 +92,74 @@ window.analysisTests = async function () {
     graph.show("tran");
     ok("going back to ANALOGUE shows the waveforms again", plotter.data.mode === "transient");
     graph.hide();
+
+
+    // ======================================================== parametric sweep and Monte Carlo
+    clear(); loadExampleById(editor, "rc-ladder");
+    document.getElementById("simTstop").value = "50m"; document.getElementById("simTstep").value = "100u";
+    const params = Study.parameters(editor, runner);
+    ok("the sweepable parameters list component values, source levels and temperature", params.some(p => p.id.endsWith(".value") && /R1/.test(p.label)) && params.some(p => /dcVoltage/.test(p.id)) && params.some(p => p.id === "temp"), params.map(p => p.id));
+    ok("value lists: linear, log and explicit", near(Study.values({ start: 1, stop: 5, points: 5 })[2], 3, 1e-12) && near(Study.values({ start: 1, stop: 100, points: 3, scale: "log" })[1], 10, 1e-9) && Study.values({ list: [1, 2, 7] }).length === 3);
+    ok("a typed list parses with SI suffixes", Study.parseList("1k 2.2k, 4.7k").join() === "1000,2200,4700", Study.parseList("1k 2.2k, 4.7k"));
+    const vparam = params.find(p => /^\d+\.dcVoltage$/.test(p.id)).id;
+    const before = JSON.stringify(editor.components);
+    let sw = await Study.sweep(editor, runner, { param: vparam, analysis: "op", show: "overlay", start: 5, stop: 15, points: 3 });
+    ok("an operating-point sweep of the source gives V(in) equal to the source at every setting", sw.mode === "sweep" && near(sw.series[0].values[0], 5, 1e-6) && near(sw.series[0].values[2], 15, 1e-6) && near(sw.series[1].values[1], 10, 1e-6), sw.series.map(s => s.values));
+    ok("the circuit is exactly as before after a sweep", JSON.stringify(editor.components) === before);
+    const r1p = params.find(p => /R1 value/.test(p.label)).id;
+    sw = await Study.sweep(editor, runner, { param: r1p, analysis: "tran", show: "overlay", start: 500, stop: 4000, points: 4, scale: "log" });
+    ok("a transient sweep overlays every probe for every run on one time axis", sw.mode === "transient" && sw.series.length === 12 && sw.xValues.length === 1200 && /R1 value = /.test(sw.series[0].name), [sw.series.length, sw.series[0].name]);
+    sw = await Study.sweep(editor, runner, { param: r1p, analysis: "tran", show: "metric", metric: "final", probe: 1, start: 500, stop: 4000, points: 3 });
+    ok("a measurement sweep returns one number per run", sw.series.length === 1 && sw.series[0].values.length === 3 && sw.series[0].values.every(Number.isFinite) && sw.yUnit === "", sw.series[0].values);
+    ok("a larger resistor charges the capacitor less in the same time (final value falls)", sw.series[0].values[0] > sw.series[0].values[2], sw.series[0].values);
+    sw = await Study.sweep(editor, runner, { param: r1p, analysis: "ac", show: "metric", metric: "bw", probe: 2, start: 500, stop: 4000, points: 3 });
+    ok("the -3 dB bandwidth falls as R1 grows", sw.series[0].values[0] > sw.series[0].values[2], sw.series[0].values);
+    sw = await Study.sweep(editor, runner, { param: r1p, analysis: "ac", show: "overlay", start: 500, stop: 4000, points: 3 });
+    ok("an AC sweep overlays Bode curves (gain and phase panels)", sw.mode === "ac" && sw.panels && sw.panels[0].series.length === 9, sw.panels && sw.panels[0].series.length);
+    let thrown = "";
+    try { await Study.sweep(editor, runner, { param: r1p, analysis: "op", show: "overlay", list: [1000] }); } catch (e) { thrown = e.message; }
+    ok("a one-point sweep is refused with a clear message", /two values/.test(thrown), thrown);
+    let cancelled = 0;
+    try { await Study.sweep(editor, runner, { param: r1p, analysis: "op", show: "overlay", start: 1000, stop: 2000, points: 5 }, { cancelled: () => ++cancelled > 1 }); } catch (e) { thrown = e.message; }
+    ok("cancelling stops the sweep and still restores the value", thrown === "Cancelled" && JSON.stringify(editor.components) === before, thrown);
+
+    // the dialog and the graph tab
+    Commands.run("design.sweep");
+    ok("Design > Parametric Sweep… opens its dialog", !!document.querySelector(".dialog .study #stParam") && document.querySelectorAll("#stParam option").length === params.length);
+    Dialog.close("t");
+    graph.showStudy(sw, "x");
+    ok("the STUDY tab shows the result", graph.kind === "step" && plotter.data === sw && plotter.cache.step === sw);
+    ok("the Measure panel works on a study result", !!graph.measurements());
+    graph.hide();
+
+    clear(); loadExampleById(editor, "pot-divider");
+    const mcBefore = JSON.stringify(editor.components);
+    const spec = { analysis: "op", metric: "value", probe: 0, runs: 200, seed: 7, dist: "gauss", defaults: { R: 5, C: 10, L: 10 }, limits: { lo: 3, hi: 5 } };
+    let mc = await Study.monteCarlo(editor, runner, spec);
+    const st = mc.study.stats;
+    ok("Monte Carlo varies the parts and the circuit is restored afterwards", st.std > 0 && JSON.stringify(editor.components) === mcBefore, st);
+    ok("the histogram counts add up to the number of runs", mc.bars && mc.series[0].values.reduce((a, b) => a + b, 0) === st.n && st.n === 200);
+    const nominal = new SimEngine(NetlistExtractor.extract(editor).circuit).operatingPoint();
+    const wiperNode = NetlistExtractor.extract(editor).getPointNodeName(editor.probes[0].x, editor.probes[0].y);
+    ok("the mean sits close to the nominal value (within 4 standard errors)", Math.abs(st.mean - nominal.nodeVoltages[wiperNode]) < 4 * st.std / Math.sqrt(st.n) + 1e-9, [st.mean, nominal.nodeVoltages[wiperNode], st.std]);
+    ok("the yield is a fraction between 0 and 1", st.yield >= 0 && st.yield <= 1, st.yield);
+    const again = await Study.monteCarlo(editor, runner, spec);
+    ok("the same seed repeats the same runs, another seed does not", again.study.stats.mean === st.mean && (await Study.monteCarlo(editor, runner, { ...spec, seed: 8 })).study.stats.mean !== st.mean);
+    mc = await Study.monteCarlo(editor, runner, { ...spec, dist: "uniform", defaults: { R: 10, C: 0, L: 0 }, limits: {} });
+    ok("a uniform distribution never exceeds the tolerance", mc.study.stats.yield === undefined && mc.study.stats.max <= nominal.nodeVoltages[wiperNode] * 1.2 && mc.study.stats.min >= nominal.nodeVoltages[wiperNode] * 0.8);
+    thrown = "";
+    try { await Study.monteCarlo(editor, runner, { ...spec, defaults: { R: 0, C: 0, L: 0 } }); } catch (e) { thrown = e.message; }
+    ok("with no tolerance anywhere Monte Carlo says so", /tolerance/.test(thrown), thrown);
+    byName("R1") && (byName("R1").tol = "0");
+    ok("a part's own tolerance overrides the default (0 keeps it exact)", Study.tolerance({ type: "R", tol: "0" }, { R: 5 }) === 0 && Study.tolerance({ type: "R", tol: "1" }, { R: 5 }) === 1 && Study.tolerance({ type: "R" }, { R: 5 }) === 5);
+    graph.showStudy(mc, "mc");
+    const mm = graph.measurements();
+    ok("the Measure panel lists the statistics", mm && mm.series[0].rows.some(r => r[0] === "Std deviation"), mm);
+    plotter.draw();
+    ok("the histogram draws", true);
+    graph.hide();
+    ok("Design > Monte Carlo… opens its dialog", (Commands.run("design.montecarlo"), !!document.querySelector(".dialog #mcRuns")));
+    Dialog.close("t");
 
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };

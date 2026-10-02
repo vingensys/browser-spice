@@ -161,6 +161,8 @@
         runner.refreshSweepSources();
         Dialog.open({ title: "Simulation Settings", content: $("settings-form"), buttons: [{ label: "OK", primary: true }] });
     } });
+    C("design.sweep", "Parametric Sweep…", { run: () => StudyDialog.openSweep() });
+    C("design.montecarlo", "Monte Carlo…", { run: () => StudyDialog.openMonteCarlo() });
     C("design.erc", "Electrical Rules Check", { icon: "erc", run: runErc });
 
     C("graph.tran", "Analogue Analysis (Transient)", { run: () => graph.show("tran") });
@@ -221,7 +223,7 @@
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
-        { title: "Design", items: ["design.titleblock", "design.settings", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
+        { title: "Design", items: ["design.titleblock", "design.settings", "-", "design.sweep", "design.montecarlo", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.sweep", "graph.dc", "-", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },

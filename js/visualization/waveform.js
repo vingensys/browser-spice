@@ -241,6 +241,14 @@ class WaveformPlotter {
             return;
         }
 
+        this.lastPhasors = [freqPoints, phasors];
+        this.data = this.acData(freqPoints, phasors);
+        this.draw();
+    }
+
+    // plot data for a Bode plot from complex responses (also used by parametric sweeps, which overlay many)
+    // phasors: [{ label, color?, z: Complex[] }]
+    acData(freqPoints, phasors) {
         const color = (i) => phasors[i].color || this.colors[i % this.colors.length];
         const mag = (z) => z.magnitude();
         const db = (z) => 20 * Math.log10(Math.max(z.magnitude(), 1e-20));
@@ -263,7 +271,7 @@ class WaveformPlotter {
 
         const linear = this.acScale === "linear";
         const magSeries = phasors.map((p, i) => ({ name: p.label, color: color(i), values: p.z.map(linear ? mag : db) }));
-        this.data = {
+        const data = {
             mode: "ac",
             xLabel: "Frequency (Hz)",
             yLabel: linear ? "Magnitude" : "Gain (dB)",
@@ -274,14 +282,13 @@ class WaveformPlotter {
                 { yUnit: "Phase (°)", valueUnit: "°", tickDigits: 0, series: phasors.map((p, i) => ({ name: p.label, color: color(i), values: phase(p.z) })) }
             ]
         };
-        if (linear) this.data.yUnit = "Magnitude";
-
-        this.draw();
+        if (linear) data.yUnit = "Magnitude";
+        return data;
     }
 
     setACScale(scale) {
         this.acScale = scale;
-        if (this.data && this.data.mode === "ac" && this.lastAC) this.plotAC(...this.lastAC);
+        if (this.data && this.data.mode === "ac" && !this.data.study && this.lastAC) this.plotAC(...this.lastAC);
     }
 
     /**
@@ -489,6 +496,7 @@ class WaveformPlotter {
             }
         }
         if (!isFinite(yMin) || !isFinite(yMax)) { yMin = -1; yMax = 1; }
+        if (data.bars) yMin = Math.min(yMin, 0);                       // histograms stand on zero
         if (yMin === yMax) { yMin -= 1; yMax += 1; }
         const yMargin = (yMax - yMin) * 0.1;
         yMin -= yMargin; yMax += yMargin;
@@ -552,6 +560,16 @@ class WaveformPlotter {
         for (const s of data.series) {
             ctx.strokeStyle = s.color;
             ctx.lineWidth = 2;
+            if (data.bars) {                                           // histogram: filled bars one bin wide
+                const w = n > 1 ? Math.abs(xOf(xs[1]) - xOf(xs[0])) : 20;
+                ctx.fillStyle = s.color; ctx.globalAlpha = 0.75;
+                for (let i = i0; i <= i1; i++) {
+                    const px = xOf(xs[i]), top = mapY(s.values[i]), base = mapY(0);
+                    ctx.fillRect(px - w / 2 + 1, Math.min(top, base), Math.max(w - 2, 1), Math.abs(base - top));
+                }
+                ctx.globalAlpha = 1;
+                continue;
+            }
             ctx.beginPath();
             if (!dense) {
                 for (let i = i0; i <= i1; i++) {

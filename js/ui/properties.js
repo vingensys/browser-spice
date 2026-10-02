@@ -83,9 +83,9 @@ class PropertiesPanel {
             `<div class="property"><label>Wiper position</label>
                 <input type="range" data-prop="position" min="0" max="100" value="${Math.round((c.position === undefined ? 0.5 : c.position) * 100)}">
                 <div class="prop-note">${Math.round((c.position === undefined ? 0.5 : c.position) * 100)}% from pin A</div></div>`;
-        else if (type === "R") html += this.text("Resistance", "value", c.value, "e.g. 4.7k");
-        else if (type === "C") html += this.text("Capacitance", "value", c.value, "e.g. 10u") + this.text("Initial voltage (UIC)", "ic", c.ic || "", "0");
-        else if (type === "L") html += this.text("Inductance", "value", c.value, "e.g. 10m") + this.text("Initial current (UIC)", "ic", c.ic || "", "0");
+        else if (type === "R") html += this.text("Resistance", "value", c.value, "e.g. 4.7k") + this.text("Tolerance (Monte Carlo)", "tol", c.tol || "", "e.g. 5 (%)");
+        else if (type === "C") html += this.text("Capacitance", "value", c.value, "e.g. 10u") + this.text("Initial voltage (UIC)", "ic", c.ic || "", "0") + this.text("Tolerance (Monte Carlo)", "tol", c.tol || "", "e.g. 5 (%)");
+        else if (type === "L") html += this.text("Inductance", "value", c.value, "e.g. 10m") + this.text("Initial current (UIC)", "ic", c.ic || "", "0") + this.text("Tolerance (Monte Carlo)", "tol", c.tol || "", "e.g. 5 (%)");
 
         const part = typeof PartLib !== "undefined" && PartLib.defs[type];
         if (part && part.rows) html += part.rows(this, c);

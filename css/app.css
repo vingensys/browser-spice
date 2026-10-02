@@ -566,3 +566,11 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 .scope-meas th { color: #8c98a8; font-weight: normal; text-align: right; padding: 0 3px; }
 .scope-meas td { text-align: right; padding: 1px 3px; }
 .scope-meas td:first-child { text-align: left; font-weight: bold; }
+
+/* parametric sweep / Monte Carlo dialogs */
+.study .form-grid { width: 100%; }
+.study-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.study-bar { display: none; height: 6px; background: var(--ui-border, #ccc); border-radius: 3px; margin-top: 10px; overflow: hidden; }
+.study-bar > div { height: 100%; width: 0; background: var(--ui-accent, #3b82f6); }
+.study-msg { min-height: 18px; margin-top: 6px; font-size: 12px; color: var(--ui-dim); }
+.study-msg.err { color: #d32f2f; }

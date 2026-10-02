@@ -10,7 +10,7 @@ class GraphWindow {
         this.kind = "tran";
 
         this.tabs = [
-            ["live", "LIVE"], ["tran", "ANALOGUE"], ["fft", "SPECTRUM"], ["ac", "FREQUENCY"], ["sweep", "DC SWEEP"], ["dc", "OPERATING POINT"]
+            ["live", "LIVE"], ["tran", "ANALOGUE"], ["fft", "SPECTRUM"], ["ac", "FREQUENCY"], ["sweep", "DC SWEEP"], ["step", "STUDY"], ["dc", "OPERATING POINT"]
         ];
         root.innerHTML = `
             <div id="graph-resize"></div>
@@ -112,6 +112,7 @@ class GraphWindow {
     }
 
     static unitFor(name, data) {
+        if (data.yUnit !== undefined) return data.yUnit;
         if (data.mode === "sweep" || data.mode === "transient") return /^I\(/.test(name) ? "A" : "V";
         return "";
     }
@@ -136,6 +137,12 @@ class GraphWindow {
         }
         const lo = both ? Math.min(a, b) : view.inv(view.vmin), hi = both ? Math.max(a, b) : view.inv(view.vmax);
         const scope = both ? "between the cursors" : "in the visible range";
+        if (d.study && d.study.kind === "montecarlo") {
+            const st = d.study.stats, f = (v) => Number(v.toPrecision(5)).toString();
+            const rows = [["Runs", `${st.n} of ${st.runs} measured, ${st.parts} varying part${st.parts === 1 ? "" : "s"}`], ["Mean", f(st.mean)], ["Std deviation", f(st.std)], ["Min / max", `${f(st.min)} / ${f(st.max)}`], ["Median", f(st.median)], ["±3σ", `${f(st.mean - 3 * st.std)} … ${f(st.mean + 3 * st.std)}`]];
+            if (st.yield !== undefined) rows.push(["Yield (within limits)", `${(st.yield * 100).toFixed(1)} %`]);
+            return { header, series: [{ name: `${d.study.probe}: ${d.study.metric}`, color: d.series[0].color, rows }], scope: "all runs", hasCursors: a !== null || b !== null };
+        }
 
         const series = [];
         if (d.mode === "spectrum") {
@@ -357,8 +364,20 @@ class GraphWindow {
     simulate() {
         if (this.kind === "fft") { this.showSpectrum(); return; }
         this.show(this.kind === "live" ? "tran" : this.kind);
+        if (this.kind === "step") { if (window.StudyDialog) StudyDialog.rerun(); return; }
         const run = { tran: "runTransient", ac: "runAC", sweep: "runSweep", dc: "runDC" }[this.kind];
         if (run) this.runner[run]();
+    }
+
+    // the STUDY tab: a parametric sweep or Monte Carlo result
+    showStudy(data, title) {
+        const p = this.plotter;
+        p.clearCursors();
+        p.data = data;
+        p.cache.step = data;
+        p.resetZoom && p.resetZoom();
+        this.show("step");
+        this.root.querySelector("#plotTitle").textContent = title;
     }
 
     // the LIVE tab: plot the running simulation's buffers

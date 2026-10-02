@@ -74,3 +74,5 @@ against Proteus / ngspice, **P3** polish.
 3. ~~Counters, shift registers and a 74xx set~~ done.
 4. ~~Text annotation, title block, net highlighting~~ done.
 5. ~~ERC rules~~ done; CI for the test suites is next.
+
+- **Done**: parametric sweep and Monte Carlo analysis (Design menu, STUDY tab). Still open: sweeps run on the main thread (large runs block the page between yields), no corner analysis, no multi-parameter sweeps.
