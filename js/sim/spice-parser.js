@@ -381,9 +381,16 @@ class SpiceParser {
 
     // create the engine elements for a flat list of parsed elements
     static addElements(circuit, els, deck, warnings) {
-        const model = (name, what) => {
+        // a model the deck does not define is looked up in the built-in library by name (1N4148, 2N2222, BC547 ...), ignoring case
+        const LIBTYPE = { D: "d", LED: "d", DZ: "d", BJT_NPN: "npn", BJT_PNP: "pnp", JFET_N: "njf", JFET_P: "pjf", NMOS: "nmos", PMOS: "pmos" };
+        const model = (name, what, kinds) => {
             const m = deck.models[name];
-            if (!m) warnings.push(`model ${name} for ${what} not found, using defaults`);
+            if (m) return m;
+            if (typeof SIM_MODELS !== "undefined" && kinds) for (const k of kinds) {
+                const set = SIM_MODELS[k], key = set && Object.keys(set).find(x => x.toLowerCase() === String(name).toLowerCase());
+                if (key) return { name, type: LIBTYPE[k], params: set[key].params, library: true };
+            }
+            warnings.push(`model ${name} for ${what} not found, using defaults`);
             return m;
         };
 
@@ -401,7 +408,7 @@ class SpiceParser {
             switch (e.kind) {
                 case "XFMR": circuit.add(new Transformer(nm, e.nodes, { l1: e.l1, ratio: Math.sqrt(e.l2 / e.l1), k: Math.min(e.k, 0.99999) })); break;
                 case "J": {
-                    const m = model(e.model, e.name);
+                    const m = model(e.model, e.name, ["JFET_N", "JFET_P"]);
                     circuit.add(new JFET(nm, e.nodes, m && m.type === "pjf" ? -1 : 1, SpiceParser.jfetParams(m)));
                     break;
                 }
@@ -414,19 +421,19 @@ class SpiceParser {
                     }));
                     break;
                 case "I": circuit.add(new CurrentSource(nm, e.nodes, { wave: SpiceParser.waveFor(e.spec) })); break;
-                case "D": circuit.add(new Diode(nm, e.nodes, SpiceParser.diodeParams(model(e.model, e.name)))); break;
+                case "D": circuit.add(new Diode(nm, e.nodes, SpiceParser.diodeParams(model(e.model, e.name, ["D", "LED", "DZ"])))); break;
                 case "Q": {
-                    const m = model(e.model, e.name);
+                    const m = model(e.model, e.name, ["BJT_NPN", "BJT_PNP"]);
                     const pol = m && m.type === "pnp" ? -1 : 1;
                     // SPICE order is C B E; the engine takes B C E
                     circuit.add(new BJT(nm, [e.nodes[1], e.nodes[0], e.nodes[2]], pol, SpiceParser.bjtParams(m)));
                     break;
                 }
                 case "M": {
-                    const m = model(e.model, e.name);
+                    const m = model(e.model, e.name, ["NMOS", "PMOS"]);
                     const pol = m && m.type === "pmos" ? -1 : 1;
-                    // e.nodes is [g, d, s]
-                    circuit.add(new MOSFET(nm, e.nodes, pol, SpiceParser.mosParams(m, e.w, e.l, e)));
+                    // e.nodes is [g, d, s]; a library device (2N7000, IRF540 ...) is a packaged part: its numbers are already per device, W / L do not scale them
+                    circuit.add(new MOSFET(nm, e.nodes, pol, m && m.library ? { ...m.params } : SpiceParser.mosParams(m, e.w, e.l, e)));
                     break;
                 }
                 case "E": circuit.add(new VCVS(nm, e.nodes, { gain: e.gain })); break;

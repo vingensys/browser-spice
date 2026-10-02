@@ -760,6 +760,15 @@ class NetlistExtractor {
                     models.set(e.model, { kind: e.modelKind, params: p });
                     // drain gate source bulk
                     lines.push(`${name} ${n[1]} ${n[0]} ${n[2]} ${n[3] === undefined ? n[2] : n[3]} ${e.model} W=${f(p.w || 1e-6)} L=${f(p.l || 1e-6)}${p.ad ? ` AD=${f(p.ad)}` : ""}${p.as ? ` AS=${f(p.as)}` : ""}${p.pd ? ` PD=${f(p.pd)}` : ""}${p.ps ? ` PS=${f(p.ps)}` : ""}`);
+                    // the built-in library parts also carry lumped gate capacitances and a body diode (the engine adds them as
+                    // separate elements); a .model card cannot express them, so they are written out as elements
+                    if (p.cgs > 0) lines.push(`C${name}_GS ${n[0]} ${n[2]} ${f(p.cgs)}`);
+                    if (p.cgd > 0) lines.push(`C${name}_GD ${n[0]} ${n[1]} ${f(p.cgd)}`);
+                    if (p.bodyDiode) {
+                        const bd = p.bodyDiode, dm = `BD_${name}`;
+                        lines.push(e.pol > 0 ? `D${name}_BD ${n[2]} ${n[1]} ${dm}` : `D${name}_BD ${n[1]} ${n[2]} ${dm}`);
+                        extra.push(`.model ${dm} D(IS=${f(bd.is)} N=${f(bd.n === undefined ? 1 : bd.n)}${bd.rs ? ` RS=${f(bd.rs)}` : ""})`);
+                    }
                     break;
                 case "OPAMP": {
                     const sub = `OPAMP_${e.model}`;

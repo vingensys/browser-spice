@@ -339,4 +339,32 @@ for (const seed of [5, 9]) {
     check("dragging across another track is refused", !rc.ok, rc.reason);
     check("a drag onto the same spot changes nothing", Pcb.shoveDrag(b, other, 1, other.pts[1], {}).ok);
 }
+// ---- walk-around
+{
+    const board = (items) => { const b = Pcb.blank(60, 40); b.parts = items.map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; }); return b; };
+    const hard = (b) => Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
+    const b = board([["P", "2", 20, 15], ["Q", "2", 20, 25], ["A", "1", 10, 20], ["B", "1", 30, 20]]);
+    b.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[20, 15], [20, 25]] });
+    const r = Pcb.walkaround(b, "F", [[10, 20], [30, 20]], 0.3, "1");
+    check("a wall of another net in the way is walked around (the path goes past its end)", r.ok && r.pts.length >= 3 && r.pts[r.pts.length - 1][0] === 30 && r.pts[r.pts.length - 1][1] === 20, r.reason);
+    b.tracks.push({ id: 2, layer: "F", w: 0.3, pts: [[10, 20], ...r.pts] });
+    check("the detour keeps the clearance (rule check clean) and uses 0°/45°/90° only", hard(b).length === 0 && b.tracks[1].pts.slice(0, -1).every((q, i) => { const dx = b.tracks[1].pts[i + 1][0] - q[0], dy = b.tracks[1].pts[i + 1][1] - q[1]; return Math.abs(dx) < 1e-6 || Math.abs(dy) < 1e-6 || Math.abs(Math.abs(dx) - Math.abs(dy)) < 1e-6; }), JSON.stringify(hard(b).slice(0, 2)));
+    const free = Pcb.walkaround(board([["A", "1", 10, 20], ["B", "1", 30, 20]]), "F", [[10, 20], [30, 20]], 0.3, "1");
+    check("with nothing in the way the straight line comes back", free.ok && free.pts.length === 1 && free.pts[0][0] === 30);
+    const bs = board([["P", "1", 20, 15], ["Q", "1", 20, 25], ["A", "1", 10, 20], ["B", "1", 30, 20]]); bs.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[20, 15], [20, 25]] });
+    check("copper of the same net is not walked around", Pcb.walkaround(bs, "F", [[10, 20], [30, 20]], 0.3, "1").pts.length === 1);
+    const bw = board([["A", "1", 10, 20], ["B", "1", 30, 20]]); bw.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[20, 0], [20, 40]] }, { id: 2, layer: "F", w: 0.3, pts: [[21, 0], [21, 40]] });
+    bw.parts.push(...[["W1", "2", 20, 0.5], ["W2", "2", 20, 39.5]].map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, bw.footprints); return part; }));
+    const rw = Pcb.walkaround(bw, "F", [[10, 20], [30, 20]], 0.3, "1");
+    check("a wall across the whole board has no way around: refused with a reason", !rw.ok && /no way around|violate/.test(rw.reason), rw.reason);
+    const bo = board([["P", "2", 20, 15], ["A", "1", 10, 20], ["B", "1", 30, 20]]); bo.tracks.push({ id: 1, layer: "B", w: 0.3, pts: [[20, 10], [20, 30]] });
+    check("copper on the other layer is ignored", Pcb.walkaround(bo, "F", [[10, 20], [30, 20]], 0.3, "1").pts.length === 1);
+    const bp = board([["A", "1", 10, 20], ["B", "1", 30, 20], ["X", "3", 20, 20]]);
+    const rp = Pcb.walkaround(bp, "F", [[10, 20], [30, 20]], 0.3, "1");
+    check("a pad of another net is walked around too", rp.ok && rp.pts.length >= 3, rp.reason);
+    const bv = board([["A", "1", 10, 20], ["B", "1", 30, 20]]); bv.vias.push({ id: 7, x: 20, y: 20, d: 0.8, drill: 0.4 });
+    const rv = Pcb.walkaround(bv, "F", [[10, 20], [30, 20]], 0.3, "1");
+    check("so is a via (on any layer)", rv.ok && rv.pts.length >= 3, rv.reason);
+    const t0 = Date.now(); Pcb.walkaround(b, "F", [[3, 3], [57, 37]], 0.3, "1"); check(`a board-wide search is quick (${Date.now() - t0} ms)`, Date.now() - t0 < 1500);
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

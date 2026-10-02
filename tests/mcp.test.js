@@ -90,6 +90,43 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
             if (r.operatingPoint.worst_deviation_percent_of_full_scale > 0.5 || r.transient.worst_rms_deviation_percent_of_range > 4) throw new Error(JSON.stringify(r));
         });
     }
+    await test("DC sweep returns source currents as well as node voltages", async () => {
+        const r = await call("simulate", { netlist: "d\nV1 a 0 0\nR1 a b 100\nR2 b 0 100\n.dc V1 0 4 1\n.end", analysis: "dc", signals: ["v(b)", "i(v1)"] });
+        near(r.signals["v(b)"][4], 2, 1e-9); near(r.signals["i(v1)"][4], -0.02, 1e-9);
+    });
+    await test("operating-point measures: .meas op find v(x) / i(source), also in the deck", async () => {
+        const r = await call("simulate", { netlist: "op\nV1 a 0 6\nR1 a b 1k\nR2 b 0 2k\n.op\n.meas op vb find v(b)\n.meas op iin i(v1)\n.end", analysis: "op" });
+        near(r.measures.find(m => m.name === "vb").value, 4, 1e-6); near(r.measures.find(m => m.name === "iin").value, -0.002, 1e-9);
+    });
+    await test("Monte Carlo and sweep work on operating-point measures", async () => {
+        const deck = "mc\n.param rv=10k\nV1 in 0 DC 10\nR1 in out {rv}\nR2 out 0 10k\n.op\n.end";
+        const m = await call("monte_carlo", { netlist: deck, measure: ".meas op vout find v(out)", runs: 100, seed: 3, tolerance_percent: { R: 1 }, limits: { min: 4.9, max: 5.1 } });
+        near(m.mean, 5, 0.01); if (!(m.std_dev > 0.005 && m.std_dev < 0.03) || m.yield_percent !== 100) throw new Error(JSON.stringify(m));
+        const sw = await call("sweep", { netlist: deck, param: "rv", values: [5000, 10000, 20000], analysis: "op", measures: [".meas op vout find v(out)"] });
+        near(sw.results[0].measures[0].value, 20 / 3, 1e-4); near(sw.results[2].measures[0].value, 10 / 3, 1e-4);
+    });
+    await test("part names from the built-in library work in a deck without .model cards (1N4148, 2N2222, 2N7000), any case", async () => {
+        const d = await call("simulate", { netlist: "d\nV1 a 0 5\nR1 a b 1k\nD1 b 0 1n4148\n.op\n.end", analysis: "op" });
+        if (d.warnings.length) throw new Error("diode: " + d.warnings.join());
+        const lib = await call("simulate", { netlist: "q\nVCC vcc 0 12\nR1 vcc b 47k\nR2 b 0 10k\nRC vcc c 2.2k\nRE e 0 470\nQ1 c b e 2N2222\n.op\n.end", analysis: "op" });
+        const def = await call("simulate", { netlist: "q\nVCC vcc 0 12\nR1 vcc b 47k\nR2 b 0 10k\nRC vcc c 2.2k\nRE e 0 470\nQ1 c b e MYQ\n.model MYQ NPN(IS=1e-16 BF=100)\n.op\n.end", analysis: "op" });
+        if (lib.warnings.length) throw new Error("bjt: " + lib.warnings.join());
+        if (Math.abs(lib.nodeVoltages.c - def.nodeVoltages.c) < 0.05) throw new Error("the 2N2222 model was not used");
+        const m = await call("simulate", { netlist: "m\nVD d 0 10\nVG g 0 5\nR1 d x 100\nM1 x g 0 0 2N7000\n.op\n.end", analysis: "op" });
+        if (m.warnings.length || !(m.nodeVoltages.x < 9.9)) throw new Error("mosfet: " + JSON.stringify(m));
+    });
+    await test("a model that exists nowhere is still reported", async () => {
+        const r = await call("simulate", { netlist: "d\nV1 a 0 5\nR1 a b 1k\nD1 b 0 NOSUCH\n.op\n.end", analysis: "op" });
+        if (!r.warnings.some(w => /nosuch/i.test(w))) throw new Error(JSON.stringify(r.warnings));
+    });
+    if (!spawnSync("ngspice", ["-v"]).error) {
+        await test("library parts reach ngspice as cards (BJT, MOSFET with gate capacitances and body diode): bias and averages agree", async () => {
+            const bjt = await call("compare_with_ngspice", { netlist: "q\nVCC vcc 0 12\nR1 vcc b 47k\nR2 b 0 10k\nRC vcc c 2.2k\nRE e 0 470\nQ1 c b e 2N2222\n.op\n.end" });
+            if (bjt.operatingPoint.worst_deviation_percent_of_full_scale > 0.05) throw new Error(JSON.stringify(bjt));
+            const boost = await call("compare_with_ngspice", { netlist: "b\nVIN in 0 DC 5\nL1 in sw 100u\nM1 sw g 0 0 IRF540\nVG g 0 PULSE(0 10 0 20n 20n 5u 10u)\nD1 sw out 1N5819\nC1 out 0 100u\nRL out 0 50\n.tran 100n 2m\n.end" });
+            if (boost.operatingPoint.worst_deviation_percent_of_full_scale > 0.05 || boost.transient.worst_mean_deviation_percent_of_range > 1) throw new Error(JSON.stringify(boost).slice(0, 400));
+        });
+    }
     server.stdin.end();
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);

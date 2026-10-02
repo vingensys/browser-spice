@@ -36,7 +36,7 @@ class PcbView {
                 <span class="sep"></span>
                 <button class="tb-btn txt" data-tool="select" title="Select and move (S)">Select</button>
                 <button class="tb-btn txt" data-tool="route" title="Route a track (T)">Route</button>
-                <label title="Push-and-shove: tracks of other nets are pushed out of the way of the track you lay, instead of being violated (vias and the track ends on them move along; pads, the board edge and track ends on pads never move; a move that cannot work is refused)"><input type="checkbox" id="pcbShove" checked> Shove</label>
+                <label title="How the track you lay deals with other copper: Shove pushes tracks and vias aside; Walk around routes the new track around them (0°/45°/90°); Off lets it violate (the rule check reports it)">Route <select id="pcbMode"><option value="shove">Shove</option><option value="walk">Walk around</option><option value="off">Off</option></select></label>
                 <button class="tb-btn txt" data-a="layer" title="Active copper layer (F)">Layer: <span id="pcbLayer">F.Cu</span></button>
                 <button class="tb-btn txt" data-a="rotate" title="Rotate the selected part (R)">Rotate</button>
                 <button class="tb-btn txt" data-a="flip" title="Move the selected surface-mount part to the other side of the board (X)">Flip side</button>
@@ -405,7 +405,8 @@ class PcbView {
     // moving a part leaves its tracks where they were: they stay, and the rule check shows what no longer connects
     dropOrphansOfMoved() { this.issues = []; this.renderIssues(); }
 
-    get shoving() { return this.root.querySelector("#pcbShove").checked; }
+    get mode() { return this.root.querySelector("#pcbMode").value; }
+    get shoving() { return this.mode === "shove"; }
 
     // the net a track starting here belongs to: the pad, via or track it starts on (null when it starts on bare board)
     netAt(x, y) {
@@ -425,6 +426,14 @@ class PcbView {
         const last = this.draft.pts[this.draft.pts.length - 1];
         s = this.constrain(last, s, free);
         if (Math.hypot(s.x - last[0], s.y - last[1]) < 1e-6) return;
+        if (this.mode === "walk") {
+            const res = Pcb.walkaround(this.pcb, this.draft.layer, [...this.draft.pts, [s.x, s.y]], this.pcb.rules.track, this.draft.net);
+            if (!res.ok) { this.say(`Blocked: ${res.reason}`, true); return; }
+            this.draft.pts.push(...res.pts);
+            if (res.pts.length > 1) this.say(`Routed around other copper (${res.pts.length} segments).`);
+            if (s.pad) this.finishTrack(); else this.draw();
+            return;
+        }
         if (this.shoving) {
             const res = Pcb.shove(this.pcb, this.draft.layer, [...this.draft.pts, [s.x, s.y]], this.pcb.rules.track, this.draft.net);
             if (!res.ok) { this.say(`Blocked: ${res.reason}`, true); return; }
@@ -437,9 +446,12 @@ class PcbView {
 
     // what the segment under the pointer would do (cached until the pointer or the board changes)
     shovePreview(last, s) {
-        if (!this.shoving) return null;
-        const key = `${this.rev}|${this.draft.layer}|${this.draft.pts.length}|${last}|${s.x},${s.y}`;
-        if (!this.pv || this.pv.key !== key) this.pv = { key, res: Pcb.shove(this.pcb, this.draft.layer, [...this.draft.pts, [s.x, s.y]], this.pcb.rules.track, this.draft.net) };
+        if (this.mode === "off") return null;
+        const key = `${this.mode}|${this.rev}|${this.draft.layer}|${this.draft.pts.length}|${last}|${s.x},${s.y}`;
+        if (!this.pv || this.pv.key !== key) {
+            const draft = [...this.draft.pts, [s.x, s.y]];
+            this.pv = { key, res: this.mode === "walk" ? Pcb.walkaround(this.pcb, this.draft.layer, draft, this.pcb.rules.track, this.draft.net) : Pcb.shove(this.pcb, this.draft.layer, draft, this.pcb.rules.track, this.draft.net) };
+        }
         return this.pv.res;
     }
 
@@ -703,8 +715,9 @@ class PcbView {
             const last = this.draft.pts[this.draft.pts.length - 1];
             let s = this.snap(this.mouse.x, this.mouse.y, false); s = this.constrain(last, s, false);
             const pv = Math.hypot(s.x - last[0], s.y - last[1]) > 1e-6 ? this.shovePreview(last, s) : null;
-            if (pv && pv.ok) for (const ch of pv.changes) { c.setLineDash([lw(5), lw(3)]); drawTrack({ layer: this.draft.layer, w: ch.track.w, pts: ch.pts }, 0.9, "#ffe066"); c.setLineDash([]); }
-            drawTrack({ layer: this.draft.layer, w: p.rules.track, pts: [...this.draft.pts, [s.x, s.y]] }, 0.8, pv && !pv.ok ? "#ff3b3b" : "#ffffff");
+            if (pv && pv.ok && pv.changes) for (const ch of pv.changes) { c.setLineDash([lw(5), lw(3)]); drawTrack({ layer: this.draft.layer, w: ch.track.w, pts: ch.pts }, 0.9, "#ffe066"); c.setLineDash([]); }
+            const tail = pv && pv.ok && this.mode === "walk" && pv.pts.length ? pv.pts : [[s.x, s.y]];
+            drawTrack({ layer: this.draft.layer, w: p.rules.track, pts: [...this.draft.pts, ...tail] }, 0.8, pv && !pv.ok ? "#ff3b3b" : "#ffffff");
             if (pv && !pv.ok && this.statusEl.dataset.blocked !== pv.reason) { this.statusEl.dataset.blocked = pv.reason; this.statusEl.textContent = `Blocked: ${pv.reason}`; this.statusEl.classList.add("warn"); }
             else if (pv && pv.ok) { delete this.statusEl.dataset.blocked; }
         }

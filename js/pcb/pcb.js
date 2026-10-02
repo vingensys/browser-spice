@@ -744,6 +744,90 @@ class Pcb {
         return out;
     }
 
+    // ---------------------------------------------------------------- walk-around
+    // Routes a new segment a -> b on one layer *around* the copper of other nets instead of pushing it: an A* search on a
+    // 0.25 mm grid (8 directions, so the result runs horizontally, vertically and at 45°) inside the segment's bounding box
+    // plus a margin. Returns { ok, pts: [points after a, ending at b], reason }; the straight line is returned when nothing is
+    // in the way. The result is checked with the rule check like push-and-shove, and refused if it would violate anything new.
+    static walkaround(pcb, layer, draft, w, net, { res = 0.25, margin = 12, maxExpand = 120000 } = {}) {
+        const a = draft[draft.length - 2], b = draft[draft.length - 1];
+        if (!a || !b || Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6) return { ok: true, pts: [] };
+        const R = pcb.rules, clr = R.clearance, half = w / 2;
+        const conn = Pcb.connectivity(pcb, false), netOf = new Map();
+        conn.forEach(g => { g.tracks.forEach(t => netOf.set(t, g.net)); g.vias.forEach(v => netOf.set(v, g.net)); });
+        const same = (n) => net !== null && net !== undefined && n !== null && n !== undefined && String(n) === String(net);
+        const x0 = Math.max(0, Math.min(a[0], b[0]) - margin), y0 = Math.max(0, Math.min(a[1], b[1]) - margin);
+        const x1 = Math.min(pcb.outline.w, Math.max(a[0], b[0]) + margin), y1 = Math.min(pcb.outline.h, Math.max(a[1], b[1]) + margin);
+        const nx = Math.floor((x1 - x0) / res) + 1, ny = Math.floor((y1 - y0) / res) + 1;
+        const blocked = new Uint8Array(nx * ny);
+        const slack = res * 0.45;
+        const disc = (cx, cy, r) => {
+            const i0 = Math.max(0, Math.floor((cx - r - x0) / res)), i1 = Math.min(nx - 1, Math.ceil((cx + r - x0) / res)), j0 = Math.max(0, Math.floor((cy - r - y0) / res)), j1 = Math.min(ny - 1, Math.ceil((cy + r - y0) / res));
+            for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot(x0 + i * res - cx, y0 + j * res - cy) < r) blocked[j * nx + i] = 1;
+        };
+        const rect = (cx, cy, hw, hh, grow) => {
+            const i0 = Math.max(0, Math.floor((cx - hw - grow - x0) / res)), i1 = Math.min(nx - 1, Math.ceil((cx + hw + grow - x0) / res)), j0 = Math.max(0, Math.floor((cy - hh - grow - y0) / res)), j1 = Math.min(ny - 1, Math.ceil((cy + hh + grow - y0) / res));
+            for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+                const dx = Math.max(0, Math.abs(x0 + i * res - cx) - hw), dy = Math.max(0, Math.abs(y0 + j * res - cy) - hh);
+                if (Math.hypot(dx, dy) < grow) blocked[j * nx + i] = 1;
+            }
+        };
+        const seg = (p, q, r) => { const n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / (res / 2))); for (let k = 0; k <= n; k++) disc(p[0] + ((q[0] - p[0]) * k) / n, p[1] + ((q[1] - p[1]) * k) / n, r); };
+        const grow = clr + half + slack;
+        for (const p of Pcb.pads(pcb)) { if (!p.layers.includes(layer) || same(p.net)) continue; if (p.shape === "round") disc(p.x, p.y, Math.min(p.w, p.h) / 2 + grow); else rect(p.x, p.y, p.w / 2, p.h / 2, grow); }
+        for (const t of pcb.tracks) { if (t.layer !== layer || same(netOf.get(t))) continue; for (let k = 0; k + 1 < t.pts.length; k++) seg(t.pts[k], t.pts[k + 1], t.w / 2 + grow); }
+        for (const v of pcb.vias) { if (same(netOf.get(v))) continue; disc(v.x, v.y, v.d / 2 + grow); }
+        // the board edge margin
+        for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) { const x = x0 + i * res, y = y0 + j * res; if (x < R.edge + half || y < R.edge + half || x > pcb.outline.w - R.edge - half || y > pcb.outline.h - R.edge - half) blocked[j * nx + i] = 1; }
+        const cell = (p) => [Math.round((p[0] - x0) / res), Math.round((p[1] - y0) / res)];
+        const [si, sj] = cell(a), [ti, tj] = cell(b);
+        const inside = (i, j) => i >= 0 && j >= 0 && i < nx && j < ny;
+        if (!inside(si, sj) || !inside(ti, tj)) return { ok: false, reason: "the end of the segment is outside the board", pts: [] };
+        // the end points themselves may sit on the keep-out of their own pad: free the cells right at them
+        const freeAround = (i, j) => { for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) if (inside(i + di, j + dj)) blocked[(j + dj) * nx + i + di] = 0; };
+        freeAround(si, sj); freeAround(ti, tj);
+        const key = (i, j) => j * nx + i, gs = new Map(), from = new Map(), closed = new Set();
+        const h = (i, j) => { const dx = Math.abs(i - ti), dy = Math.abs(j - tj); return Math.max(dx, dy) + 0.4142 * Math.min(dx, dy); };
+        const heap = [];
+        const push = (n) => { heap.push(n); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p].f <= heap[i].f) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
+        const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l].f < heap[m].f) m = l; if (r < heap.length && heap[r].f < heap[m].f) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
+        gs.set(key(si, sj), 0); push({ i: si, j: sj, f: h(si, sj), dir: -1 });
+        let found = null, expanded = 0;
+        const dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+        while (heap.length && expanded < maxExpand) {
+            const cur = pop(), ck = key(cur.i, cur.j);
+            if (closed.has(ck)) continue;
+            closed.add(ck); expanded++;
+            if (cur.i === ti && cur.j === tj) { found = cur; break; }
+            const g0 = gs.get(ck);
+            for (let d = 0; d < 8; d++) {
+                const [dx, dy] = dirs[d], i = cur.i + dx, j = cur.j + dy;
+                if (!inside(i, j) || blocked[key(i, j)]) continue;
+                if (dx && dy && (blocked[key(cur.i + dx, cur.j)] || blocked[key(cur.i, cur.j + dy)])) continue;       // no corner cutting
+                const turn = cur.dir >= 0 && cur.dir !== d ? (Math.min((d - cur.dir + 8) % 8, (cur.dir - d + 8) % 8) > 1 ? 0.6 : 0.25) : 0;
+                const g = g0 + (dx && dy ? 1.4142 : 1) + turn, k = key(i, j);
+                if (!gs.has(k) || g < gs.get(k)) { gs.set(k, g); from.set(k, { i: cur.i, j: cur.j, dir: cur.dir }); push({ i, j, f: g + h(i, j), dir: d }); }
+            }
+        }
+        if (!found) return { ok: false, reason: "there is no way around: the other copper encloses the way to that point", pts: [] };
+        const path = []; let n = { i: ti, j: tj };
+        while (n && !(n.i === si && n.j === sj)) { path.push([x0 + n.i * res, y0 + n.j * res]); n = from.get(key(n.i, n.j)); }
+        path.reverse();
+        // straight when it can be: drop collinear points; the ends are the exact requested points
+        const raw = [a, ...path.slice(0, -1), b], out = [raw[0]];
+        for (let k = 1; k < raw.length - 1; k++) { const p = out[out.length - 1], q = raw[k], r = raw[k + 1]; if (Math.abs((q[0] - p[0]) * (r[1] - q[1]) - (q[1] - p[1]) * (r[0] - q[0])) > 1e-6) out.push(q); }
+        out.push(b);
+        // validate
+        const cand = { id: -1, layer, w, pts: draft.slice(0, -2).concat(out) };
+        const trial = (list) => ({ ...pcb, zones: [], tracks: list });
+        const key2 = (i) => `${i.type}|${[...(i.ids || [i.msg])].sort().join("|")}`;
+        const earlier = draft.length - 2 >= 2 ? [{ ...cand, pts: draft.slice(0, -1) }] : [];
+        const before = new Set(Pcb.drc(trial(pcb.tracks.concat(earlier)), { zones: false }).filter(i => i.type !== "unrouted").map(key2));
+        const fresh = Pcb.drc(trial(pcb.tracks.concat([cand])), { zones: false }).filter(i => i.type !== "unrouted" && !before.has(key2(i)));
+        if (fresh.length) return { ok: false, reason: `the way around would violate the rules: ${fresh[0].msg}`, pts: [] };
+        return { ok: true, pts: out.slice(1) };
+    }
+
     // ---------------------------------------------------------------- push-and-shove
     // Lays a new segment of a track (or drops a via) and pushes the copper of other nets out of its way instead of violating
     // the clearance: tracks on the same layer, and vias together with the track ends attached to them (on both layers).

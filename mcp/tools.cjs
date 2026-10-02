@@ -1,7 +1,7 @@
 // The tools of the Browser SPICE MCP server: plain functions from JSON arguments to JSON results, so they can be
 // tested without the protocol around them.
 
-const { SimEngine, SpiceParser, Measure, PlotMath, Spectrum, Units, SIM_MODELS } = require("./engine.cjs");
+const { SimEngine, SpiceParser, Measure, PlotMath, Spectrum, Units, SIM_MODELS, simModelCardFromParams } = require("./engine.cjs");
 const { spawnSync } = require("child_process");
 const fs = require("fs"), os = require("os"), path = require("path");
 
@@ -40,13 +40,29 @@ function defaultSignals(circuit, kind) {
     return nodes.slice(0, 8).map(n => (kind === "ac" ? `vdb(${n})` : `v(${n})`));
 }
 
+// ------------------------------------------------------------------------------------------------ operating-point measurements
+// ".meas op vout find v(out)" / ".meas op iq i(vcc)": a node voltage or a source current at the DC operating point
+function parseOpMeas(line) {
+    const m = /^\s*\.meas(?:ure)?\s+op\s+(\w+)\s+(?:find\s+)?([vi])\(\s*([^)\s]+)\s*\)(?:\s+at\s*=\s*\S+)?\s*$/i.exec(String(line));
+    return m ? { name: m[1], kind: "op", type: m[2].toLowerCase(), sig: m[3] } : null;
+}
+function opValue(sp, op) {
+    const table = sp.type === "v" ? op.nodeVoltages : op.currents;
+    const key = Object.keys(table).find(k => k.toLowerCase() === sp.sig.toLowerCase());
+    if (key === undefined) throw new Error(`unknown ${sp.type === "v" ? "node" : "source"} ${sp.sig}`);
+    return table[key];
+}
+const opToSpice = (sp) => `.meas op ${sp.name} find ${sp.type}(${sp.sig})`;
+
 // ------------------------------------------------------------------------------------------------ simulate
 function simulate(args) {
     const { deck, engine, circuit, warnings } = engineFor(args.netlist);
     const { type, card } = pickAnalysis(deck, args);
     const out = { analysis: type, warnings: warnings.slice(0, 10), nodes: circuit.names.filter(n => !n.includes("#") && !n.includes(".")) };
     const maxPoints = Math.min(Math.max(Math.round(num(args.maxPoints, 100)), 2), 2000);
-    const measures = (args.measures || []).map(m => { const sp = Measure.parse(m); if (!sp) throw new Error(`cannot read measurement: ${m}`); return sp; });
+    const opSpecs = [], measures = [];
+    for (const m of args.measures || []) { const o = parseOpMeas(m); if (o) opSpecs.push(o); else { const sp = Measure.parse(m); if (!sp) throw new Error(`cannot read measurement: ${m}`); measures.push(sp); } }
+    for (const line of String(args.netlist).split("\n")) { const o = parseOpMeas(line); if (o) opSpecs.push(o); }
     const measure = (specs, getSignal) => specs.map(sp => { try { return { name: sp.name, value: round(Measure.compute(sp, getSignal), 8), spec: Measure.toSpice(sp) }; } catch (e) { return { name: sp.name, error: e.message }; } });
 
     if (type === "op") {
@@ -54,6 +70,7 @@ function simulate(args) {
         out.nodeVoltages = Object.fromEntries(Object.entries(op.nodeVoltages).map(([k, v]) => [k, round(v)]));
         out.branchCurrents = Object.fromEntries(Object.entries(op.currents).filter(([k]) => !k.includes(".")).map(([k, v]) => [k, round(v)]));
         out.method = op.method;
+        if (opSpecs.length) out.measures = opSpecs.map(sp => { try { return { name: sp.name, value: round(opValue(sp, op), 8), spec: opToSpice(sp) }; } catch (e) { return { name: sp.name, error: e.message }; } });
     } else if (type === "tran") {
         const tStop = num(args.tran && args.tran.tStop, card.tStop), tStep = num(args.tran && args.tran.tStep, card.tStep);
         if (!(tStop > 0) || !(tStep > 0)) throw new Error("a transient run needs tStop and tStep (in the deck's .tran card or the tran argument)");
@@ -89,10 +106,11 @@ function simulate(args) {
         out.sweepSource = source; out.sweep = arr(res.sweep);
         out.signals = {};
         for (const s of (args.signals && args.signals.length ? args.signals : defaultSignals(circuit, "dc"))) {
-            const m = /^v\((.+)\)$/i.exec(s.trim());
-            const key = m && Object.keys(res.nodeHistories).find(k => k.toLowerCase() === m[1].toLowerCase());
-            if (!key) throw new Error(`unknown signal ${s}`);
-            out.signals[s] = arr(res.nodeHistories[key]);
+            const m = /^([vi])\((.+)\)$/i.exec(s.trim());
+            const table = m && (m[1].toLowerCase() === "v" ? res.nodeHistories : res.currentHistories);
+            const key = m && Object.keys(table).find(k => k.toLowerCase() === m[2].toLowerCase());
+            if (!key) throw new Error(`unknown signal ${s} (use v(node) or i(source))`);
+            out.signals[s] = arr(table[key]);
         }
     } else if (type === "noise") {
         const n = args.noise || {};
@@ -148,7 +166,7 @@ function monteCarlo(args) {
     const runs = Math.round(num(args.runs, 50));
     if (runs < 2 || runs > 1000) throw new Error("runs must be between 2 and 1000");
     if (!args.measure) throw new Error('give one measurement, for example ".meas tran vfinal find v(out) at=5m"');
-    const spec = Measure.parse(args.measure);
+    const opSpec = parseOpMeas(args.measure), spec = opSpec || Measure.parse(args.measure);
     if (!spec) throw new Error(`cannot read measurement: ${args.measure}`);
     const tol = Object.assign({ R: 5, C: 10, L: 10 }, args.tolerance_percent || {});
     const rand = rng(num(args.seed, 1));
@@ -164,6 +182,7 @@ function monteCarlo(args) {
         const { circuit } = SpiceParser.build(deck);
         const eng = new SimEngine(circuit, { temp: deck.temp === undefined ? 27 : deck.temp });
         try {
+            if (opSpec) { values.push(opValue(opSpec, eng.operatingPoint({ nodeset: deck.nodeset }))); continue; }
             const get = spec.kind === "tran"
                 ? Measure.tranSignals(eng.transient({ tStop: card.tStop, tStep: card.tStep, uic: card.uic !== false, nodeIC: deck.ic }))
                 : Measure.acSignals(eng.ac({ fStart: card.fStart, fStop: card.fStop, pointsPerDecade: card.points || 20 }));
@@ -176,7 +195,7 @@ function monteCarlo(args) {
     const lo = args.limits && args.limits.min !== undefined ? num(args.limits.min) : -Infinity, hi = args.limits && args.limits.max !== undefined ? num(args.limits.max) : Infinity;
     const bins = Math.max(5, Math.min(20, Math.ceil(Math.log2(n)) + 1)), span = v[n - 1] - v[0] || 1, counts = new Array(bins).fill(0);
     for (const x of v) counts[Math.min(bins - 1, Math.floor(((x - v[0]) / span) * bins))]++;
-    return { measurement: Measure.toSpice(spec), runs: n, mean: round(mean), std_dev: round(std), min: round(v[0]), max: round(v[n - 1]), median: round(v[n >> 1]), yield_percent: lo > -Infinity || hi < Infinity ? round((100 * v.filter(x => x >= lo && x <= hi).length) / n, 4) : undefined, histogram: { from: round(v[0]), to: round(v[n - 1]), counts } };
+    return { measurement: opSpec ? opToSpice(opSpec) : Measure.toSpice(spec), runs: n, mean: round(mean), std_dev: round(std), min: round(v[0]), max: round(v[n - 1]), median: round(v[n >> 1]), yield_percent: lo > -Infinity || hi < Infinity ? round((100 * v.filter(x => x >= lo && x <= hi).length) / n, 4) : undefined, histogram: { from: round(v[0]), to: round(v[n - 1]), counts } };
 }
 
 // ------------------------------------------------------------------------------------------------ check / compare / models
@@ -195,7 +214,20 @@ function compareNgspice(args) {
     const { deck, engine, circuit } = engineFor(args.netlist);
     const nodes = circuit.names.filter(n => !n.includes("#") && !n.includes("."));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bs-cmp-"));
-    const body = args.netlist.split("\n").filter(l => !/^\s*\.(op|tran|ac|dc|end|control|endc|print|plot)\b/i.test(l)).join("\n");
+    let body = args.netlist.split("\n").filter(l => !/^\s*\.(op|tran|ac|dc|end|control|endc|print|plot)\b/i.test(l)).join("\n");
+    // models taken from the built-in library (1N4148, 2N2222 ...) are not known to ngspice: hand them over as .model cards
+    const given = new Set();
+    for (const e of deck.elements) {
+        if (!["D", "Q", "J", "M"].includes(e.kind) || !e.model || deck.models[e.model] || given.has(e.model)) continue;
+        const kinds = e.kind === "D" ? ["D", "LED", "DZ"] : e.kind === "Q" ? ["BJT_NPN", "BJT_PNP"] : e.kind === "M" ? ["NMOS", "PMOS"] : ["JFET_N", "JFET_P"];
+        for (const k of kinds) { const set = SIM_MODELS[k], key = set && Object.keys(set).find(x => x.toLowerCase() === e.model.toLowerCase()); if (key) { body += "\n" + simModelCardFromParams(k, e.model, set[key].params); given.add(e.model); if (e.kind === "M") {
+                const lp = set[key].params, nm = e.name.replace(/[^A-Za-z0-9_]/g, "_"), [g, d, so] = e.nodes;
+                if (lp.cgs > 0) body += `\nC${nm}_GS ${g} ${so} ${lp.cgs}`;
+                if (lp.cgd > 0) body += `\nC${nm}_GD ${g} ${d} ${lp.cgd}`;
+                if (lp.bodyDiode) body += `\n${k === "NMOS" ? `D${nm}_BD ${so} ${d}` : `D${nm}_BD ${d} ${so}`} BD_${nm}\n.model BD_${nm} D(IS=${lp.bodyDiode.is} N=${lp.bodyDiode.n === undefined ? 1 : lp.bodyDiode.n}${lp.bodyDiode.rs ? ` RS=${lp.bodyDiode.rs}` : ""})`;
+            }
+            if (e.kind === "M") body = body.split("\n").map(l => (/^\s*m/i.test(l) && new RegExp(`\\s${e.model}(\\s|$)`, "i").test(l) ? l.replace(/\s+[wl]\s*=\s*\S+/gi, "") : l)).join("\n"); break; } }
+    }
     const tr = deck.analyses.find(a => a.type === "tran"), ac = deck.analyses.find(a => a.type === "ac");
     const ctl = [".control", "set noaskquit", "op", ...nodes.map(n => `print v(${n})`)];
     if (tr) ctl.push(`tran ${tr.tStep} ${tr.tStop}${tr.uic ? " uic" : ""}`, `wrdata ${tmp}/t.txt ${nodes.map(n => `v(${n})`).join(" ")}`);
@@ -214,13 +246,18 @@ function compareNgspice(args) {
     const rows = tr && read(`${tmp}/t.txt`);
     if (rows && rows.length) {
         const r = new SimEngine(circuit, { temp: deck.temp === undefined ? 27 : deck.temp }).transient({ tStop: tr.tStop, tStep: tr.tStep, uic: tr.uic, nodeIC: deck.ic });
-        let worst = 0, worstNode = "";
+        let worst = 0, worstNode = "", worstMean = 0;
+        const per = [];
         nodes.forEach((n, k) => {
             const ys = rows.map(x => x[2 * k + 1]), range = Math.max(Math.max(...ys) - Math.min(...ys), 0.05 * Math.max(...ys.map(Math.abs)), 1e-3);
             let acc = 0; rows.forEach((x, i) => { const d = PlotMath.valueAt(r.timePoints, r.nodeHistories[n], x[0]) - ys[i]; acc += d * d; });
             const rms = Math.sqrt(acc / rows.length) / range; if (rms > worst) { worst = rms; worstNode = n; }
+            // the time average of each waveform: robust against small timing differences of fast edges
+            const avg = (xs, vs) => { let a = 0; for (let i = 1; i < xs.length; i++) a += 0.5 * (vs[i] + vs[i - 1]) * (xs[i] - xs[i - 1]); return a / (xs[xs.length - 1] - xs[0]); };
+            const mean = Math.abs(avg(r.timePoints, r.nodeHistories[n]) - avg(rows.map(x => x[0]), ys)) / range; worstMean = Math.max(worstMean, mean);
+            per.push({ node: n, rms_deviation_percent_of_range: round(100 * rms, 4), mean_deviation_percent_of_range: round(100 * mean, 4) });
         });
-        res.transient = { worst_rms_deviation_percent_of_range: round(100 * worst, 4), at_node: worstNode };
+        res.transient = { worst_rms_deviation_percent_of_range: round(100 * worst, 4), at_node: worstNode, worst_mean_deviation_percent_of_range: round(100 * worstMean, 4), nodes: per, note: "rms compares sample by sample and is dominated by the timing of fast switching edges; the mean compares the time averages" };
     }
     return res;
 }
