@@ -300,6 +300,7 @@
     editor.onEdit = (comp) => {
         if (!comp) return;
         if (comp.type === "SCOPE") { ScopeWindow.open(editor, live, comp); return; }
+        if (comp.type === "LOGAN") { LogicWindow.open(editor, live, comp); return; }
         if (comp.type === "SW") {
             editor.saveState();
             comp.closed = !comp.closed;
@@ -320,6 +321,7 @@
     C("probe.rename", "Rename Probe…", { enabled: () => !!editor.selectedProbe, run: () => editor.onEditProbe(editor.selectedProbe) });
     C("probe.addI", "Add Current Probe", { enabled: () => editor.selection.length === 1 && editor.selection[0].type !== "GND", run: () => editor.addCurrentProbe(editor.selection[0]) });
     C("probe.addV", "Add Voltage Probe Here", { run: () => editor.addVoltageProbe(editor.contextPos.x, editor.contextPos.y) });
+    C("logan.open", "Open Logic Analyser", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "LOGAN", run: () => LogicWindow.open(editor, live, editor.selection[0]) });
     C("scope.open", "Open Oscilloscope", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "SCOPE", run: () => ScopeWindow.open(editor, live, editor.selection[0]) });
     C("part.toggle", "Toggle Switch", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "SW", run: () => editor.onEdit(editor.selection[0]) });
 

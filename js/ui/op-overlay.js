@@ -74,7 +74,7 @@ class OpOverlay {
         for (const el of info.elements) {
             if (!el.comp || el.name.includes("_") && el.comp.name !== el.name) continue;
             const i = currents[el.name];
-            if (i === undefined || !Number.isFinite(i) || ["VM", "SCOPE", "GND"].includes(el.comp.type)) continue;
+            if (i === undefined || !Number.isFinite(i) || ["VM", "SCOPE", "LOGAN", "GND"].includes(el.comp.type)) continue;
             if (!parts.some(p => p.comp === el.comp)) parts.push({ comp: el.comp, i });
         }
         return { nodes: [...labels.values()], parts };

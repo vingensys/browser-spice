@@ -27,7 +27,9 @@ class ScopeCore {
                 D: { on: false, vdiv: 1, pos: 0, coup: "DC" }
             },
             trig: { src: "A", level: 0, slope: "rise", mode: "auto", autoLevel: true },
-            xy: false, run: true
+            xy: false, run: true,
+            cur: { on: false, x: [3, 7], ch: "A" },          // measurement cursors, in divisions from the left edge
+            fft: { on: false, chan: "A", window: "hann" }
         };
     }
 
@@ -38,6 +40,9 @@ class ScopeCore {
         out.chan = {};
         for (const c of ScopeCore.CHANNELS) out.chan[c] = Object.assign(base.chan[c], (s.chan || {})[c] || {});
         out.trig = Object.assign(base.trig, s.trig || {});
+        out.cur = Object.assign(base.cur, s.cur || {});
+        out.cur.x = [Number((s.cur && s.cur.x && s.cur.x[0]) ?? 3), Number((s.cur && s.cur.x && s.cur.x[1]) ?? 7)];
+        out.fft = Object.assign(base.fft, s.fft || {});
         if (s.trig && s.trig.level !== undefined && s.trig.autoLevel === undefined) out.trig.autoLevel = false;   // an explicit level wins
         return out;
     }
@@ -181,6 +186,57 @@ class ScopeCore {
         const st = PlotMath.stats(X, Y, X[0], X[X.length - 1]);
         const f = PlotMath.frequency(X, Y, X[0], X[X.length - 1]);
         return { vpp: st.pkpk, vrms: st.rms, vavg: st.mean, vmax: st.max, vmin: st.min, freq: f ? f.freq : null, period: f ? f.period : null };
+    }
+
+    // ---- cursors, spectrum, saved traces ----------------------------------------------------------------------------
+
+    // voltage of a channel at a screen position given in divisions (0 .. 10), with the channel's coupling applied
+    voltageAt(chan, div, cap = this.last) {
+        if (!cap) return null;
+        const c = this.s.chan[chan];
+        if (!c || !c.on) return null;
+        if (c.coup === "GND") return 0;
+        const n = 1001, ys = this.samples(chan, n, cap);
+        const x = Math.min(Math.max(div / 10, 0), 1) * (n - 1), i = Math.floor(x), f = x - i;
+        const a = ys[i], b = ys[Math.min(i + 1, n - 1)];
+        if (!Number.isFinite(a)) return null;
+        return Number.isFinite(b) ? a + f * (b - a) : a;
+    }
+
+    // { t1, t2, dt, freq, v1, v2, dv } for the cursor channel (times are relative to the trigger point)
+    cursorReadout(cap = this.last) {
+        const cu = this.s.cur;
+        if (!cap) return null;
+        const [d1, d2] = cu.x, tOf = (d) => (d - (5 + this.s.hpos)) * cap.tdiv;
+        const v1 = this.voltageAt(cu.ch, d1, cap), v2 = this.voltageAt(cu.ch, d2, cap);
+        const dt = tOf(d2) - tOf(d1);
+        return { t1: tOf(d1), t2: tOf(d2), dt, freq: dt !== 0 ? 1 / Math.abs(dt) : null, v1, v2, dv: v1 !== null && v2 !== null ? v2 - v1 : null };
+    }
+
+    // spectrum of the displayed window of one channel (null when there is nothing to analyse)
+    spectrum(chan, cap = this.last, window = "hann") {
+        const c = this.s.chan[chan];
+        if (!cap || !c || !c.on || c.coup === "GND" || this.t.length < 8) return null;
+        const t0 = Math.max(cap.t0, this.t[0]), t1 = Math.min(cap.t0 + 10 * cap.tdiv, this.tNow);
+        return Spectrum.analyse(this.t, this.v[chan].map(v => (Number.isFinite(v) ? v : 0)), { t0, t1, n: 2048, window });
+    }
+
+    // a copy of what the screen shows, kept as a reference trace: { t0, tdiv, traces: { A: [v...] } }
+    snapshot(cap = this.last, n = 500) {
+        if (!cap) return null;
+        const traces = {};
+        for (const c of ScopeCore.CHANNELS) if (this.s.chan[c].on) traces[c] = this.samples(c, n, cap);
+        return { tdiv: cap.tdiv, hpos: cap.hpos, traces };
+    }
+
+    // CSV of the displayed window (time relative to the left edge)
+    csv(cap = this.last, n = 1000) {
+        if (!cap) return "";
+        const on = ScopeCore.CHANNELS.filter(c => this.s.chan[c].on);
+        const cols = on.map(c => this.samples(c, n, cap));
+        const lines = [["Time (s)", ...on.map(c => `${c} (V)`)].join(",")];
+        for (let i = 0; i < n; i++) lines.push([cap.t0 + (i / (n - 1)) * 10 * cap.tdiv, ...cols.map(v => (Number.isFinite(v[i]) ? v[i] : ""))].join(","));
+        return lines.join("\r\n");
     }
 
     // ---- automatic setup -----------------------------------------------------------------------------------------

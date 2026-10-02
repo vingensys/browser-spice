@@ -340,6 +340,27 @@ const EXAMPLES = [
         }
     },
     {
+        id: "logic-analyser",
+        name: "Logic analyser on a ripple counter",
+        note: "Press Play, then double-click the logic analyser: the clock and the three counter outputs as digital traces. Try the trigger, cursors (bus value in hex) and Auto set.",
+        settings: { tStop: "10m", tStep: "10u" },
+        build(b) {
+            const ck = b.part("V", 100, 360, { rot: 270, sourceType: "SQUARE", gen: { low: 0, high: 5, freq: 1000, duty: 50 } });
+            const ff = [0, 1, 2].map(i => b.part("DFF", 340 + i * 280, 360, {}));
+            const g = b.part("GND", 100, 560);
+            b.wire(ck, "2", ff[0], "CLK"); b.wire(ck, "1", g, "1");
+            ff.forEach((f, i) => {
+                b.wire(f, "QN", f, "D");
+                if (i < 2) b.wire(f, "QN", ff[i + 1], "CLK");
+                const gs = b.part("GND", f.x - 20, 560); const gr = b.part("GND", f.x + 20, 620);
+                b.wire(f, "S", gs, "1"); b.wire(f, "R", gr, "1");
+            });
+            const la = b.part("LOGAN", 1300, 360, {});
+            b.wire(la, "D0", ck, "2");
+            ff.forEach((f, i) => b.wire(la, `D${i + 1}`, f, "Q"));
+        }
+    },
+    {
         id: "ripple-counter",
         name: "3-bit ripple counter (flip-flops)",
         note: "Three D flip-flops, each wired D = QN and clocked by the previous QN, divide a 1 kHz clock by 2, 4 and 8. Press Play.",

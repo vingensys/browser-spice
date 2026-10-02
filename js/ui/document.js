@@ -5,7 +5,7 @@
 class DocumentStore {
     static KEY = "browser-spice/autosave/1";
     // fields that only exist while a simulation runs; they must never be saved or count as an edit
-    static RUNTIME = ["live", "scopeTrace", "scopeScale", "glow", "seg", "energized", "blown", "on"];
+    static RUNTIME = ["live", "scopeTrace", "scopeScale", "logTrace", "glow", "seg", "energized", "blown", "on"];
 
     constructor(editor, runner) {
         this.editor = editor;

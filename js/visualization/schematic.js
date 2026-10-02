@@ -649,7 +649,7 @@ class SchematicEditor {
         R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", D: "D", DZ: "D", LED: "D",
         BJT_NPN: "Q", BJT_PNP: "Q", NMOS: "Q", PMOS: "Q", OPAMP: "U", IC555: "U",
         AND: "U", OR: "U", NOT: "U", NAND: "U", NOR: "U", XOR: "U", XNOR: "U", BUF: "U",
-        SW: "SW", POT: "RV", VM: "VM", AM: "AM", SCOPE: "OSC", NODEIC: "IC"
+        SW: "SW", POT: "RV", VM: "VM", AM: "AM", SCOPE: "OSC", LOGAN: "LA", NODEIC: "IC"
     };
 
     nextReference(type) {

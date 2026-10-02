@@ -23,6 +23,7 @@
  "js/visualization/waveform.js",
  "js/visualization/fft.js",
  "js/visualization/scope-core.js",
+ "js/visualization/logic-core.js",
  "js/circuit/netlist.js",
  "js/circuit/erc.js",
  "js/ui/icons.js",
@@ -46,6 +47,7 @@
  "js/analysis/study.js",
  "js/ui/study-dialog.js",
  "js/ui/scope.js",
+ "js/ui/logic-analyser.js",
  "js/examples.js",
  "js/app.js"
 ]

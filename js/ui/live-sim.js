@@ -20,6 +20,7 @@ class LiveSim {
         this.lastSig = 0;
         this.lastDraw = 0;
         this.scopes = new Map();      // SCOPE component id -> { comp, nets, wired, core }
+        this.logans = new Map();      // LOGAN component id -> { comp, nets, wired, core }
     }
 
     onState(fn) { this.listeners.push(fn); }
@@ -28,7 +29,7 @@ class LiveSim {
     // everything that changes the circuit's equations (switch / wiper settings excluded)
     circuitSignature() {
         const comps = this.editor.components.map(c => {
-            const { closed, position, live, scopeTrace, scopeScale, glow, seg, energized, blown, on, scope, ...rest } = c;
+            const { closed, position, live, scopeTrace, scopeScale, logTrace, logan, glow, seg, energized, blown, on, scope, ...rest } = c;
             const part = PartLib.defs[c.type];
             for (const k of (part && part.tweak) || []) delete rest[k];   // knobs you can turn during a run
             if (part && part.tweak) delete rest.value;                     // its label shows the knob
@@ -89,6 +90,13 @@ class LiveSim {
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
             sc.comp.scope = ScopeCore.merge(sc.comp.scope);
             this.scopes.set(sc.comp.id, { comp: sc.comp, nets: sc.nets, wired: sc.wired, core: new ScopeCore(sc.comp.scope) });
+        }
+        this.logans = new Map();
+        for (const la of info.instruments.filter(i => i.type === "LOGAN")) {
+            la.comp.logan = LogicCore.merge(la.comp.logan);
+            const core = new LogicCore(la.comp.logan);
+            core.wired = la.wired;
+            this.logans.set(la.comp.id, { comp: la.comp, nets: la.nets, wired: la.wired, core });
         }
         this.baseStep = s.tStep;
         this.feedScopes();
@@ -170,7 +178,7 @@ class LiveSim {
         const minGap = this.span / 3000; // keep the plot buffers bounded
         while (!run.done && performance.now() - t0 < ms && (this.speed <= 0 || run.t < this.target)) {
             run.step();
-            if (this.scopes.size) this.feedScopes();
+            if (this.scopes.size || this.logans.size) this.feedScopes();
             if (run.t >= this.nextSample) {
                 this.times.push(run.t);
                 this.channels.forEach((ch, i) => this.values[i].push(ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element)));
@@ -217,6 +225,10 @@ class LiveSim {
             comp.scopeTrace = trace;
             comp.scopeScale = 1;          // the trace is already in screen units (+-1 = the screen edge)
         }
+        for (const { comp, core } of this.logans.values()) {
+            const cap = core.capture();
+            comp.logTrace = cap ? [0, 1, 2, 3, 4, 5, 6, 7].map(c => { const out = []; for (let i = 0; i < 40; i++) { const l = core.level(c, cap.t0 + (i / 39) * 10 * cap.tdiv); out.push(l === null ? 0 : l); } return out; }) : null;
+        }
     }
 
     // every accepted time point goes to each scope's sample buffer
@@ -227,6 +239,11 @@ class LiveSim {
             ["A", "B", "C", "D"].forEach((c, k) => { if (e.wired[k]) values[c] = run.voltage(e.nets[k]); });
             e.core.push(run.t, values);
         }
+        for (const e of this.logans.values()) {
+            const values = {};
+            e.nets.forEach((net, k) => { if (e.wired[k]) values[k] = run.voltage(net); });
+            e.core.push(run.t, values);
+        }
     }
 
     // an open scope with a fast timebase needs time steps small enough to draw the waveform
@@ -234,6 +251,7 @@ class LiveSim {
         if (!this.run) return;
         let want = this.baseStep || this.run.tStep;
         for (const [id, w] of ScopeWindow.windows) if (this.scopes.has(id)) want = Math.min(want, w.s.tdiv / 40);
+        for (const [id, w] of LogicWindow.windows) if (this.logans.has(id)) want = Math.min(want, w.s.tdiv / 40);
         want = Math.max(want, (this.baseStep || want) * 1e-3);
         this.run.tStep = want;
         this.run.hNext = Math.min(this.run.hNext, want);
@@ -249,7 +267,7 @@ class LiveSim {
 
     clearDisplays() {
         for (const prb of this.editor.probes) delete prb.live;
-        for (const c of this.editor.components) { for (const k of ["live", "scopeTrace", "scopeScale", "glow", "seg", "energized", "blown", "on"]) delete c[k]; }
+        for (const c of this.editor.components) { for (const k of ["live", "scopeTrace", "scopeScale", "logTrace", "glow", "seg", "energized", "blown", "on"]) delete c[k]; }
         this.editor.draw();
     }
 

@@ -58,7 +58,24 @@ class ScopeWindow {
                         <button data-act="single" title="Wait for one trigger, catch it and hold">Single</button>
                         <button data-act="auto" title="Pick timebase, volts/div and trigger for the signals">Auto set</button>
                         <button data-act="xy" title="Plot A against B">XY</button>
+                        <button data-act="cur" title="Measurement cursors: click or drag on the screen">Cursors</button>
+                        <button data-act="fft" title="Show the spectrum of one channel instead of the waveform">FFT</button>
                     </div>
+                    <div class="scope-buttons">
+                        <button data-act="save" title="Keep the picture on screen as a grey reference trace (up to 4)">Save trace</button>
+                        <button data-act="clearrefs" title="Remove the saved reference traces">Clear saved</button>
+                        <button data-act="csv" title="Download the displayed data as CSV">CSV</button>
+                        <button data-act="png" title="Download the screen as a picture">PNG</button>
+                    </div>
+                    <fieldset data-role="curbox" style="display:none"><legend>Cursors</legend>
+                        <label>Channel <select data-c="ch"><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
+                        <div class="scope-readout" data-role="cur"></div>
+                    </fieldset>
+                    <fieldset data-role="fftbox" style="display:none"><legend>Spectrum</legend>
+                        <label>Channel <select data-f="chan"><option>A</option><option>B</option><option>C</option><option>D</option></select></label>
+                        <label>Window <select data-f="window">${Object.entries(Spectrum.WINDOWS).map(([k, w]) => `<option value="${k}">${w.label}</option>`).join("")}</select></label>
+                        <div class="scope-readout" data-role="fftread"></div>
+                    </fieldset>
                     <fieldset><legend>Timebase</legend>
                         <label>Time/div <select data-k="tdiv">${tdivs}</select></label>
                         <label>Position <input type="range" data-k="hpos" min="-5" max="5" step="0.1"></label>
@@ -95,6 +112,8 @@ class ScopeWindow {
         });
         root.addEventListener("pointerdown", () => this.toFront());
         root.querySelector(".scope-close").onclick = () => this.close();
+        this.refs = [];
+        this.attachScreen();
 
         // controls write straight into the part's settings
         root.addEventListener("input", (e) => this.onControl(e));
@@ -122,12 +141,21 @@ class ScopeWindow {
         root.querySelector('[data-act="run"]').classList.toggle("on", !s.run);
         root.querySelector('[data-act="xy"]').classList.toggle("on", !!s.xy);
         root.querySelector('[data-act="single"]').classList.toggle("on", s.trig.mode === "single");
+        root.querySelector('[data-act="cur"]').classList.toggle("on", !!s.cur.on);
+        root.querySelector('[data-act="fft"]').classList.toggle("on", !!s.fft.on);
+        root.querySelector('[data-role="curbox"]').style.display = s.cur.on ? "flex" : "none";
+        root.querySelector('[data-role="fftbox"]').style.display = s.fft.on ? "flex" : "none";
+        set(root.querySelector('[data-c="ch"]'), s.cur.ch);
+        set(root.querySelector('[data-f="chan"]'), s.fft.chan);
+        set(root.querySelector('[data-f="window"]'), s.fft.window);
     }
 
     onControl(e) {
         const t = e.target;
-        if (!t.matches || !t.matches("[data-k],[data-t]")) return;
+        if (!t.matches || !t.matches("[data-k],[data-t],[data-c],[data-f]")) return;
         const s = this.s;
+        if (t.dataset.c) { s.cur.ch = t.value; this.syncControls(); return; }
+        if (t.dataset.f) { s.fft[t.dataset.f] = t.value; this.syncControls(); return; }
         const num = (v) => Number(v);
         if (t.dataset.t) {
             const k = t.dataset.t;
@@ -155,13 +183,48 @@ class ScopeWindow {
             s.run = !s.run;
             if (s.run && s.trig.mode === "single") core.arm();
         } else if (name === "single") core.arm();
-        else if (name === "xy") s.xy = !s.xy;
+        else if (name === "xy") { s.xy = !s.xy; if (s.xy) s.fft.on = false; }
+        else if (name === "cur") s.cur.on = !s.cur.on;
+        else if (name === "fft") { s.fft.on = !s.fft.on; if (s.fft.on) { s.xy = false; if (!s.chan[s.fft.chan].on) s.fft.chan = ["A", "B", "C", "D"].find(c => s.chan[c].on) || "A"; } }
+        else if (name === "save") {
+            const snap = core.snapshot();
+            if (!snap) { if (this.live.runner) this.live.runner.toast("Nothing on the screen to save yet.", "info"); }
+            else { this.refs.push(snap); if (this.refs.length > 4) this.refs.shift(); }
+        } else if (name === "clearrefs") this.refs = [];
+        else if (name === "csv") ScopeWindow.download(`${this.comp.name}.csv`, new Blob([core.csv()], { type: "text/csv" }));
+        else if (name === "png") this.canvas.toBlob(b => b && ScopeWindow.download(`${this.comp.name}.png`, b));
         else if (name === "auto") {
             const ok = core.autoset();
             if (!ok && this.live.runner) this.live.runner.toast("Auto set needs a running simulation with a signal on a wired channel.", "info");
             if (this.live.applyScopeResolution) this.live.applyScopeResolution();
         }
         this.syncControls();
+    }
+
+    static download(name, blob) {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    }
+
+    // with the cursors on, click or drag on the screen to move the nearer cursor (a vertical line)
+    attachScreen() {
+        const cv = this.canvas;
+        const divAt = (e) => { const r = cv.getBoundingClientRect(); return Math.min(10, Math.max(0, ((e.clientX - r.left) / r.width) * 10)); };
+        cv.addEventListener("pointerdown", (e) => {
+            const s = this.s;
+            if (!s.cur.on || s.xy || s.fft.on) return;
+            const d = divAt(e), x = s.cur.x;
+            const k = Math.abs(d - x[0]) <= Math.abs(d - x[1]) ? 0 : 1;
+            x[k] = d;
+            cv.setPointerCapture(e.pointerId);
+            const move = (ev) => { x[k] = divAt(ev); };
+            const up = () => { cv.removeEventListener("pointermove", move); cv.removeEventListener("pointerup", up); };
+            cv.addEventListener("pointermove", move); cv.addEventListener("pointerup", up);
+        });
+        cv.title = "With Cursors on: click or drag to place the nearer cursor.";
     }
 
     close() {
@@ -216,6 +279,8 @@ class ScopeWindow {
             const live = this.live.scopes && this.live.scopes.has(this.compId);
             ctx.fillText(live ? (s.trig.mode === "single" ? "Waiting for a trigger…" : s.trig.mode === "normal" ? "Waiting for a trigger…" : "Waiting for samples…") : "Press Play (F12) to start the simulation", W / 2, H / 2 - 8);
             if (!live) { ctx.font = "11px system-ui"; ctx.fillText("Wire the circuit to inputs A–D of the scope", W / 2, H / 2 + 12); }
+        } else if (s.fft.on) {
+            this.drawSpectrum(ctx, core, cap, W, H, dx, dy);
         } else if (s.xy) {
             const xs = core.samples("A", 600, cap), ys = core.samples("B", 600, cap);
             ctx.strokeStyle = ScopeCore.COLORS.A; ctx.lineWidth = 1.6; ctx.beginPath();
@@ -244,13 +309,38 @@ class ScopeWindow {
             ctx.restore();
         }
 
+        if (cap && !s.xy && !s.fft.on) {
+            // saved reference traces, drawn grey under the channel's current scale
+            ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+            this.refs.forEach((r, k) => {
+                for (const c of Object.keys(r.traces)) {
+                    ctx.strokeStyle = `rgba(200,205,215,${0.35 + 0.1 * k})`; ctx.lineWidth = 1.2; ctx.setLineDash([5, 3]); ctx.beginPath();
+                    let st = false;
+                    r.traces[c].forEach((v, i) => { if (!Number.isFinite(v)) { st = false; return; } const px = (i / (r.traces[c].length - 1)) * W, py = yOf(v, c); if (st) ctx.lineTo(px, py); else { ctx.moveTo(px, py); st = true; } });
+                    ctx.stroke();
+                }
+            });
+            ctx.restore(); ctx.setLineDash([]);
+            // the live traces are drawn after these (below), so redraw them on top
+            ctx.save(); ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
+            for (const c of active) {
+                if (!this.refs.length) break;
+                const ys = core.samples(c, W, cap);
+                ctx.strokeStyle = ScopeCore.COLORS[c]; ctx.lineWidth = 1.8; ctx.beginPath(); let st = false;
+                ys.forEach((v, i) => { if (!Number.isFinite(v)) { st = false; return; } const py = yOf(v, c); if (st) ctx.lineTo(i, py); else { ctx.moveTo(i, py); st = true; } });
+                ctx.stroke();
+            }
+            ctx.restore();
+            if (s.cur.on) this.drawCursors(ctx, core, cap, W, H, dx, yOf);
+        }
+
         // markers: channel zero levels on the left, trigger level on the right, trigger position on top
-        for (const c of active) {
+        for (const c of s.fft.on ? [] : active) {
             const y = yOf(0, c);
             ctx.fillStyle = ScopeCore.COLORS[c];
             ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(9, y - 5); ctx.lineTo(9, y + 5); ctx.closePath(); ctx.fill();
         }
-        if (!s.xy && s.chan[s.trig.src] && s.chan[s.trig.src].on) {
+        if (!s.xy && !s.fft.on && s.chan[s.trig.src] && s.chan[s.trig.src].on) {
             const y = yOf(s.trig.level, s.trig.src);
             ctx.fillStyle = ScopeCore.COLORS[s.trig.src];
             ctx.beginPath(); ctx.moveTo(W, y); ctx.lineTo(W - 10, y - 5); ctx.lineTo(W - 10, y + 5); ctx.closePath(); ctx.fill();
@@ -268,7 +358,67 @@ class ScopeWindow {
         ctx.textAlign = "right"; ctx.fillText(info, W - 6, H - 6);
     }
 
+    drawCursors(ctx, core, cap, W, H, dx, yOf) {
+        const s = this.s, ch = s.cur.ch;
+        ctx.save();
+        ctx.setLineDash([6, 4]); ctx.lineWidth = 1; ctx.font = "bold 10px system-ui"; ctx.textAlign = "center";
+        s.cur.x.forEach((d, k) => {
+            const x = d * dx;
+            ctx.strokeStyle = "#e8edf5"; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+            ctx.setLineDash([]); ctx.fillStyle = "#e8edf5"; ctx.fillText(String(k + 1), x, 12);
+            const v = core.voltageAt(ch, d, cap);
+            if (v !== null && s.chan[ch].on) { ctx.fillStyle = ScopeCore.COLORS[ch]; ctx.beginPath(); ctx.arc(x, yOf(v, ch), 4, 0, 7); ctx.fill(); }
+            ctx.setLineDash([6, 4]);
+        });
+        ctx.restore();
+    }
+
+    // spectrum of one channel across the displayed window: 0 .. a useful frequency, 10 dB per division
+    drawSpectrum(ctx, core, cap, W, H, dx, dy) {
+        const s = this.s, c = s.fft.chan;
+        this.fftInfo = null;
+        const sp = cap ? core.spectrum(c, cap, s.fft.window) : null;
+        ctx.font = "13px system-ui"; ctx.textAlign = "center"; ctx.fillStyle = "#4f9d63";
+        if (!sp) { ctx.fillText(cap ? `Channel ${c} is off or grounded` : "Waiting for samples…", W / 2, H / 2); return; }
+        const f1 = sp.fundamental ? sp.fundamental.f : 0;
+        let K = sp.freq.length;
+        if (f1) K = Math.min(K, Math.ceil((12 * f1) / (sp.freq[1] || 1)) + 2);
+        const fmax = sp.freq[K - 1];
+        const peak = Math.max(...Array.from(sp.db).slice(1, K));
+        const top = Math.ceil(peak / 10) * 10 + (peak > -1e8 ? 0 : 0);
+        const yOf = (db) => ((top - db) / 10) * dy;
+        ctx.strokeStyle = ScopeCore.COLORS[c]; ctx.lineWidth = 1.5; ctx.beginPath();
+        for (let k = 1; k < K; k++) {
+            const x = (sp.freq[k] / fmax) * W, y = Math.min(H, Math.max(0, yOf(Math.max(sp.db[k], top - 80))));
+            if (k === 1) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.fillStyle = "#8fbf9a"; ctx.font = "10px Consolas, monospace"; ctx.textAlign = "left";
+        for (let j = 0; j <= 8; j += 2) ctx.fillText(`${top - j * 10} dBV`, 4, Math.max(10, j * dy - 3));
+        ctx.textAlign = "right";
+        for (let i = 2; i <= 10; i += 2) ctx.fillText(Units.formatSI((i / 10) * fmax, "Hz"), i * dx - 3, H - 18);
+        this.fftInfo = { sp, f1 };
+    }
+
+    measureFFT() {
+        const el = this.root.querySelector('[data-role="fftread"]');
+        const i = this.fftInfo;
+        if (!i) { el.textContent = ""; return; }
+        const f = i.sp.fundamental;
+        el.innerHTML = f ? `Fundamental ${Units.formatSI(f.f, "Hz")}, ${(20 * Math.log10(f.mag)).toFixed(1)} dBV<br>THD ${(i.sp.thd * 100).toFixed(2)} %   DC ${Units.formatSI(i.sp.mean, "V")}` : "No tone found";
+    }
+
+    measureCursors(core, cap) {
+        const el = this.root.querySelector('[data-role="cur"]');
+        const r = cap ? core.cursorReadout(cap) : null;
+        if (!r) { el.textContent = ""; return; }
+        const v = (x) => (x === null ? "—" : Units.formatSI(x, "V"));
+        el.innerHTML = `1: ${Units.formatSI(r.t1, "s")}, ${v(r.v1)}<br>2: ${Units.formatSI(r.t2, "s")}, ${v(r.v2)}<br>Δt ${Units.formatSI(Math.abs(r.dt), "s")} (${r.freq ? Units.formatSI(r.freq, "Hz") : "—"})   ΔV ${v(r.dv)}`;
+    }
+
     measure(core, cap) {
+        if (this.s.cur.on) this.measureCursors(core, cap);
+        if (this.s.fft.on) this.measureFFT();
         const table = this.root.querySelector('[data-role="meas"]');
         const f = (v, u) => (v === null || v === undefined || !Number.isFinite(v) ? "—" : Units.formatSI(v, u));
         const rows = ["A", "B", "C", "D"].filter(c => this.s.chan[c].on).map(c => {

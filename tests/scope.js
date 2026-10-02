@@ -7,7 +7,7 @@ window.scopeTests = async function () {
     const near = (a, b, tol) => Math.abs(a - b) <= tol;
     const wait = (ms) => new Promise(r => setTimeout(r, ms));
     const clear = () => {
-        live.stop(); ScopeWindow.closeAll(); Dialog.close("t");
+        live.stop(); ScopeWindow.closeAll(); LogicWindow.closeAll(); Dialog.close("t");
         editor.setTool("select");
         editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
         editor.historyStack = []; editor.futureStack = []; editor.clearSelection(); editor.resetView();
@@ -174,6 +174,25 @@ window.scopeTests = async function () {
     ok("XY mode switches on", sc.scope.xy === true);
     win.root.querySelector('[data-act="xy"]').click();
 
+    // cursors, spectrum and saved traces
+    win.root.querySelector('[data-act="cur"]').click();
+    ok("Cursors shows the cursor panel", sc.scope.cur.on && win.root.querySelector('[data-role="curbox"]').style.display !== "none");
+    const rect = win.canvas.getBoundingClientRect();
+    const fire = (type, dx) => win.canvas.dispatchEvent(new PointerEvent(type, { clientX: rect.left + rect.width * dx / 10, clientY: rect.top + 50, pointerId: 1, bubbles: true }));
+    fire("pointerdown", 2); fire("pointerup", 2);
+    ok("clicking the screen places the nearer cursor", Math.abs(sc.scope.cur.x[0] - 2) < 0.05, sc.scope.cur.x);
+    await wait(300);
+    ok("the cursor readout shows a time difference", /Δt/.test(win.root.querySelector('[data-role="cur"]').textContent), win.root.querySelector('[data-role="cur"]').textContent);
+    win.root.querySelector('[data-act="cur"]').click();
+    win.root.querySelector('[data-act="fft"]').click(); await wait(400);
+    ok("FFT mode shows the spectrum readout", sc.scope.fft.on && /Fundamental|No tone/.test(win.root.querySelector('[data-role="fftread"]').textContent), win.root.querySelector('[data-role="fftread"]').textContent);
+    win.root.querySelector('[data-act="fft"]').click();
+    win.root.querySelector('[data-act="save"]').click();
+    ok("Save trace keeps a reference trace (and five saves keep the last four)", win.refs.length === 1 && (win.root.querySelector('[data-act="save"]').click(), win.root.querySelector('[data-act="save"]').click(), win.root.querySelector('[data-act="save"]').click(), win.root.querySelector('[data-act="save"]').click(), win.refs.length === 4));
+    await wait(100);
+    win.root.querySelector('[data-act="clearrefs"]').click();
+    ok("Clear saved removes them", win.refs.length === 0);
+
     // resolution follows the timebase
     const base = live.baseStep;
     sc.scope.tdiv = 1e-5; live.applyScopeResolution();
@@ -195,6 +214,31 @@ window.scopeTests = async function () {
     // closing
     win.root.querySelector(".scope-close").click();
     ok("the close button removes the window", !document.querySelector(".scope-win") && !ScopeWindow.windows.size);
+    // ======================================================== logic analyser
+    clear(); loadExampleById(editor, "logic-analyser");
+    const la = editor.components.find(c => c.type === "LOGAN");
+    ok("the logic analyser example places an analyser with eight pins", la && editor.getTerminals(la).length === 8 && editor.wires.length >= 8);
+    const lai = NetlistExtractor.extract(editor);
+    ok("the netlist lists it as an instrument without simulating it", lai.instruments.some(i => i.type === "LOGAN" && i.wired.slice(0, 4).every(Boolean) && !i.wired[7]) && !lai.elements.some(e => e.comp && e.comp.type === "LOGAN"));
+    ok("an unconnected logic analyser input raises no warning", !lai.warnings.some(w => /LA/.test(w)), lai.warnings);
+    ok("the Pick Devices catalog offers it", DeviceCatalog.instruments().some(i => i.type === "LOGAN"));
+    live.start(); await wait(900);
+    ok("playing feeds the analyser's core", live.logans.size === 1 && live.logans.get(la.id).core.t.length > 20);
+    const lw = LogicWindow.open(editor, live, la);
+    document.getElementById("simTstop").value = "10m";
+    lw.s.tdiv = 1e-3; live.applyScopeResolution(); await wait(1200);
+    const lcore = live.logans.get(la.id).core;
+    ok("the clock toggles on D0 across the screen", lcore.last && lcore.segments(0, lcore.last).length >= 8, lcore.last && lcore.segments(0, lcore.last).length);
+    ok("D1 (clock divided by two) toggles half as often", lcore.segments(1, lcore.last).length < lcore.segments(0, lcore.last).length);
+    ok("the symbol on the sheet shows the traces", la.logTrace && la.logTrace.length === 8 && la.logTrace[0].some(v => v === 1) && la.logTrace[0].some(v => v === 0));
+    lw.root.querySelector('[data-act="cur"]').click(); await wait(400);
+    ok("cursors show the bus value in hex", /bus 0x/.test(lw.root.querySelector('[data-role="cur"]').textContent), lw.root.querySelector('[data-role="cur"]').textContent);
+    const sig1 = live.circuitSignature(); lw.s.tdiv = 2e-3;
+    ok("changing analyser settings does not restart the simulation", live.circuitSignature() === sig1);
+    ok("settings are saved with the design but the trace is not", (() => { const sv = doc.serialize(); const c = sv.components.find(x => x.type === "LOGAN"); return c.logan && c.logan.tdiv === 2e-3 && c.logTrace === undefined; })());
+    live.stop(); LogicWindow.closeAll();
+    ok("closing removes the window", !document.querySelector(".logan-win"));
+
     editor.onNotice = realNotice;
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };

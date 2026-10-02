@@ -1,7 +1,7 @@
 // Oscilloscope core: node tests/scope.test.js
 const fs = require("fs"), path = require("path");
-const src = ["js/visualization/plot-math.js", "js/visualization/scope-core.js"].map(f => fs.readFileSync(path.join(__dirname, "..", f), "utf8")).join("\n;\n");
-const { ScopeCore, PlotMath } = new Function(src + "\nreturn { ScopeCore, PlotMath };")();
+const src = ["js/visualization/plot-math.js", "js/visualization/fft.js", "js/visualization/scope-core.js"].map(f => fs.readFileSync(path.join(__dirname, "..", f), "utf8")).join("\n;\n");
+const { ScopeCore, PlotMath, Spectrum } = new Function(src + "\nreturn { ScopeCore, PlotMath, Spectrum };")();
 
 let passed = 0, failed = 0;
 const test = (name, fn) => { try { fn(); passed++; console.log(`  ok   ${name}`); } catch (e) { failed++; console.log(`  FAIL ${name}\n       ${e.message}`); } };
@@ -176,6 +176,35 @@ test("the 1-2-5 steps", () => {
     near(t[0], 1e-6, 0); near(t[t.length - 1], 10, 0); near(v[0], 1e-3, 0); near(v[v.length - 1], 100, 0);
     if (!t.includes(2e-4) || !t.includes(5e-3) || !v.includes(0.2) || !v.includes(5)) throw new Error("1-2-5 values missing");
     if (t.some((x, i) => i && x <= t[i - 1])) throw new Error("ascending");
+});
+
+test("cursors read time difference, frequency and voltage at their positions", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-4, trig: { level: 0, slope: "rise", mode: "auto", autoLevel: false }, cur: { on: true, x: [5, 7.5], ch: "A" } }));
+    feed(sc, 0.0113, 1e-6, sine(1000)); const cap = sc.capture();
+    const r = sc.cursorReadout(cap);
+    near(r.dt, 2.5e-4, 1e-9, "dt"); near(r.freq, 4000, 1, "1/dt");
+    near(r.v1, 0, 0.02, "v at the trigger (0 V rising)"); near(r.v2, 1, 0.02, "v a quarter period later (peak)"); near(r.dv, r.v2 - r.v1, 1e-12);
+});
+test("cursor positions survive a settings merge and default sensibly", () => {
+    const m = ScopeCore.merge({ cur: { on: true, x: [1, 9], ch: "B" } });
+    if (!m.cur.on || m.cur.x[0] !== 1 || m.cur.x[1] !== 9 || m.cur.ch !== "B" || ScopeCore.merge().cur.on) throw new Error(JSON.stringify(m.cur));
+});
+test("the scope's FFT finds the tone and its level", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-3, trig: { level: 0, mode: "auto", autoLevel: false } }));
+    feed(sc, 0.05, 2e-6, (t) => ({ A: 0.5 * Math.sin(2 * Math.PI * 1000 * t), B: 0 })); const cap = sc.capture();
+    const sp = sc.spectrum("A", cap, "flattop");
+    near(sp.fundamental.f, 1000, 15, "f"); near(sp.fundamental.mag, 0.5, 0.01, "mag");
+    if (sc.spectrum("C", cap) !== null) throw new Error("a channel that is off has no spectrum");
+});
+test("a saved trace keeps the screen as it was, and the CSV lists time and channels", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-4, trig: { level: 0, autoLevel: false } }));
+    feed(sc, 0.0113, 1e-6, sine(1000)); const cap = sc.capture();
+    const snap = sc.snapshot(cap, 100);
+    if (snap.traces.A.length !== 100 || Object.keys(snap.traces).join() !== "A,B") throw new Error(JSON.stringify(Object.keys(snap.traces)));
+    sc.reset(); feed(sc, 0.0113, 1e-6, sine(500));
+    if (!snap.traces.A.some(Number.isFinite)) throw new Error("snapshot changed");
+    sc.capture(); const lines = sc.csv(sc.last, 50).split("\r\n");
+    if (lines.length !== 51 || lines[0] !== "Time (s),A (V),B (V)") throw new Error(lines[0]);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

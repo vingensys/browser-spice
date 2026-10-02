@@ -202,7 +202,7 @@ class NetlistExtractor {
 
             const pin = (name) => nets.terminalNode(comp, name) || "0";
             const base = { name: comp.name, comp };
-            if (comp.type === "VM" || comp.type === "SCOPE") {
+            if (comp.type === "VM" || comp.type === "SCOPE" || comp.type === "LOGAN") {
                 instruments.push({
                     type: comp.type, comp,
                     nets: editor.getTerminals(comp).map(t => pin(t.name)),
@@ -225,7 +225,7 @@ class NetlistExtractor {
             const unwired = editor.getTerminals(comp)
                 .filter(t => !nets.wired.has(`${comp.id}:${t.name}`)).map(t => t.name);
             const quiet = typeof PartLib !== "undefined" && PartLib.defs[comp.type] && PartLib.defs[comp.type].quietPins;
-            if (unwired.length && comp.type !== "SCOPE" && !quiet) warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
+            if (unwired.length && comp.type !== "SCOPE" && comp.type !== "LOGAN" && !quiet) warnings.push(`${comp.name}: unconnected pin${unwired.length > 1 ? "s" : ""} ${unwired.join(", ")}`);
 
             switch (comp.type) {
                 case "R":

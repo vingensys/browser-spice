@@ -98,6 +98,7 @@ const DeviceCatalog = {
         return [
             { name: "VOLTMETER", type: "VM", desc: "DC voltmeter: reads the voltage across its pins while the simulation runs", props: { value: "" } },
             { name: "AMMETER", type: "AM", desc: "DC ammeter: put it in series; reads the current while the simulation runs", props: { value: "" } },
+            { name: "LOGIC ANALYSER", type: "LOGAN", desc: "Eight-input logic analyser: digital traces, a trigger, cursors and bus values while the simulation runs", props: { value: "" } },
             { name: "OSCILLOSCOPE", type: "SCOPE", desc: "Four-channel oscilloscope: shows its inputs live while the simulation runs", props: { value: "" } }
         ];
     },

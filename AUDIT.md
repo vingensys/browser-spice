@@ -43,8 +43,8 @@ against Proteus / ngspice, **P3** polish.
 | --- | --- | --- |
 | ~~No cursors / measurements~~ | P2 | **Done**: cursors A / B, per-trace readouts, frequency / duty / rise-fall, AC peak / −3 dB / unity gain / phase margin. Still missing: multi-axis graphs, user-defined `.measure` expressions. |
 | ~~No export of graph data~~ | P2 | **Done**: CSV (all / visible / between cursors), measurements CSV, PNG. |
-| ~~Oscilloscope is only a preview~~ | P2 | **Done**: a real scope window with timebase, triggers (auto / normal / single), channel scaling and coupling, XY, readouts. Still missing: scope cursors, FFT mode, saved captures. |
-| No logic analyser, signal generator panel, or spectrum view | P3 | |
+| ~~Oscilloscope is only a preview~~ | P2 | **Done**: a real scope window with timebase, triggers (auto / normal / single), channel scaling and coupling, XY, readouts. Also done: cursors, FFT mode, saved reference traces, CSV/PNG export. |
+| ~~No logic analyser or spectrum view~~ | P3 | **Done** (logic analyser part and window; spectrum tab and scope FFT). Signal generator panel still missing. |
 
 ## 4. Interoperability
 | Gap | Pri | Notes |

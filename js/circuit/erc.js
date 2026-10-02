@@ -46,7 +46,7 @@ class ErcChecker {
 
         // ---- pins that are not connected ----------------------------------------------------------
         for (const c of real) {
-            if (c.type === "GND" || c.type === "NODEIC" || c.type === "SCOPE") continue;
+            if (c.type === "GND" || c.type === "NODEIC" || c.type === "SCOPE" || c.type === "LOGAN") continue;
             const def = typeof PartLib !== "undefined" ? PartLib.defs[c.type] : null;
             if (def && def.quietPins) continue;
             const open = editor.getTerminals(c).filter(t => !nets.wired.has(`${c.id}:${t.name}`));

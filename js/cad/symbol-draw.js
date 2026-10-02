@@ -84,6 +84,7 @@ class SymbolRenderer {
             case "VM": this.drawMeter(component, "V"); break;
             case "AM": this.drawMeter(component, "A"); break;
             case "SCOPE": this.drawScope(component); break;
+            case "LOGAN": this.drawLogan(component); break;
             default: this.drawPart(component);
         }
 
@@ -425,6 +426,25 @@ class SymbolRenderer {
                 });
                 ctx.stroke();
             }
+        });
+        this.drawLabel(component);
+    }
+
+    drawLogan(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.col("#e8edf5"); ctx.lineWidth = this.lw(2); ctx.fillStyle = "#101820";
+        ctx.beginPath(); ctx.rect(-40, -98, 96, 176); ctx.fill(); ctx.stroke();
+        const colors = ["#ffd54a", "#4fc3f7", "#ff6e9a", "#7cf08a", "#ffab40", "#b388ff", "#80deea", "#e6ee9c"], tr = component.logTrace;
+        [-80, -60, -40, -20, 0, 20, 40, 60].forEach((y, i) => {
+            ctx.strokeStyle = this.col("#e8edf5"); ctx.lineWidth = this.lw(2);
+            ctx.beginPath(); ctx.moveTo(-80, y); ctx.lineTo(-40, y); ctx.stroke();
+            ctx.font = "bold 9px system-ui"; ctx.fillStyle = colors[i]; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            ctx.fillText(String(i), -36, y);
+            ctx.strokeStyle = colors[i]; ctx.lineWidth = 1.2; ctx.beginPath();
+            const a = tr && tr[i];
+            if (a && a.length > 1) a.forEach((v, k) => { const px = -26 + (k / (a.length - 1)) * 76, py = y + (v ? -6 : 6); k ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+            else { ctx.moveTo(-26, y + 6); ctx.lineTo(50, y + 6); }
+            ctx.stroke();
         });
         this.drawLabel(component);
     }
