@@ -322,4 +322,21 @@ for (const seed of [5, 9]) {
     check("a pushed via pushes its neighbouring via in turn (or the move is refused for a stated reason)", r6.ok ? r6.vias.length === 2 : /fixed|violate|cross|crowded|cannot/.test(r6.reason), r6.reason || r6.vias.length);
     if (r6.ok) { Pcb.applyShove(b6, r6); b6.tracks.push({ id: 9, layer: "F", w: 0.3, pts: [[10, 19.5], [32, 19.5]] }); const i6 = clean(b6).filter(i => i.type !== "unrouted"); check("and that cascade ends clean", i6.length === 0, JSON.stringify(i6.slice(0, 2))); }
 }
+// ---- dragging a track vertex with shove
+{
+    const board = (items) => { const b = Pcb.blank(60, 40); b.parts = items.map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; }); return b; };
+    const b = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 5, 28], ["D", "1", 40, 28]]);
+    const mine = { id: 1, layer: "F", w: 0.3, pts: [[5, 28], [15, 28], [30, 28], [40, 28]] }, other = { id: 2, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] };
+    b.tracks.push(mine, other);
+    const r = Pcb.shoveDrag(b, mine, 1, [15, 20.4], {});
+    check("dragging a vertex of one track against another pushes the other aside", r.ok && r.changes.length === 1 && r.changes[0].track === other, r.reason);
+    check("the dragged track ends at the requested place", r.drag && r.drag.pts[1][0] === 15 && r.drag.pts[1][1] === 20.4);
+    Pcb.applyShove(b, r);
+    check("after applying, the rule check is clean", Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type)).length === 0, JSON.stringify(Pcb.drc(b, { zones: false }).slice(0, 2)));
+    const rb = Pcb.shoveDrag(b, mine, 0, [5, 25], {});
+    check("a track end on a pad cannot be dragged", !rb.ok && /pad/.test(rb.reason));
+    const rc = Pcb.shoveDrag(board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 5, 28], ["D", "1", 40, 28]]).tracks.length ? b : b, mine, 1, [15, 8], {});
+    check("dragging across another track is refused", !rc.ok, rc.reason);
+    check("a drag onto the same spot changes nothing", Pcb.shoveDrag(b, other, 1, other.pts[1], {}).ok);
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

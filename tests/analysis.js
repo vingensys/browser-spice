@@ -1123,6 +1123,21 @@ window.analysisTests = async function () {
             const drcV = Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
             ok("the board with the pushed via has no clearance violation", drcV.length === 0, JSON.stringify(drcV.slice(0, 2)));
             pcbView.setTool("select");
+            // dragging a track vertex pushes other copper away
+            editor.pcb = b; b.vias = []; b.zones = [];
+            b.tracks = [{ id: 61, layer: "F", w: 0.3, pts: [[5, 28], [15, 28], [40, 28]] }, { id: 62, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] }];
+            b.parts = b.parts.filter(q => ["A", "B", "C", "D"].includes(q.ref)); b.parts.find(q => q.ref === "C").x = 5; b.parts.find(q => q.ref === "C").y = 28; b.parts.find(q => q.ref === "D").x = 40; b.parts.find(q => q.ref === "D").y = 28;
+            pcbView.setTool("select"); pcbView.fit();
+            const sp2 = (x, y) => ({ clientX: sr.left + pcbView.view.ox + x * pcbView.view.s, clientY: sr.top + pcbView.view.oy + y * pcbView.view.s });
+            sc.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 2, button: 0, buttons: 1, bubbles: true, ...sp2(15, 28) }));
+            sc.dispatchEvent(new PointerEvent("pointermove", { pointerId: 2, buttons: 1, bubbles: true, ...sp2(15, 22) }));
+            sc.dispatchEvent(new PointerEvent("pointermove", { pointerId: 2, buttons: 1, bubbles: true, ...sp2(15, 20.5) }));
+            sc.dispatchEvent(new PointerEvent("pointerup", { pointerId: 2, button: 0, bubbles: true, ...sp2(15, 20.5) }));
+            const dragged = b.tracks.find(t => t.id === 61), pushed = b.tracks.find(t => t.id === 62);
+            ok("dragging a track vertex moves it and pushes the track it runs into", dragged.pts.some(q => q[0] === 15 && Math.abs(q[1] - 20.5) < 0.3) && pushed.pts.length > 2 && Math.min(...pushed.pts.map(q => q[1])) < 19.99, JSON.stringify([dragged.pts, pushed.pts]));
+            ok("the dragged board is rule-clean", Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type)).length === 0);
+            pcbView.act("undo");
+            ok("Undo puts both tracks back", b.tracks.length === 2 && JSON.stringify(editor.pcb.tracks.find(t => t.id === 62).pts) === JSON.stringify([[5, 20], [40, 20]]), JSON.stringify(editor.pcb.tracks.map(t => t.pts)));
             editor.pcb = null;
         }
         pcbView.close(); pcbView.open();

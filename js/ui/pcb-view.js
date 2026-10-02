@@ -17,6 +17,7 @@ class PcbView {
         this.fills = [];
         this.rev = 0;
         this.zdraft = null;
+        this.tdrag = null;
         this.undoStack = [];
         this.view = { s: 8, ox: 20, oy: 20 };
         this.mouse = { x: 0, y: 0 };
@@ -323,7 +324,7 @@ class PcbView {
     down(e) {
         this.cv.focus();
         const { px, py } = this.pos(e), w = this.toWorld(px, py);
-        if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) { this.pan = { px, py, ox: this.view.ox, oy: this.view.oy }; this.cv.setPointerCapture(e.pointerId); return; }
+        if (e.button === 1 || e.button === 2 || (e.button === 0 && e.altKey)) { this.pan = { px, py, ox: this.view.ox, oy: this.view.oy }; try { this.cv.setPointerCapture(e.pointerId); } catch (er) { /* synthetic pointers have no capture */ } return; }
         if (e.button !== 0) return;
         if (this.tool === "route") { this.routeClick(w, e); return; }
         if (this.tool === "zone") {
@@ -336,8 +337,24 @@ class PcbView {
         }
         const h = this.hit(w.x, w.y);
         this.sel = h;
-        if (h && h.kind === "part") { this.snapshot(); this.drag = { part: h.ref, dx: h.ref.x - w.x, dy: h.ref.y - w.y, moved: false }; this.cv.setPointerCapture(e.pointerId); }
-        else if (!h) { this.pan = { px, py, ox: this.view.ox, oy: this.view.oy }; this.cv.setPointerCapture(e.pointerId); }
+        if (h && h.kind === "track" && !e.altKey) {
+            // drag a vertex of the track (or make one where you grabbed a segment); other copper is pushed aside when Shove is on
+            const t = h.ref, orig = t.pts.map(q => [q[0], q[1]]);
+            let idx = t.pts.findIndex(q => Math.hypot(q[0] - w.x, q[1] - w.y) <= 0.8);
+            if (idx < 0) {
+                let best = null;
+                for (let i = 0; i + 1 < t.pts.length; i++) { const a = t.pts[i], b = t.pts[i + 1], d = Pcb.segDist(w.x, w.y, a[0], a[1], b[0], b[1]); if (!best || d < best.d) best = { d, i }; }
+                const g = [Math.round(w.x * 4) / 4, Math.round(w.y * 4) / 4];
+                t.pts.splice(best.i + 1, 0, g); idx = best.i + 1;
+            }
+            this.snapshot();
+            this.tdrag = { track: t, index: idx, orig, moved: false };
+            try { this.cv.setPointerCapture(e.pointerId); } catch (er) { /* synthetic pointers have no capture */ }
+            this.draw();
+            return;
+        }
+        if (h && h.kind === "part") { this.snapshot(); this.drag = { part: h.ref, dx: h.ref.x - w.x, dy: h.ref.y - w.y, moved: false }; try { this.cv.setPointerCapture(e.pointerId); } catch (er) { /* synthetic pointers have no capture */ } }
+        else if (!h) { this.pan = { px, py, ox: this.view.ox, oy: this.view.oy }; try { this.cv.setPointerCapture(e.pointerId); } catch (er) { /* synthetic pointers have no capture */ } }
         this.draw();
     }
 
@@ -345,6 +362,15 @@ class PcbView {
         const { px, py } = this.pos(e), w = this.toWorld(px, py);
         this.mouse = w;
         if (this.pan) { this.view.ox = this.pan.ox + px - this.pan.px; this.view.oy = this.pan.oy + py - this.pan.py; this.draw(); return; }
+        if (this.tdrag) {
+            const td = this.tdrag, to = [Math.round(w.x * 4) / 4, Math.round(w.y * 4) / 4], cur = td.track.pts[td.index];
+            if (to[0] === cur[0] && to[1] === cur[1]) return;
+            const res = this.shoving ? Pcb.shoveDrag(this.pcb, td.track, td.index, to) : { ok: true, changes: [], vias: [], drag: { track: td.track, pts: td.track.pts.map((q, i) => (i === td.index ? to : q)) } };
+            if (res.ok) { Pcb.applyShove(this.pcb, res); td.moved = true; this.statusEl.classList.remove("warn"); this.statusEl.textContent = res.changes.length || (res.vias && res.vias.length) ? `Pushing ${res.changes.length} track(s) and ${res.vias.length} via(s).` : ""; }
+            else { this.statusEl.textContent = `Blocked: ${res.reason}`; this.statusEl.classList.add("warn"); }
+            this.draw();
+            return;
+        }
         if (this.drag) {
             const q = this.drag.part;
             q.x = Math.round((w.x + this.drag.dx) * 2) / 2; q.y = Math.round((w.y + this.drag.dy) * 2) / 2;
@@ -357,6 +383,18 @@ class PcbView {
 
     up(e) {
         if (this.pan) { this.pan = null; return; }
+        if (this.tdrag) {
+            const td = this.tdrag;
+            this.tdrag = null;
+            if (!td.moved) { this.undoStack.pop(); td.track.pts = td.orig; this.draw(); }
+            else {
+                // a vertex that ended up straight (or on top of its neighbour) is not needed
+                const pts = td.track.pts;
+                for (let i = pts.length - 2; i >= 1; i--) { const a = pts[i - 1], b = pts[i], c = pts[i + 1]; if (Math.hypot(b[0] - a[0], b[1] - a[1]) < 1e-6 || Math.abs((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) < 1e-9) pts.splice(i, 1); }
+                this.changed();
+            }
+            return;
+        }
         if (this.drag) {
             if (!this.drag.moved) this.undoStack.pop();
             else { this.dropOrphansOfMoved(); this.changed(); }
