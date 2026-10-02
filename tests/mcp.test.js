@@ -167,7 +167,7 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
         if (k.clean || !k.counts.unrouted) throw new Error("moving parts should leave connections to route: " + JSON.stringify(k.counts));
         const bad = await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "flip", ref: "Q1" }] });
         if (!/through-hole/.test(bad.error)) throw new Error(JSON.stringify(bad));
-        await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "rules", clearance: 0.2 }, { op: "clear_routing" }] });
+        await call("pcb_edit", { board_id: board.board_id, actions: [{ op: "rules", clearance: 0.2 }, { op: "auto_place" }] });
         const rr = await call("pcb_route", { board_id: board.board_id });
         if (rr.failed) throw new Error(JSON.stringify(rr));
     });
