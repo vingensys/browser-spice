@@ -274,9 +274,19 @@ class SpiceParser {
         return Waveform.pwl(pts);
     }
 
+    // the model card exactly as written (type, every parameter and its level), so the SPICE export and ngspice can use the
+    // real model even where the built-in engine only has a simpler one
+    static rawModel(m) {
+        if (!m) return undefined;
+        const params = {};
+        for (const [k, v] of Object.entries(m.params || {})) if (Number.isFinite(v)) params[k] = v;
+        return { type: m.type, params, level: Number(params.level) || 0 };
+    }
+
     static diodeParams(m) {
         const p = m ? m.params : {};
         return {
+            raw: SpiceParser.rawModel(m),
             is: p.is || 1e-14, n: p.n || 1, rs: p.rs || 0,
             bv: p.bv || Infinity, ibv: p.ibv || 1e-3, nbv: p.nbv || 1,
             cjo: p.cjo || p.cj0 || 0, vj: p.vj || 1, m: p.m || 0.5, fc: p.fc || 0.5, tt: p.tt || 0,
@@ -287,6 +297,7 @@ class SpiceParser {
     static bjtParams(m) {
         const p = m ? m.params : {};
         return {
+            raw: SpiceParser.rawModel(m),
             is: p.is || 1e-16, bf: p.bf || 100, br: p.br || 1, nf: p.nf || 1, nr: p.nr || 1,
             vaf: p.vaf || p.va || 0, var: p.var || p.vb || 0, ikf: p.ikf || p.ik || 0, ikr: p.ikr || 0,
             ise: p.ise || p.c2 * (p.bf || 100) || 0, ne: p.ne || 1.5, isc: p.isc || p.c4 * (p.bf || 100) || 0, nc: p.nc || 2,
@@ -304,6 +315,7 @@ class SpiceParser {
         const p = m ? m.params : {};
         const W = w || 1e-4, L = l || 1e-4, pmos = !!(m && m.type === "pmos");
         return {
+            raw: SpiceParser.rawModel(m),
             vto: (pmos ? -1 : 1) * (p.vto === undefined ? 0 : p.vto), beta: (p.kp || 2e-5) * (W / L), lambda: p.lambda || 0, rd: p.rd || 0, rs: p.rs || 0,
             gamma: p.gamma || 0, phi: p.phi || 0.6, isb: p.is === undefined ? 1e-14 : p.is, pb: p.pb || 0.8,
             cbd: p.cbd || 0, cbs: p.cbs || 0, cj: p.cj || 0, cjsw: p.cjsw || 0, mj: p.mj === undefined ? 0.5 : p.mj, mjsw: p.mjsw === undefined ? 0.33 : p.mjsw, fc: p.fc === undefined ? 0.5 : p.fc,

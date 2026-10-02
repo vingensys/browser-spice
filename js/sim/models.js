@@ -66,6 +66,11 @@ function simModel(kind, name) {
 function simModelCardFromParams(kind, name, p) {
     if (!p) return null;
     const f = (v) => (typeof v === "number" ? Number(v.toPrecision(6)).toString() : v);
+    // an imported card is written back as it was read (every parameter, any level)
+    if (p.raw && p.raw.params && Object.keys(p.raw.params).length) {
+        const body = Object.entries(p.raw.params).map(([k, v]) => `${k.toUpperCase()}=${f(v)}`).join(" ");
+        return `.model ${name} ${String(p.raw.type).toUpperCase()}(${body})`;
+    }
 
     if (kind === "D" || kind === "LED" || kind === "DZ") {
         const parts = [`IS=${f(p.is)}`, `N=${f(p.n)}`];

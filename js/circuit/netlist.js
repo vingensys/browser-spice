@@ -252,6 +252,7 @@ class NetlistExtractor {
             }
         };
 
+        const approx = [];
         const nodeIC = {};
         const nodeset = {};
         const instruments = [];
@@ -382,6 +383,15 @@ class NetlistExtractor {
                     break;
             }
         }
+        // models of a higher level than the built-in engine has: simulated as level 1 here, exactly by ngspice
+        for (const e of els) {
+            const lv = e.params && e.params.raw ? e.params.raw.level : 0;
+            if ((e.kind === "M" && lv >= 2) || ((e.kind === "Q" || e.kind === "D") && lv >= 2)) {
+                approx.push(e.name);
+                warnings.push(`${e.name}: model ${e.model} is level ${lv}; the built-in solver approximates it (choose the ngspice solver in Simulation Settings for the exact model)`);
+            }
+        }
+        els.approx = approx;
         els.nodeIC = nodeIC;
         els.nodeset = nodeset;
         els.instruments = instruments;
@@ -530,7 +540,7 @@ class NetlistExtractor {
 
         const circuit = NetlistExtractor.instantiate(els);
         return {
-            circuit, elements: els, warnings, probes: [...editor.probes, ...(els.subProbes || [])], located: els.located, sheetPaths: els.sheetPaths || new Map(), nodeIC: els.nodeIC || {}, nodeset: els.nodeset || {}, instruments: els.instruments || [],
+            circuit, elements: els, warnings, probes: [...editor.probes, ...(els.subProbes || [])], located: els.located, sheetPaths: els.sheetPaths || new Map(), nodeIC: els.nodeIC || {}, nodeset: els.nodeset || {}, approx: els.approx || [], instruments: els.instruments || [],
             getPointNodeName: nets.getPointNodeName,
             getTerminalNodeName: nets.terminalNode,
             nets

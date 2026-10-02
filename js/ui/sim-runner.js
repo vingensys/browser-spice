@@ -55,7 +55,9 @@ class SimRunner {
         this.rootSheet();
         this.rejectImpossible();
         const info = NetlistExtractor.extract(this.editor);
-        if (info.warnings.length) {
+        if (info.approx && info.approx.length && this.settings().engine !== "ngspice") {
+            this.toast(`${info.approx.slice(0, 3).join(", ")}${info.approx.length > 3 ? " …" : ""}: higher-level model cards are approximated by the built-in solver. Choose the ngspice solver in Simulation Settings for the exact model.`, "warn");
+        } else if (info.warnings.length) {
             this.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}${info.warnings.length > 3 ? " …" : ""}`, "warn");
         }
         return info;

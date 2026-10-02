@@ -934,6 +934,28 @@ window.analysisTests = async function () {
     ok("and as an initial condition it goes the other way", Object.keys(NetlistExtractor.extract(editor).nodeIC).length === 1);
     editor.components = editor.components.filter(c => c !== ic1);
 
+
+    // ======================================================== model cards of higher level
+    clear(); editor.resetSheets();
+    const L3 = "level3\nVDD vdd 0 DC 3\nVG g 0 DC 1.6\nRD vdd d 2k\nM1 d g 0 0 NM3 W=10u L=1u\n.model NM3 NMOS(LEVEL=3 VTO=0.7 UO=500 TOX=15n THETA=0.1 VMAX=1.5e5 ETA=0.05 KAPPA=0.3 NSUB=1e16 GAMMA=0.5 PHI=0.7)\n.op\n.end\n";
+    SchematicImporter.import(editor, L3);
+    const l3info = NetlistExtractor.extract(editor);
+    ok("an imported level 3 card is flagged as approximated by the built-in solver", l3info.approx.length === 1 && l3info.warnings.some(w => /level 3/.test(w)), [l3info.approx, l3info.warnings]);
+    const l3deck = NetlistExtractor.toSpice(l3info.elements, { analysis: ".op" });
+    ok("the export writes the card as it was read, with its level and every parameter", /LEVEL=3/.test(l3deck) && /KAPPA=0\.3/.test(l3deck) && /THETA=0\.1/.test(l3deck) && /VMAX=/.test(l3deck), l3deck.split("\n").filter(l => /^\.model/.test(l)));
+    const viaApp = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(l3deck), l3info);
+    const viaOrig = await NgspiceBackend.run(L3);
+    const origD = viaOrig.data.find(d => /v\(d\)/i.test(d.name)).values[0];
+    const mosC = editor.components.find(c => c.type === "NMOS");
+    const appD = viaApp.nodeVoltages[l3info.getTerminalNodeName(mosC, "D")];
+    ok("ngspice gives the same drain voltage from the exported schematic as from the original deck", Math.abs(appD - origD) < 1e-6, [appD, origD]);
+    const l1 = new SimEngine(l3info.circuit).operatingPoint().nodeVoltages[l3info.getTerminalNodeName(mosC, "D")];
+    ok("while the built-in solver's level-1 stand-in differs, as the warning says", Math.abs(l1 - origD) > 1e-3, [l1, origD]);
+    document.getElementById("simEngine").value = "builtin";
+    let warned = ""; const rt = runner.toast; runner.toast = (m, k) => { if (k === "warn") warned = m; }; runner.prepare(); runner.toast = rt;
+    ok("running with the built-in solver says so", /approximated by the built-in solver/.test(warned), warned);
+    editor.resetSheets();
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };
