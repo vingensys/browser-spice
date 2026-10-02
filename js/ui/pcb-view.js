@@ -374,9 +374,14 @@ class PcbView {
             return;
         }
         if (this.drag) {
-            const q = this.drag.part;
-            q.x = Math.round((w.x + this.drag.dx) * 2) / 2; q.y = Math.round((w.y + this.drag.dy) * 2) / 2;
-            this.drag.moved = true;
+            const q = this.drag.part, nx = Math.round((w.x + this.drag.dx) * 2) / 2, ny = Math.round((w.y + this.drag.dy) * 2) / 2;
+            if (nx === q.x && ny === q.y) return;
+            if (this.shoving) {
+                // the part pushes other nets' tracks and vias out of its way; a move that cannot work is refused and the part stays put
+                const res = Pcb.shovePart(this.pcb, q, nx, ny);
+                if (res.ok) { Pcb.applyShove(this.pcb, res); this.drag.moved = true; this.statusEl.classList.remove("warn"); this.statusEl.textContent = res.changes.length || res.vias.length ? `Pushing ${res.changes.length} track(s) and ${res.vias.length} via(s).` : ""; }
+                else { this.statusEl.textContent = `Blocked: ${res.reason}`; this.statusEl.classList.add("warn"); }
+            } else { q.x = nx; q.y = ny; this.drag.moved = true; }
             this.draw();
             return;
         }

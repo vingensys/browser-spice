@@ -277,6 +277,22 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
         await call("pcb_edit", { board_id: id, actions: [{ op: "rules", fab: "none" }] });
         if ((await call("pcb_check", { board_id: id })).counts.fab) throw new Error("fab off should list nothing");
     });
+    await test("pcb_edit move with shove pushes copper out of the part's way and refuses what cannot work", async () => {
+        const b = await call("pcb_create", { netlist: "t\nV1 a 0 1\nR1 0 b 1k\nR2 c d 1k\nV2 e 0 1\n.end", width: 50, height: 40, auto_place: false, packages: { R2: "0805" } });
+        const id = b.board_id;
+        await call("pcb_edit", { board_id: id, actions: [{ op: "move", ref: "V1", x: 5, y: 20 }, { op: "move", ref: "R1", x: 40, y: 20 }, { op: "move", ref: "R2", x: 20, y: 32 }, { op: "move", ref: "V2", x: 5, y: 5 }] });
+        const d0 = await call("pcb_describe", { board_id: id, include: ["parts"] });
+        const a1 = d0.parts_list.find(p => p.ref === "V1").pads[1], b1 = d0.parts_list.find(p => p.ref === "R1").pads[0];
+        await call("pcb_edit", { board_id: id, actions: [{ op: "track", layer: "F", points: [[a1.x, a1.y], [b1.x, b1.y]], mode: "off" }] });
+        const r = await call("pcb_edit", { board_id: id, actions: [{ op: "move", ref: "R2", x: 20, y: 20.8, shove: true }] });
+        if (r.error || !(r.results[0].pushed.tracks > 0)) throw new Error(JSON.stringify(r).slice(0, 300));
+        const k = await call("pcb_check", { board_id: id });
+        if (Object.keys(k.counts).some(t => ["clearance", "short", "edge"].includes(t))) throw new Error(JSON.stringify(k.issues).slice(0, 300));
+        const bad = await call("pcb_edit", { board_id: id, actions: [{ op: "move", ref: "R2", x: 35, y: 20, shove: true }] });
+        if (!bad.error || !/cannot move R2/.test(bad.error)) throw new Error("moving onto R1's pad should be refused: " + JSON.stringify(bad).slice(0, 300));
+        const after = await call("pcb_describe", { board_id: id, include: ["parts"] });
+        if (after.parts_list.find(p => p.ref === "R2").x !== 20) throw new Error("a refused move must leave the part where it was");
+    });
     server.stdin.end();
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);

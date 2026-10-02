@@ -963,7 +963,7 @@ class Pcb {
         return Pcb.shoveCore(pcb, ["F", "B"].map(l => ({ layer: l, pts: [pt, pt], w: via.d, net, round: true })), draft && draft.length >= 2 ? { layer, w, pts: draft } : null, via, net, opts);
     }
 
-    static shoveCore(pcb, starters, candTrack, candVia, net, { maxPush = 80, replace = null } = {}) {
+    static shoveCore(pcb, starters, candTrack, candVia, net, { maxPush = 80, replace = null, movePart = null } = {}) {
         const R = pcb.rules, clr = R.clearance;
         const conn = Pcb.connectivity(pcb, false), netOf = new Map();
         conn.forEach(g => { g.tracks.forEach(t => netOf.set(t, g.net)); g.vias.forEach(v => netOf.set(v, g.net)); });
@@ -991,8 +991,9 @@ class Pcb {
             for (const o of pcb.tracks) if (o !== t && o.layer === t.layer) for (let k = 0; k + 1 < o.pts.length; k++) if (ptSeg(q, o, k) <= o.w / 2 + 0.02) return true;
             return false;
         };
+        const isOct = (a, b) => { const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]); return dx < 1e-6 || dy < 1e-6 || Math.abs(dx - dy) < 1e-6; };
         const work = new Map();
-        for (const t of pcb.tracks) if (t !== replace) work.set(t, { pts: t.pts.map(q => [q[0], q[1]]), own: null, fixed: new Set([...(anchored(t, 0) ? [0] : []), ...(anchored(t, t.pts.length - 1) ? ["end"] : [])]), moved: false, by: [] });
+        for (const t of pcb.tracks) if (t !== replace) work.set(t, { pts: t.pts.map(q => [q[0], q[1]]), own: null, fixed: new Set([...(anchored(t, 0) ? [0] : []), ...(anchored(t, t.pts.length - 1) ? ["end"] : [])]), moved: false, by: [], oct: t.pts.every((q, i) => i === 0 || isOct(t.pts[i - 1], q)) });
         for (const wk of work.values()) wk.own = new Set(wk.pts);          // the vertices the user drew: the tidy-up never removes them
         const vw = new Map(pcb.vias.map(v => [v, { x: v.x, y: v.y, moved: false, movable: viaMovable(v) }]));
         const queue = starters.map(st => ({ ...st, self: null }));
@@ -1107,22 +1108,49 @@ class Pcb {
                 }
             }
         }
+        // a track that ran at 0 / 45 / 90 degrees stays that way: every segment the push left at another angle becomes a short
+        // straight run plus a 45 degree one (whichever of the two doglegs keeps the clearance to what pushed it)
+        for (const [, wk] of work) {
+            if (!wk.moved || !wk.oct) continue;
+            const out = [wk.pts[0]];
+            for (let i = 1; i < wk.pts.length; i++) {
+                const a = out[out.length - 1], b = wk.pts[i];
+                if (isOct(a, b)) { out.push(b); continue; }
+                const dx = b[0] - a[0], dy = b[1] - a[1], sx = Math.sign(dx), sy = Math.sign(dy), dm = Math.min(Math.abs(dx), Math.abs(dy));
+                const cands = [[a[0] + sx * dm, a[1] + sy * dm], Math.abs(dx) > Math.abs(dy) ? [b[0] - sx * dm, a[1]] : [a[0], b[1] - sy * dm]];
+                let best = null, bestGap = -1;
+                for (const m of cands) {
+                    let gap = Infinity, ok = true;
+                    for (const pu of wk.by) {
+                        const g = Math.min(segDistP(pu.pts, a, m), segDistP(pu.pts, m, b)) - pu.D;
+                        if (g < -1e-6 || crosses(pu.pts, a, m) || crosses(pu.pts, m, b)) { ok = false; break; }
+                        gap = Math.min(gap, g);
+                    }
+                    if (ok && gap > bestGap) { best = m; bestGap = gap; }
+                }
+                if (best) out.push(best);
+                out.push(b);
+            }
+            // straight runs need no vertices in the middle
+            for (let i = out.length - 2; i >= 1; i--) { const a = out[i - 1], b = out[i], c = out[i + 1]; if (Math.abs((b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0])) < 1e-9 && (b[0] - a[0]) * (c[0] - b[0]) + (b[1] - a[1]) * (c[1] - b[1]) > 0) out.splice(i, 1); }
+            wk.pts = out;
+        }
         if (!blocked && queue.length) blocked = "the pushed copper keeps pushing each other (too crowded)";
         if (blocked) return { ok: false, reason: blocked, changes: [], vias: [] };
         const changes = [...work].filter(([, wk]) => wk.moved).map(([t, wk]) => ({ track: t, pts: wk.pts }));
         const viaMoves = [...vw].filter(([, st]) => st.moved).map(([v, st]) => ({ via: v, x: st.x, y: st.y }));
         // validate with the rule check: nothing new may be violated
-        const trial = (tracks, vias) => ({ ...pcb, zones: [], tracks, vias });
+        const trial = (tracks, vias, moved) => ({ ...pcb, zones: [], tracks, vias, parts: moved && movePart ? pcb.parts.map(p => (p === movePart.part ? { ...p, x: movePart.x, y: movePart.y } : p)) : pcb.parts });
         const candT = candTrack ? { id: replace ? replace.id : -1, layer: candTrack.layer, w: candTrack.w, pts: candTrack.pts.map(q => [q[0], q[1]]) } : null;
         const candV = candVia ? { id: -2, x: candVia.x, y: candVia.y, d: candVia.d, drill: candVia.drill } : null;
         const key = (i) => `${i.type}|${[...(i.ids || [i.msg])].sort().join("|")}`;
         const earlier = replace ? [] : candT && candT.pts.length >= 3 && !candVia ? [{ ...candT, pts: candT.pts.slice(0, -1) }] : (candT && candVia ? [candT] : []);
         const before = new Set(Pcb.drc(trial(pcb.tracks.concat(earlier), pcb.vias), { zones: false }).filter(i => i.type !== "unrouted").map(key));
         const mt = new Map(changes.map(c => [c.track, c.pts])), mv = new Map(viaMoves.map(c => [c.via, c]));
-        const after = Pcb.drc(trial(pcb.tracks.filter(t => t !== replace).map(t => (mt.has(t) ? { ...t, pts: mt.get(t) } : t)).concat(candT ? [candT] : []), pcb.vias.map(v => (mv.has(v) ? { ...v, x: mv.get(v).x, y: mv.get(v).y } : v)).concat(candV ? [candV] : [])), { zones: false }).filter(i => i.type !== "unrouted");
+        const after = Pcb.drc(trial(pcb.tracks.filter(t => t !== replace).map(t => (mt.has(t) ? { ...t, pts: mt.get(t) } : t)).concat(candT ? [candT] : []), pcb.vias.map(v => (mv.has(v) ? { ...v, x: mv.get(v).x, y: mv.get(v).y } : v)).concat(candV ? [candV] : []), true), { zones: false }).filter(i => i.type !== "unrouted");
         const fresh = after.filter(i => !before.has(key(i)));
         if (fresh.length) return { ok: false, reason: `would violate the rules: ${fresh[0].msg}`, changes: [], vias: [] };
-        return { ok: true, changes, vias: viaMoves, drag: replace ? { track: replace, pts: candT.pts } : null };
+        return { ok: true, changes, vias: viaMoves, drag: replace ? { track: replace, pts: candT.pts } : null, part: movePart || null };
     }
 
     // Moves vertex `index` of an existing track to `to` (as when dragging it), pushing other copper aside. The two segments
@@ -1145,7 +1173,23 @@ class Pcb {
         return Pcb.shoveCore(pcb, [{ layer: track.layer, pts: pusher, w: track.w, net }], { layer: track.layer, w: track.w, pts }, null, net, { ...(opts || {}), replace: track });
     }
 
+    // Moves a part to (x, y) and pushes the tracks and vias of other nets out of the way of its pads (a pad is treated as the circle
+    // that contains it, so the push is a little generous). Tracks of the part's own nets stay where they are (their ends are left
+    // behind, as when a part is moved without shoving). Refused when the move would create a violation that pushing cannot cure
+    // (pads on pads, copper that cannot give way, the board edge).
+    static shovePart(pcb, part, x, y, opts) {
+        const moved = { ...part, x, y };
+        const starters = [];
+        for (const pad of part.fp.pads) {
+            const w = Pcb.padWorld(moved, pad), i = part.fp.pads.indexOf(pad), net = part.nets[i] || null;
+            const d = w.shape === "round" ? Math.min(w.w, w.h) : Math.hypot(w.w, w.h);
+            for (const layer of w.layers) starters.push({ layer, pts: [[w.x, w.y], [w.x, w.y]], w: d, net, round: true });
+        }
+        return Pcb.shoveCore(pcb, starters, null, null, null, { ...(opts || {}), movePart: { part, x, y } });
+    }
+
     static applyShove(pcb, result) {
+        if (result.part) { result.part.part.x = result.part.x; result.part.part.y = result.part.y; }
         if (result.drag) result.drag.track.pts = result.drag.pts.map(q => [q[0], q[1]]);
         for (const c of result.changes) c.track.pts = c.pts.map(q => [q[0], q[1]]);
         for (const m of result.vias || []) { m.via.x = m.x; m.via.y = m.y; }

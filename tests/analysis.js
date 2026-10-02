@@ -1152,6 +1152,20 @@ window.analysisTests = async function () {
             ok("and the board is rule-clean", Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type)).length === 0);
             pcbView.root.querySelector("#pcbMode").value = "shove";
             pcbView.setTool("select");
+            // moving a part pushes other copper aside
+            pcbView.root.querySelector("#pcbMode").value = "shove";
+            b.parts = b.parts.filter(q => ["A", "B"].includes(q.ref)); b.parts.find(q => q.ref === "A").x = 5; b.parts.find(q => q.ref === "A").y = 20; b.parts.find(q => q.ref === "B").x = 40; b.parts.find(q => q.ref === "B").y = 20;
+            b.parts.push({ ref: "H", kind: "R", nodes: ["1", "3"], x: 20, y: 30, rot: 0, placed: true }); Pcb.setPackage(b.parts[2], "0805", b.footprints);
+            b.tracks = [{ id: 91, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] }]; b.vias = [];
+            pcbView.setTool("select"); pcbView.sel = null; pcbView.fit();
+            const mp = (x, y) => ({ clientX: sr.left + pcbView.view.ox + x * pcbView.view.s, clientY: sr.top + pcbView.view.oy + y * pcbView.view.s });
+            sc.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 3, button: 0, buttons: 1, bubbles: true, ...mp(20, 30) }));
+            for (const y of [27, 24, 22, 20.8]) sc.dispatchEvent(new PointerEvent("pointermove", { pointerId: 3, buttons: 1, bubbles: true, ...mp(20, y) }));
+            sc.dispatchEvent(new PointerEvent("pointerup", { pointerId: 3, button: 0, bubbles: true, ...mp(20, 20.8) }));
+            const hp = b.parts.find(q => q.ref === "H"), tk = b.tracks.find(t => t.id === 91);
+            ok("dragging a part onto another net's track pushes the track and the part goes where it was dragged", hp.y < 25 && Math.min(...tk.pts.map(q => q[1])) < 19.9, JSON.stringify([hp.y, tk.pts]));
+            ok("the board is rule-clean after the drag", Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type)).length === 0);
+            pcbView.root.querySelector("#pcbMode").value = "shove";
             editor.pcb = null;
         }
         pcbView.close(); pcbView.open();

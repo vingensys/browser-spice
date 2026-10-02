@@ -28,6 +28,17 @@ for (let trial = 0; trial < 40 && !(trial >= 14 && vias > 0 && tracks > 0); tria
             draft = [[g.a[0] + dx * f0 + nx * off, g.a[1] + dy * f0 + ny * off], [g.a[0] + dx * f1 + nx * off, g.a[1] + dy * f1 + ny * off]];
             if (k % 3 === 2) viaDrop = { x: draft[1][0], y: draft[1][1], d: 0.8, drill: 0.4 };
         }
+        if (k === 5 && b.parts.length) {
+            // a part moved to a random place near existing copper
+            const part = b.parts[Math.floor(rnd() * b.parts.length)], nx = Math.round((5 + rnd() * 60) * 2) / 2, ny = Math.round((5 + rnd() * 40) * 2) / 2;
+            const snapP = JSON.stringify([b.tracks, b.vias, b.parts.map(q => [q.x, q.y])]);
+            const rp = Pcb.shovePart(b, part, nx, ny);
+            if (!rp.ok) { refused++; if (JSON.stringify([b.tracks, b.vias, b.parts.map(q => [q.x, q.y])]) !== snapP) problems.push("a refused part move mutated the board"); continue; }
+            const ox = part.x, oy = part.y; Pcb.applyShove(b, rp);
+            const bad = hard(b).filter(i => !(i.ids || []).some(x => x.startsWith(part.ref + ".")));
+            if (bad.length > base) problems.push(`part move: violations grew from ${base} to ${bad.length}: ${bad[0].msg}`);
+            part.x = ox; part.y = oy; continue;
+        }
         const snap = JSON.stringify([b.tracks, b.vias]);
         const res = viaDrop ? Pcb.shoveVia(b, layer, draft, 0.3, null, viaDrop) : Pcb.shove(b, layer, draft, 0.3, null);
         if (!res.ok) { refused++; if (JSON.stringify([b.tracks, b.vias]) !== snap) problems.push(`refused move mutated the board (trial ${trial})`); if (!res.reason) problems.push("refusal without a reason"); continue; }

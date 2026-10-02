@@ -435,4 +435,49 @@ for (const seed of [5, 9]) {
     si.parts[0].fp.silk = [[[-6, 0], [6, 0]]];
     check("silkscreen running over a pad is a cosmetic note, not a blocking issue", Pcb.drc(si, { zones: false }).some(i => i.type === "silk" && /over pads/.test(i.msg)) && !fab(si).length);
 }
+// ---- shoved tracks stay at 0 / 45 / 90 degrees
+{
+    const board = (items) => { const b = Pcb.blank(60, 40); b.parts = items.map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; }); return b; };
+    const isOct = (a, b) => { const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1]); return dx < 1e-6 || dy < 1e-6 || Math.abs(dx - dy) < 1e-6; };
+    const allOct = (pts) => pts.every((q, i) => i === 0 || isOct(pts[i - 1], q));
+    const b = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 10, 25], ["D", "1", 30, 25]]);
+    b.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] });
+    const r = Pcb.shove(b, "F", [[10, 25], [10, 20.2], [30, 20.2]], 0.3, "1");
+    check("a straight track pushed aside comes out at 0 / 45 / 90 degrees only", r.ok && allOct(r.changes[0].pts), JSON.stringify(r.changes[0] && r.changes[0].pts));
+    check("with no stray vertices (a bump is 4 to 6 points)", r.changes[0].pts.length <= 6, r.changes[0].pts.length);
+    Pcb.applyShove(b, r); b.tracks.push({ id: 2, layer: "F", w: 0.3, pts: [[10, 25], [10, 20.2], [30, 20.2]] });
+    check("and the board is clean", Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type)).length === 0);
+    // a diagonal track pushed by a vertical one stays 45 / 90 too
+    const d = board([["A", "2", 5, 5], ["B", "2", 35, 35], ["C", "1", 5, 30], ["D", "1", 30, 5]]);
+    d.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 5], [35, 35]] });
+    const rd = Pcb.shove(d, "F", [[5, 30], [20.3, 30], [20.3, 15]], 0.3, "1");
+    check("a 45 degree track pushed sideways stays octilinear (or the push is refused)", !rd.ok || (rd.changes.length === 0 || allOct(rd.changes[0].pts)), JSON.stringify(rd.changes[0] && rd.changes[0].pts));
+}
+// ---- moving a part pushes other copper out of its way
+{
+    const board = (items) => { const b = Pcb.blank(60, 40); b.parts = items.map(([ref, nodes, x, y]) => { const part = { ref, kind: "X", nodes, x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; }); return b; };
+    const hard = (b) => Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
+    const b = board([["A", ["2"], 5, 20], ["B", ["2"], 50, 20], ["H", ["1", "3"], 20, 30]]);
+    b.parts[2].kind = "R"; Pcb.setPackage(b.parts[2], "0805", b.footprints);
+    b.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [50, 20]] });
+    const part = b.parts[2];
+    const r = Pcb.shovePart(b, part, 25, 20.8);
+    check("a part moved onto another net's track pushes the track aside", r.ok && r.changes.length === 1 && r.part.x === 25, r.reason);
+    Pcb.applyShove(b, r);
+    check("the part ends up where it was put and the board is clean", part.x === 25 && part.y === 20.8 && hard(b).length === 0, JSON.stringify(hard(b).slice(0, 2)));
+    check("the pushed track keeps its ends on the pads", b.tracks[0].pts[0][0] === 5 && b.tracks[0].pts[b.tracks[0].pts.length - 1][0] === 50);
+    // onto a pad of another part: cannot be pushed away, refused with a reason
+    const c = board([["A", ["2"], 20, 20], ["H", ["1", "3"], 30, 30]]);
+    c.parts[1].kind = "R"; Pcb.setPackage(c.parts[1], "0805", c.footprints);
+    const rc = Pcb.shovePart(c, c.parts[1], 20.3, 20);
+    check("a part moved onto another part's pad is refused", !rc.ok && /touch|overlap|violate/.test(rc.reason), rc.reason);
+    // same net copper is not pushed
+    const d = board([["A", ["1"], 5, 20], ["B", ["1"], 50, 20], ["H", ["1", "1"], 20, 30]]);
+    d.parts[2].kind = "R"; Pcb.setPackage(d.parts[2], "0805", d.footprints);
+    d.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [50, 20]] });
+    const rd = Pcb.shovePart(d, d.parts[2], 25, 20.4);
+    check("copper of the part's own net is left alone", rd.changes.length === 0, JSON.stringify(rd.changes.length));
+    // the original is untouched until applied
+    check("nothing moves until the result is applied", c.parts[1].x === 30 && b.parts[2].x === 25);
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

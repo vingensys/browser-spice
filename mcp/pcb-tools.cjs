@@ -72,7 +72,16 @@ function act(b, a) {
     const pcb = b.pcb, R = pcb.rules;
     const part = (ref) => { const p = pcb.parts.find(q => q.ref === String(ref).toUpperCase()); if (!p) throw new Error(`no part ${ref}`); return p; };
     switch (a.op) {
-        case "move": { const p = part(a.ref); if (a.x !== undefined) p.x = Number(a.x); if (a.y !== undefined) p.y = Number(a.y); if (a.rot !== undefined) p.rot = ((Number(a.rot) % 360) + 360) % 360; p.placed = true; return { moved: p.ref, x: round(p.x), y: round(p.y), rot: p.rot, note: "tracks that ended on this part need routing again" }; }
+        case "move": {
+            const p = part(a.ref);
+            if (a.rot !== undefined) p.rot = ((Number(a.rot) % 360) + 360) % 360;
+            const x = a.x !== undefined ? Number(a.x) : p.x, y = a.y !== undefined ? Number(a.y) : p.y;
+            let pushed = null;
+            if (a.shove) { const r = Pcb.shovePart(pcb, p, x, y); if (!r.ok) throw new Error(`cannot move ${p.ref} there: ${r.reason}`); Pcb.applyShove(pcb, r); pushed = { tracks: r.changes.length, vias: r.vias.length }; }
+            else { p.x = x; p.y = y; }
+            p.placed = true;
+            return { moved: p.ref, x: round(p.x), y: round(p.y), rot: p.rot, pushed, note: "tracks that ended on this part need routing again" };
+        }
         case "flip": { const p = part(a.ref); if (!p.fp.smd) throw new Error(`${p.ref} is through-hole and cannot go on the back`); p.flip = !p.flip; return { flipped: p.ref, side: p.flip ? "back" : "front" }; }
         case "package": { const p = part(a.ref); Pcb.setPackage(p, a.package, pcb.footprints); if (p.pkg !== a.package) throw new Error(`package "${a.package}" is not available for ${p.ref} (${Pcb.packages(p.kind, pcb.footprints).map(x => x[0]).join(", ") || "none"})`); return { part: p.ref, footprint: p.fp.name, pads: p.fp.pads.length }; }
         case "outline": { pcb.outline.w = Number(a.width); pcb.outline.h = Number(a.height); if (!(pcb.outline.w >= 10 && pcb.outline.h >= 10)) throw new Error("the board must be at least 10 x 10 mm"); return { board_mm: { width: pcb.outline.w, height: pcb.outline.h } }; }
@@ -209,7 +218,7 @@ const TOOLS = [
     },
     {
         name: "pcb_edit",
-        description: "Change a board with a list of actions, applied in order and all-or-nothing (if one fails, none of them stay and you are told which). Ops: move {ref,x,y,rot}, flip {ref} (SMD only), package {ref,package}, outline {width,height}, rules {clearance,track_width,via,via_drill,edge,fab:'generic'|'relaxed'|'tight'|'none'}, auto_place {fit} (clears routing), clear_routing, define_footprint {definition} (text: footprint NAME / pad N X Y W H [round|rect] [drill D] / line … / circle X Y R / map …), import_kicad_footprint {text}, via {x,y,shove}, track {layer,points:[[x,y],…],net,width,mode:'shove'|'walk'|'off'} (lays a track the way the interactive router does: 'shove' pushes other nets' tracks and vias aside, 'walk' routes around them at 0/45/90 degrees, 'off' places it as given), pour {layer,net,points,thermal} (copper pour; net '0' is ground), remove_pour {id}, delete_track {id}.",
+        description: "Change a board with a list of actions, applied in order and all-or-nothing (if one fails, none of them stay and you are told which). Ops: move {ref,x,y,rot,shove} (shove: true pushes other nets' tracks and vias out of the part's way and refuses a move that cannot work), flip {ref} (SMD only), package {ref,package}, outline {width,height}, rules {clearance,track_width,via,via_drill,edge,fab:'generic'|'relaxed'|'tight'|'none'}, auto_place {fit} (clears routing), clear_routing, define_footprint {definition} (text: footprint NAME / pad N X Y W H [round|rect] [drill D] / line … / circle X Y R / map …), import_kicad_footprint {text}, via {x,y,shove}, track {layer,points:[[x,y],…],net,width,mode:'shove'|'walk'|'off'} (lays a track the way the interactive router does: 'shove' pushes other nets' tracks and vias aside, 'walk' routes around them at 0/45/90 degrees, 'off' places it as given), pour {layer,net,points,thermal} (copper pour; net '0' is ground), remove_pour {id}, delete_track {id}.",
         inputSchema: { type: "object", required: ["board_id", "actions"], properties: { board_id: BOARD_ID, actions: { type: "array", items: { type: "object", properties: { op: { type: "string" } }, required: ["op"] } } } },
         run: edit
     },
