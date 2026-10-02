@@ -434,7 +434,7 @@ class TransientRun {
             hitsBreak = true;
         }
 
-        let r = null, shrink = 0, lteTries = 0, ratio = 0;
+        let r = null, shrink = 0, lteTries = 0, ratio = 0, firstRatio = 0;
         for (;;) {
             r = this.solve(h, (this.afterBreak || shrink > 0 || lteTries > 0 || this.dampSteps > 0) ? "be" : this.method);
             if (!r.ok) {
@@ -450,6 +450,7 @@ class TransientRun {
             if (this.adaptive && !this.afterBreak && this.xPrev) {
                 ratio = engine.lteRatio(r.x, this.x, this.xPrev, h, this.hPrev, this.lteTol);
                 if (ratio > 1 && lteTries < 8 && h > tStep * 1e-3) {
+                    if (!lteTries) firstRatio = ratio;
                     h *= Math.max(0.2, 0.85 / Math.sqrt(ratio));
                     hitsBreak = false;
                     lteTries++;
@@ -477,9 +478,11 @@ class TransientRun {
             result.events++;
         }
 
-        // repeated error rejections mean the trapezoidal rule is ringing around a kink (a diode
-        // switching off against an inductor); backward Euler damps that, so use it for a while
-        if (lteTries >= 2) this.dampSteps = 12;
+        // a sudden, large error (the waveform was smooth, then the estimate jumped by more than 25x) means the
+        // trapezoidal rule is ringing around a kink (a diode switching off against an inductor); backward Euler
+        // damps that, so use it for a while. Ordinary step-size probing on a smooth resonance must not trigger it:
+        // backward Euler would drain the oscillation's energy.
+        if (lteTries >= 2 && firstRatio > 25) this.dampSteps = 12;
         else if (this.dampSteps > 0) this.dampSteps--;
 
         this.xPrev = this.x;

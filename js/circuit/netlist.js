@@ -638,9 +638,12 @@ class NetlistExtractor {
                         `B${nm}_I ${n[0]} ${n[2]} I=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}+${f(p.iq)}`);
                     break;
                 }
-                case "BSRC":
-                    lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^B/i, "")} ${n[0]} ${n[1]} ${p.mode}=${p.expr}`);
+                case "BSRC": {
+                    const ex = Expr.toSpice(p.expr);
+                    if (ex.unsupported.length) lines.push(`* ${e.name}: ngspice has no ${ex.unsupported.join(", ")}() function`);
+                    lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^B/i, "")} ${n[0]} ${n[1]} ${p.mode}=${ex.text}`);
                     break;
+                }
                 case "CCCS": {
                     // output current = gain * I(sense source) with a smooth saturation near 0 V
                     const sense = NetlistExtractor.spiceName({ kind: "V", name: e.ctrl });

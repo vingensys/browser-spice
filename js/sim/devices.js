@@ -306,8 +306,11 @@ class Inductor extends Element {
             s.add(br, br, 1);
             s.rhs(br, this.ic);
         } else {
+            // a DC short, with a nano-ohm of resistance so that loops of inductors and voltage sources (whose
+            // currents are undetermined) stay solvable, as they do in SPICE
             s.add(br, a, 1);
             s.add(br, b, -1);
+            s.add(br, br, -1e-9);
         }
     }
 

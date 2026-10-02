@@ -129,6 +129,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
 ```
 
 - `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import, the added parts (58 checks).
+- `tests/fuzz.test.js` generates seeded random circuits (resistor networks with diodes, BJTs, capacitors, an inductor, sine / pulse and behavioural sources), solves each with the engine and with ngspice, and compares the operating point, transient and AC. `FUZZ_N=500 FUZZ_SEED=7 node tests/fuzz.test.js` runs more; `FUZZ_PRINT=<seed>` prints one circuit's deck. It found three engine problems that are now fixed: numerical damping of smooth LC resonances, a singular matrix for inductor/source loops, and `log()` meaning base 10.
 - `tests/ngspice.test.js` runs `tests/decks/*.cir` (diodes, BJT / MOS amplifiers, rectifiers, CMOS, controlled
   sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.

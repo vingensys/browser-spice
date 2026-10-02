@@ -1010,12 +1010,19 @@ console.log("behavioural (B) sources and expressions");
 
 test("expressions: operators, precedence, functions, ternary and SPICE suffixes", () => {
     const ev = (t, vals = [], time = 0) => Expr.compile(t).eval(vals, time);
-    near(ev("2+3*4"), 14, 1e-12); near(ev("(2+3)*4"), 20, 1e-12); near(ev("-2^2"), -4, 1e-12, "unary minus binds looser than ^"); near(ev("2^3^2"), 512, 1e-12, "^ groups to the right");
+    near(ev("2+3*4"), 14, 1e-12); near(ev("(2+3)*4"), 20, 1e-12); near(ev("-2^2"), -4, 1e-12, "unary minus binds looser than ^"); near(ev("2^3^2"), 64, 1e-12, "^ chains group to the left, as in ngspice"); near(ev("2^-1"), 0.5, 1e-12); near(ev("-2^2"), -4, 1e-12); near(ev("log(10)"), Math.LN10, 1e-12, "log is the natural log");
     near(ev("10k*1.5"), 15000, 1e-9); near(ev("2meg/4"), 5e5, 1e-6); near(ev("3u*1e6"), 3, 1e-12);
     near(ev("sin(pi/2)+cos(0)"), 2, 1e-12); near(ev("max(3,min(9,5))"), 5, 1e-12); near(ev("limit(7,0,5)"), 5, 1e-12);
     near(ev("1<2 && 3>2 ? 10 : 20"), 10, 1e-12); near(ev("!0 + (2==2)"), 2, 1e-12); near(ev("if(0,1,2)"), 2, 1e-12);
     near(ev("time*1k", [], 0.002), 2, 1e-12); near(ev("pwr(-2,2)"), -4, 1e-12); near(ev("u(-1)+u(2)+uramp(-3)+uramp(3)"), 4, 1e-12);
     if (!Number.isFinite(ev("1/0")) || !Number.isFinite(ev("ln(0)")) || !Number.isFinite(ev("sqrt(-1)")) || !Number.isFinite(ev("exp(1e4)"))) throw new Error("non-finite results escape");
+});
+test("expressions: the ngspice form rewrites limit() and if() and flags the functions ngspice lacks", () => {
+    const a = Expr.toSpice("limit(v(a)*2, -3, 3) + 1"), b = Expr.toSpice("if(v(a)>1, limit(v(b),0,1), atan2(1,2))");
+    if (a.text !== "max(min(-3,3),min(max(-3,3),v(a)*2)) + 1" || a.unsupported.length) throw new Error(a.text);
+    if (!/^\(\(v\(a\)>1\)\?\(max\(min\(0,1\),min\(max\(0,1\),v\(b\)\)\)\):\(atan2\(1,2\)\)\)$/.test(b.text) || b.unsupported.join() !== "atan2") throw new Error(b.text + " " + b.unsupported);
+    const e1 = Expr.compile("limit(v(a)*2,-3,3)").eval([2]), e2 = Expr.compile(a.text).eval([2]);
+    near(e1 + 1, e2, 1e-12);
 });
 test("expressions: variables are collected once and evaluated from the value list", () => {
     const e = Expr.compile("v(a,b)*2 + v(a,b) + v(c) + i(vx)");

@@ -11,7 +11,7 @@
 class Expr {
     static FUNCS = {
         abs: [1, Math.abs], sqrt: [1, (x) => Math.sqrt(Math.max(x, 0))], exp: [1, (x) => Math.exp(Math.min(x, 700))],
-        ln: [1, (x) => Math.log(Math.max(x, 1e-300))], log: [1, (x) => Math.log10(Math.max(x, 1e-300))], log10: [1, (x) => Math.log10(Math.max(x, 1e-300))],
+        ln: [1, (x) => Math.log(Math.max(x, 1e-300))], log: [1, (x) => Math.log(Math.max(x, 1e-300))],   // log is the natural log, as in ngspice log10: [1, (x) => Math.log10(Math.max(x, 1e-300))],
         sin: [1, Math.sin], cos: [1, Math.cos], tan: [1, Math.tan], asin: [1, (x) => Math.asin(Math.min(1, Math.max(-1, x)))], acos: [1, (x) => Math.acos(Math.min(1, Math.max(-1, x)))],
         atan: [1, Math.atan], atan2: [2, Math.atan2], sinh: [1, (x) => Math.sinh(Math.max(-700, Math.min(700, x)))], cosh: [1, (x) => Math.cosh(Math.max(-700, Math.min(700, x)))], tanh: [1, Math.tanh],
         min: [2, Math.min], max: [2, Math.max], pow: [2, Math.pow], pwr: [2, (x, y) => Math.sign(x) * Math.pow(Math.abs(x), y)],
@@ -93,9 +93,19 @@ class Expr {
             if (isOp("!")) { next(); const a = unary(); return (V, T) => (a(V, T) ? 0 : 1); }
             return power();
         };
+        // the exponent of ^ is a primary with an optional sign; chains group to the left, as in ngspice (2^3^2 = 64)
+        const exponent = () => {
+            if (isOp("-")) { next(); const a = exponent(); return (V, T) => -a(V, T); }
+            if (isOp("+")) { next(); return exponent(); }
+            return primary();
+        };
         const power = () => {
-            const base = primary();
-            if (isOp("^") || isOp("**")) { next(); const e = unary(); return (V, T) => { const b = base(V, T), x = e(V, T); const r = Math.pow(b, x); return Number.isFinite(r) ? r : (b < 0 ? 0 : r); }; }
+            let base = primary();
+            while (isOp("^") || isOp("**")) {
+                next();
+                const b = base, e = exponent();
+                base = (V, T) => { const x = b(V, T), y = e(V, T), r = Math.pow(x, y); return Number.isFinite(r) ? r : (x < 0 ? 0 : r); };
+            }
             return base;
         };
         const primary = () => {
@@ -142,5 +152,35 @@ class Expr {
         const root = ternary();
         if (i < toks.length) throw new Error(`unexpected "${toks[i].v}" in expression "${text}"`);
         return { vars, text: String(text), eval: (values, time = 0) => { const r = root(values, time); return Number.isFinite(r) ? r : 0; } };
+    }
+
+    // the same expression for ngspice, which has no limit(), if(), atan2(), int() or round(): the first two are rewritten
+    // in terms of functions it has; the others are returned unchanged and listed in `unsupported`
+    static toSpice(text) {
+        const unsupported = new Set();
+        const rewrite = (src) => {
+            const re = /\b(limit|if)\s*\(/i;
+            for (let guard = 0; guard < 50; guard++) {
+                const m = re.exec(src);
+                if (!m) break;
+                let depth = 1, i = m.index + m[0].length, start = i;
+                const args = [];
+                for (; i < src.length && depth > 0; i++) {
+                    const ch = src[i];
+                    if (ch === "(") depth++;
+                    else if (ch === ")") { depth--; if (!depth) args.push(src.slice(start, i)); }
+                    else if (ch === "," && depth === 1) { args.push(src.slice(start, i)); start = i + 1; }
+                }
+                const a = args.map(x => rewrite(x.trim()));
+                const out = m[1].toLowerCase() === "limit" && a.length === 3 ? `max(min(${a[1]},${a[2]}),min(max(${a[1]},${a[2]}),${a[0]}))`
+                    : m[1].toLowerCase() === "if" && a.length === 3 ? `((${a[0]})?(${a[1]}):(${a[2]}))` : null;
+                if (out === null) break;
+                src = src.slice(0, m.index) + out + src.slice(i);
+            }
+            return src;
+        };
+        const out = rewrite(String(text));
+        for (const f of ["atan2", "int", "round"]) if (new RegExp(`\\b${f}\\s*\\(`, "i").test(out)) unsupported.add(f);
+        return { text: out, unsupported: [...unsupported] };
     }
 }
