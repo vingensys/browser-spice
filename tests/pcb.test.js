@@ -212,4 +212,58 @@ for (const seed of [5, 9]) {
     const fz = Pcb.fillZones(g)[0];
     check("the pour clears the new tracks and still reaches every ground pad", fz.islands.length === 0 && fz.connected.length === 4, [fz.connected.length, fz.islands.length]);
 }
+// ---- push-and-shove
+{
+    const board = (items) => {
+        const b = Pcb.blank(60, 40);
+        b.parts = items.map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; });
+        return b;
+    };
+    const minDist = (A, B) => { let m = Infinity; for (let i = 0; i + 1 < A.length; i++) for (let j = 0; j + 1 < B.length; j++) m = Math.min(m, Pcb.segSegDist(A[i], A[i + 1], B[j], B[j + 1])); return m; };
+    // net 2 runs along y = 20 between two pads; net 1 wants to run just below it at y = 20.2
+    const b = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 10, 25], ["D", "1", 30, 25]]);
+    b.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] });
+    const draft = [[10, 25], [10, 20.2], [30, 20.2]];
+    const r = Pcb.shove(b, "F", draft, 0.3, "1");
+    check("a track laid hard against another is accepted and the other is pushed away", r.ok && r.changes.length === 1, r.reason);
+    const moved = r.changes[0] && r.changes[0].pts;
+    const D = 0.3 + b.rules.clearance;
+    check("the pushed track keeps the clearance to the new one", moved && minDist(moved, [[10, 20.2], [30, 20.2]]) >= D - 0.01, moved && minDist(moved, [[10, 20.2], [30, 20.2]]));
+    check("its ends stay on their pads (it pivots about them)", moved && moved[0][0] === 5 && moved[0][1] === 20 && moved[moved.length - 1][0] === 40 && moved[moved.length - 1][1] === 20);
+    check("it grew vertices where it bends and bulges away from the new track", moved.length > 2 && Math.min(...moved.map(q => q[1])) < 19.7 && moved.length <= 8, moved);
+    Pcb.applyShove(b, r);
+    b.tracks.push({ id: 2, layer: "F", w: 0.3, pts: draft });
+    const iss = Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
+    check("after applying, the rule check finds no clearance problem", iss.length === 0, JSON.stringify(iss.slice(0, 2)));
+    // same net is not pushed
+    const b2 = board([["A", "1", 5, 20], ["B", "1", 40, 20], ["C", "1", 10, 25], ["D", "1", 30, 25]]);
+    b2.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] });
+    check("tracks of the same net are left alone", Pcb.shove(b2, "F", [[10, 25], [10, 20.2], [30, 20.2]], 0.3, "1").changes.length === 0);
+    // crossing cannot be shoved
+    const b3 = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 20, 30]]);
+    b3.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] });
+    const rc = Pcb.shove(b3, "F", [[20, 30], [20, 10]], 0.3, "1");
+    check("a new track crossing an existing one is refused with a reason", !rc.ok && /cross/.test(rc.reason), rc.reason);
+    // a fixed obstacle in the way: another net's pad where the pushed track would have to go
+    const b4 = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 10, 25], ["D", "3", 22, 19.2]]);
+    b4.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] });
+    const rp = Pcb.shove(b4, "F", [[10, 25], [10, 20.2], [30, 20.2]], 0.3, "1");
+    check("pushing a track into a pad of a third net is refused", !rp.ok, rp);
+    // cascade: net 2 pushes net 3 which sits beside it
+    const b5 = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["E", "3", 5, 16], ["F", "3", 40, 16], ["C", "1", 10, 25]]);
+    b5.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] }, { id: 2, layer: "F", w: 0.3, pts: [[5, 16], [8, 19.4], [37, 19.4], [40, 16]] });
+    const rk = Pcb.shove(b5, "F", [[10, 25], [10, 20.2], [30, 20.2]], 0.3, "1");
+    check("a pushed track pushes its neighbour in turn", rk.ok && rk.changes.length === 2, rk.reason);
+    if (rk.ok) { Pcb.applyShove(b5, rk); b5.tracks.push({ id: 3, layer: "F", w: 0.3, pts: [[10, 25], [10, 20.2], [30, 20.2]] }); const i5 = Pcb.drc(b5, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type)); check("and the whole stack ends up clean", i5.length === 0, JSON.stringify(i5.slice(0, 2))); }
+    // tracks on the other layer are not touched
+    const b6 = board([["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 10, 25]]);
+    b6.tracks.push({ id: 1, layer: "B", w: 0.3, pts: [[5, 20], [40, 20]] });
+    check("tracks on the other layer are ignored", Pcb.shove(b6, "F", [[10, 25], [10, 20.2], [30, 20.2]], 0.3, "1").changes.length === 0);
+    // a one-segment draft just starting is fine
+    check("a single point (nothing laid yet) changes nothing", Pcb.shove(b6, "F", [[10, 25]], 0.3, "1").ok);
+    // a track pushed toward the board edge is refused
+    const b7 = board([["A", "2", 5, 0.8], ["B", "2", 40, 0.8], ["C", "1", 10, 6]]);
+    b7.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 0.8], [40, 0.8]] });
+    check("pushing a track into the board edge margin is refused", !Pcb.shove(b7, "F", [[10, 6], [10, 0.9], [30, 0.9]], 0.3, "1").ok);
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

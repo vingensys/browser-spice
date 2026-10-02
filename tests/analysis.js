@@ -1054,12 +1054,14 @@ window.analysisTests = async function () {
         pcbView.act("unroute");
         const rats = Pcb.ratsnest(editor.pcb);
         pcbView.setTool("route");
+        pcbView.root.querySelector("#pcbShove").checked = false;          // a straight line between two pads crosses other pads
         const cvr = pcbView.cv, rr0 = cvr.getBoundingClientRect(), L = rats[0];
         const pt = (w) => ({ clientX: rr0.left + pcbView.view.ox + w.x * pcbView.view.s, clientY: rr0.top + pcbView.view.oy + w.y * pcbView.view.s });
         const fire = (type, w, extra = {}) => cvr.dispatchEvent(new PointerEvent(type, { pointerId: 1, button: 0, buttons: 1, bubbles: true, ...pt(w), ...extra }));
         fire("pointerdown", L.a); fire("pointerup", L.a);
         fire("pointerdown", L.b); fire("pointerup", L.b);
         ok("clicking one pad then another with the Route tool lays a track and joins the net", editor.pcb.tracks.length === 1 && Pcb.ratsnest(editor.pcb).length === rats.length - 1, [editor.pcb.tracks.length, Pcb.ratsnest(editor.pcb).length, rats.length]);
+        pcbView.root.querySelector("#pcbShove").checked = true;
         pcbView.setTool("select");
         // a deliberate clearance fault is found by Check rules
         const fp = Pcb.pads(editor.pcb).filter(p => p.net === L.a.net)[0], other = Pcb.pads(editor.pcb).find(p => p.net !== fp.net);
@@ -1078,6 +1080,37 @@ window.analysisTests = async function () {
         ok("Flip side moves it to the back", rpart.flip === true && Pcb.pads(editor.pcb).filter(q => q.part === rpart).every(q => q.layers.join() === "B"));
         pcbView.act("route"); pcbView.runDrc();
         ok("the mixed board still routes and passes the rule check", pcbView.issues.length === 0, JSON.stringify(pcbView.issues.slice(0, 2)));
+        // push-and-shove with the Route tool
+        pcbView.act("unroute"); editor.pcb.zones = [];
+        {
+            const b = Pcb.blank(60, 40); b.footprints = {};
+            b.parts = [["A", "2", 5, 20], ["B", "2", 40, 20], ["C", "1", 10, 28], ["D", "1", 30, 28]].map(([ref, net, x, y]) => { const part = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; });
+            b.tracks.push({ id: 1, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] }); b.nextId = 10;
+            editor.pcb = b; pcbView.sel = null; pcbView.layer = "F"; pcbView.fit();
+            pcbView.setTool("route");
+            const sc = pcbView.cv, sr = sc.getBoundingClientRect();
+            const sp = (x, y) => ({ clientX: sr.left + pcbView.view.ox + x * pcbView.view.s, clientY: sr.top + pcbView.view.oy + y * pcbView.view.s });
+            const click = (x, y, extra = {}) => { sc.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, button: 0, buttons: 1, bubbles: true, ...sp(x, y), ...extra })); sc.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, button: 0, bubbles: true, ...sp(x, y) })); };
+            click(10, 28); click(10, 20.25, { shiftKey: true }); click(30, 20.25, { shiftKey: true });
+            const t1 = b.tracks.find(t => t.id === 1);
+            ok("routing a track hard against another pushes it away (the Shove option is on)", pcbView.shoving && t1.pts.length > 2 && Math.min(...t1.pts.map(q => q[1])) < 19.8, JSON.stringify(t1.pts));
+            ok("and its ends stay on their pads", t1.pts[0][0] === 5 && t1.pts[0][1] === 20 && t1.pts[t1.pts.length - 1][0] === 40);
+            click(30, 28);
+            pcbView.key({ key: "Enter", target: sc, preventDefault() {}, stopPropagation() {} });
+            const drcS = Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
+            ok("the finished board has no clearance violation", drcS.length === 0, JSON.stringify(drcS.slice(0, 2)));
+            // with Shove off the same move is allowed to violate (the rule check then reports it)
+            pcbView.act("unroute");
+            b.tracks.push({ id: 31, layer: "F", w: 0.3, pts: [[5, 20], [40, 20]] });
+            pcbView.root.querySelector("#pcbShove").checked = false;
+            click(10, 28); click(10, 20.25, { shiftKey: true }); click(30, 20.25, { shiftKey: true });
+            pcbView.key({ key: "Enter", target: sc, preventDefault() {}, stopPropagation() {} });
+            ok("with Shove off nothing is pushed and the rule check reports the violation", b.tracks.find(t => t.id === 31).pts.length === 2 && Pcb.drc(b, { zones: false }).some(i => i.type === "clearance" || i.type === "short"));
+            pcbView.root.querySelector("#pcbShove").checked = true;
+            pcbView.setTool("select");
+            editor.pcb = null;
+        }
+        pcbView.close(); pcbView.open();
         // user footprints and copper pours
         pcbView.act("unroute");
         pcbView.act("footprints");
