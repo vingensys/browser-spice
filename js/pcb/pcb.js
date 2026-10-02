@@ -36,11 +36,12 @@ class Pcb {
     static footprint(kind, nPins, ic, pkg, lib) {
         if (typeof pkg === "string" && pkg.startsWith("user:") && lib && lib[pkg.slice(5)]) return Pcb.userFootprint(lib[pkg.slice(5)]);
         const list = Pcb.PACKAGES[kind], id = list && list.some(x => x[0] === pkg) ? pkg : (list ? list[0][0] : "header");
-        const bounds = (pads, extra = 1) => {
-            const xs = pads.flatMap(p => [p.x - p.w / 2, p.x + p.w / 2]), ys = pads.flatMap(p => [p.y - p.h / 2, p.y + p.h / 2]);
+        const bounds = (pads, extra = 1, silk = []) => {
+            // the courtyard covers the pads and the silkscreen outline (a TO-220's body reaches well past its pads)
+            const xs = pads.flatMap(p => [p.x - p.w / 2, p.x + p.w / 2]).concat(silk.flat().map(q => q[0])), ys = pads.flatMap(p => [p.y - p.h / 2, p.y + p.h / 2]).concat(silk.flat().map(q => q[1]));
             return { w: Math.max(...xs.map(Math.abs)) * 2 + extra, h: Math.max(...ys.map(Math.abs)) * 2 + extra };
         };
-        const wrap = (name, pads, silk, pinMap, extra) => ({ name, pads, silk, pinMap, ...bounds(pads, extra), smd: pads.every(p => p.smd) });
+        const wrap = (name, pads, silk, pinMap, extra) => ({ name, pads, silk, pinMap, ...bounds(pads, extra, silk), smd: pads.every(p => p.smd) });
         const th = (n, pitch, pw, ph, drill) => Array.from({ length: n }, (_, i) => ({ n: i + 1, x: (i - (n - 1) / 2) * pitch, y: 0, w: pw, h: ph, drill, shape: i === 0 && n > 1 ? "rect" : "round", smd: false }));
         const smd2 = (cx, w, h) => [{ n: 1, x: -cx, y: 0, w, h, drill: 0, shape: "rect", smd: true }, { n: 2, x: cx, y: 0, w, h, drill: 0, shape: "rect", smd: true }];
         const box = (x1, y1, x2, y2) => [[x1, y1], [x2, y1], [x2, y2], [x1, y2], [x1, y1]];
@@ -61,7 +62,7 @@ class Pcb {
                 // package order: transistor E B C (BJT: nodes B C E), JFET D S G (nodes G D S)
                 const map = kind === "J" ? [1, 2, 0] : [2, 0, 1];
                 return wrap("TO-92", pads, [arc.concat([arc[0]])], map, 1); }
-            case "to220": { const pads = th(3, 2.54, 2.0, 2.4, 1.1), t = -5.5;
+            case "to220": { const pads = th(3, 2.54, 2.0, 2.4, 1.1), t = -2.4;
                 return wrap("TO-220", pads, [box(-5, t - 4.5, 5, t), [[-5, t - 1.2], [5, t - 1.2]]], [0, 1, 2], 1); }       // G D S
             case "sot23": { const pads = [{ n: 1, x: -0.95, y: 1.1, w: 0.8, h: 1.0, drill: 0, shape: "rect", smd: true }, { n: 2, x: 0.95, y: 1.1, w: 0.8, h: 1.0, drill: 0, shape: "rect", smd: true }, { n: 3, x: 0, y: -1.1, w: 0.8, h: 1.0, drill: 0, shape: "rect", smd: true }];
                 const map = kind === "M" ? [0, 2, 1] : (kind === "J" ? [0, 2, 1] : [0, 2, 1]);                                      // BJT B E C, MOSFET G S D, JFET G S D
@@ -334,6 +335,7 @@ class Pcb {
         if (hit && hit.key === key) return hit.fills;
         const R = pcb.rules, W = pcb.outline.w, H = pcb.outline.h, nx = Math.ceil(W / res), ny = Math.ceil(H / res);
         const conn = Pcb.connectivity(pcb, false), pads = Pcb.pads(pcb);
+        const reach = res * Math.SQRT1_2;          // a cell is blocked when its centre is within clearance + half its diagonal, so no corner of a kept cell is closer than the clearance
         const netOf = new Map();
         conn.forEach((g, gi) => { g.tracks.forEach(t => netOf.set(t, g.net)); g.vias.forEach(v => netOf.set(v, g.net)); });
         const fills = [];
@@ -345,19 +347,19 @@ class Pcb {
                 const y = (j + 0.5) * res;
                 for (let i = 0; i < nx; i++) {
                     const x = (i + 0.5) * res;
-                    if (x < edge || y < edge || x > W - edge || y > H - edge) continue;
+                    if (x < edge + half || y < edge + half || x > W - edge - half || y > H - edge - half) continue;
                     if (Pcb.inPoly(x, y, z.pts)) inz[j * nx + i] = 1;
                 }
             }
             const disc = (cx, cy, r) => {
-                const i0 = Math.max(0, Math.floor((cx - r) / res)), i1 = Math.min(nx - 1, Math.ceil((cx + r) / res)), j0 = Math.max(0, Math.floor((cy - r) / res)), j1 = Math.min(ny - 1, Math.ceil((cy + r) / res));
-                for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot((i + 0.5) * res - cx, (j + 0.5) * res - cy) <= r + half) blocked[j * nx + i] = 1;
+                const i0 = Math.max(0, Math.floor((cx - r - reach) / res)), i1 = Math.min(nx - 1, Math.ceil((cx + r + reach) / res)), j0 = Math.max(0, Math.floor((cy - r - reach) / res)), j1 = Math.min(ny - 1, Math.ceil((cy + r + reach) / res));
+                for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (Math.hypot((i + 0.5) * res - cx, (j + 0.5) * res - cy) <= r + reach) blocked[j * nx + i] = 1;
             };
             const rectGrow = (px, py, hw, hh, grow) => {
-                const i0 = Math.max(0, Math.floor((px - hw - grow) / res)), i1 = Math.min(nx - 1, Math.ceil((px + hw + grow) / res)), j0 = Math.max(0, Math.floor((py - hh - grow) / res)), j1 = Math.min(ny - 1, Math.ceil((py + hh + grow) / res));
+                const i0 = Math.max(0, Math.floor((px - hw - grow - reach) / res)), i1 = Math.min(nx - 1, Math.ceil((px + hw + grow + reach) / res)), j0 = Math.max(0, Math.floor((py - hh - grow - reach) / res)), j1 = Math.min(ny - 1, Math.ceil((py + hh + grow + reach) / res));
                 for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
                     const dx = Math.max(0, Math.abs((i + 0.5) * res - px) - hw), dy = Math.max(0, Math.abs((j + 0.5) * res - py) - hh);
-                    if (Math.hypot(dx, dy) <= grow + half) blocked[j * nx + i] = 1;
+                    if (Math.hypot(dx, dy) <= grow + reach) blocked[j * nx + i] = 1;
                 }
             };
             const seg = (a, b, r) => { const n = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / (res / 2))); for (let k = 0; k <= n; k++) disc(a[0] + ((b[0] - a[0]) * k) / n, a[1] + ((b[1] - a[1]) * k) / n, r); };
@@ -610,6 +612,7 @@ class Pcb {
             const r = c.k === "track" ? c.it.w / 2 : c.k === "via" ? c.it.d / 2 : Pcb.padRadius(c.it);
             for (const p of pts) if (!inside(p[0], p[1], r)) { issues.push({ type: "edge", ids: [c.label], msg: `${c.label} is outside the board or closer than ${R.edge} mm to its edge`, x: p[0], y: p[1] }); break; }
         }
+        for (const side of ["F", "B"]) for (const line of Pcb.silk(pcb, side)) { const o = line.find(q => q[0] < -0.01 || q[1] < -0.01 || q[0] > pcb.outline.w + 0.01 || q[1] > pcb.outline.h + 0.01); if (o) { issues.push({ type: "silk", msg: `${side === "F" ? "front" : "back"} silkscreen runs off the board (near ${o[0].toFixed(1)}, ${o[1].toFixed(1)}): move the part inward or enlarge the board`, x: o[0], y: o[1] }); break; } }
         for (const part of pcb.parts) if (part.pkg && String(part.pkg).startsWith("user:") && part.kind !== "M" && (part.nodes || []).length > part.fp.pads.length) issues.push({ type: "pins", msg: `${part.ref}: footprint ${part.fp.name} has ${part.fp.pads.length} pad(s) but the part has ${part.nodes.length} pin(s)`, x: part.x, y: part.y });
         const zs = zones ? (pcb.zones || []) : [];
         zs.forEach((z, i) => {

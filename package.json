@@ -11,6 +11,7 @@
     "test": "node tests/sim.test.js && node tests/ngspice.test.js && node tests/fuzz.test.js && node tests/noise.ngspice.test.js && node tests/tf.ngspice.test.js && node tests/measure.ngspice.test.js && node tests/mcp.test.js && node tests/ngspice-wasm.test.js && node tests/plot.test.js && node tests/logic.test.js && node tests/scope.test.js && node tests/logic.analyser.test.js && node tests/fft.test.js && node tests/logic.ngspice.test.js && node tests/kicad.test.js && node tests/pcb.test.js && node tests/pcb.shove.test.js",
     "test:browser": "node tests/run-browser.mjs",
     "test:all": "npm test && npm run test:browser",
+    "capability:gerber": "bash tests/capability/gerber/run.sh",
     "capability": "node tests/capability/design-flow.mjs && node tests/capability/power-and-parts.mjs && node tests/capability/app-export-roundtrip.mjs && node tests/capability/pcb-flow.mjs"
   },
   "dependencies": {

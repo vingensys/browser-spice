@@ -367,4 +367,37 @@ for (const seed of [5, 9]) {
     check("so is a via (on any layer)", rv.ok && rv.pts.length >= 3, rv.reason);
     const t0 = Date.now(); Pcb.walkaround(b, "F", [[3, 3], [57, 37]], 0.3, "1"); check(`a board-wide search is quick (${Date.now() - t0} ms)`, Date.now() - t0 < 1500);
 }
+// ---- findings from reading the Gerbers back with an independent reader
+{
+    const board = (items) => { const b = Pcb.blank(60, 40); b.parts = items.map(([ref, net, x, y, kind]) => { const part = { ref, kind: kind || "X", nodes: net, x, y, rot: 0, placed: true }; Pcb.setPackage(part, undefined, b.footprints); return part; }); return b; };
+    // the pour keeps the full clearance (the grid fill used to come within 0.18 mm of a 0.2 mm rule)
+    const b = board([["A", ["1"], 10, 10], ["B", ["2"], 30, 10], ["G", ["0"], 20, 25]]);
+    b.tracks.push({ id: 1, layer: "B", w: 0.3, pts: [[10, 10], [27.3, 17.7], [30, 10]] });
+    b.zones.push({ id: 5, layer: "B", net: "0", pts: [[0.5, 0.5], [59.5, 0.5], [59.5, 39.5], [0.5, 39.5]], thermal: true });
+    const fz = Pcb.fillZones(b)[0];
+    const rectSeg = (r, a, c) => { const inR = (p) => p[0] >= r[0] && p[0] <= r[2] && p[1] >= r[1] && p[1] <= r[3]; if (inR(a) || inR(c)) return 0; const k = [[r[0], r[1]], [r[2], r[1]], [r[2], r[3]], [r[0], r[3]]]; let m = Infinity; for (let i = 0; i < 4; i++) m = Math.min(m, Pcb.segSegDist(a, c, k[i], k[(i + 1) % 4])); return m; };
+    let gap = Infinity;
+    for (const r of fz.rects) for (let i = 0; i + 1 < b.tracks[0].pts.length; i++) gap = Math.min(gap, rectSeg(r, b.tracks[0].pts[i], b.tracks[0].pts[i + 1]) - 0.15);
+    check(`the pour's gap to another net's track is at least the clearance (${gap.toFixed(3)} mm)`, gap >= 0.2 - 1e-6, gap);
+    let padGap = Infinity;
+    for (const p of Pcb.pads(b).filter(q => q.net !== "0")) for (const r of fz.rects) {
+        const dx = Math.max(0, Math.abs(p.x - (r[0] + r[2]) / 2) - (r[2] - r[0]) / 2), dy = Math.max(0, Math.abs(p.y - (r[1] + r[3]) / 2) - (r[3] - r[1]) / 2);
+        padGap = Math.min(padGap, p.shape === "round" ? Math.hypot(dx, dy) - Math.min(p.w, p.h) / 2 : Math.hypot(Math.max(0, dx - p.w / 2), Math.max(0, dy - p.h / 2)));
+    }
+    check(`and to the pads of other nets (${padGap.toFixed(3)} mm)`, padGap >= 0.2 - 1e-6, padGap);
+    // the pour also stays the edge margin away from the board edge
+    const edgeGap = Math.min(...fz.rects.map(r => Math.min(r[0], r[1], 60 - r[2], 40 - r[3])));
+    check(`and the edge margin (${edgeGap.toFixed(3)} mm, rule 0.3)`, edgeGap >= 0.3 - 1e-6, edgeGap);
+    // a TO-220's courtyard covers its silkscreen body, and silk running off the board is reported
+    const m = Pcb.footprint("M", 3, undefined, "to220");
+    check("a TO-220's courtyard covers its silkscreen body", m.h >= 2 * 6.9, m.h);
+    const edge = Pcb.blank(60, 40); edge.parts = [{ ref: "Q1", kind: "M", nodes: ["1", "2", "3"], x: 30, y: 4, rot: 0, placed: true }]; Pcb.setPackage(edge.parts[0], "to220", edge.footprints);
+    const issues = Pcb.drc(edge, { zones: false });
+    check("silk off the edge of the board is reported (as a note, it does not block export)", issues.some(i => i.type === "silk"), issues.map(i => i.type));
+    const ok = Pcb.blank(60, 40); ok.parts = [{ ref: "Q1", kind: "M", nodes: ["1", "2", "3"], x: 30, y: 20, rot: 0, placed: true }]; Pcb.setPackage(ok.parts[0], "to220", ok.footprints);
+    check("and not when the part is inside", !Pcb.drc(ok, { zones: false }).some(i => i.type === "silk"));
+    // auto-place keeps every part's silkscreen inside the board it grows
+    const pl = Pcb.blank(30, 20); Pcb.sync(pl, [{ name: "M1", kind: "M", nodes: ["1", "2", "3"] }, { name: "R1", kind: "R", nodes: ["1", "2"] }, { name: "C1", kind: "C", nodes: ["2", "3"] }]); Pcb.autoPlace(pl, { fit: true });
+    check("auto-place fits the board around the silkscreen too", !Pcb.drc(pl, { zones: false }).some(i => i.type === "silk"), JSON.stringify(Pcb.drc(pl, { zones: false }).filter(i => i.type === "silk")));
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

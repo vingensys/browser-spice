@@ -184,7 +184,7 @@ function render(args) {
 
 function exportBoard(args) {
     const b = get(args.board_id), pcb = b.pcb, name = String(args.name || "board").replace(/[^A-Za-z0-9_-]/g, "_");
-    const blocking = Pcb.drc(pcb).filter(i => !["unrouted", "zone", "pins"].includes(i.type));
+    const blocking = Pcb.drc(pcb).filter(i => !["unrouted", "zone", "pins", "silk"].includes(i.type));
     if (blocking.length && !args.force) throw new Error(`the board has ${blocking.length} rule violation(s) (first: ${blocking[0].msg}); fix them, or pass force: true to export anyway`);
     const files = Pcb.files(pcb, name), zip = Pcb.zip(files);
     const out = { clean: blocking.length === 0, files: files.map(([n, t]) => ({ name: n, bytes: t.length, lines: t.split("\n").length - 1 })), zip_bytes: zip.length, unrouted_connections: Pcb.ratsnest(pcb).length };

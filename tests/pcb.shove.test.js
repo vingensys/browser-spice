@@ -6,7 +6,7 @@ const { Pcb } = new Function(fs.readFileSync(path.join(__dirname, "..", "js/pcb/
 let seed = 11; const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 let accepted = 0, refused = 0, vias = 0, tracks = 0; const problems = [];
 const hard = (b) => Pcb.drc(b, { zones: false }).filter(i => ["clearance", "short", "edge"].includes(i.type));
-for (let trial = 0; trial < 14; trial++) {
+for (let trial = 0; trial < 40 && !(trial >= 14 && vias > 0 && tracks > 0); trial++) {
     const pick = () => String(1 + Math.floor(rnd() * 10)), els = [];
     for (let i = 0; i < 3; i++) els.push({ name: "U" + i, kind: "DIGITAL", ic: "7400", nodes: Array.from({ length: 12 }, pick) });
     for (let i = 0; i < 6; i++) els.push({ name: "R" + i, kind: "R", nodes: [pick(), pick()] });
