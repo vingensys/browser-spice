@@ -1057,7 +1057,7 @@ class MOSFET extends NonlinearElement {
                 if (key === "bs") this.vbsj = vj; else this.vbdj = vj;
                 const e = safeExp(vj / this.vt), i0 = par.isb * (e - 1), gj = (par.isb * e) / this.vt + ctx.gmin;
                 const iAct = p * (i0 + ctx.gmin * vj);
-                const ieq = iAct - gj * (ctx.v(b) - ctx.v(n2));
+                const ieq = iAct - gj * (p * vj);            // linearised about the (limited) junction voltage, as in the diode model
                 ctx.sys.addG(b, n2, gj);
                 ctx.sys.rhs(b, -ieq); ctx.sys.rhs(n2, ieq);
                 this[`ij${key}`] = i0; this[`gj${key}`] = gj - ctx.gmin;

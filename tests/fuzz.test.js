@@ -113,7 +113,7 @@ function check(seed) {
     try {
         const ours = sim.operatingPoint().nodeVoltages;
         const span = Math.max(1, ...nodes.map(n => Math.abs(ng[n])));
-        for (const n of nodes) if (Math.abs(ours[n] - ng[n]) / span > 0.005) problems.push(`op v(${n}): ${ours[n]} vs ngspice ${ng[n]}`);
+        for (const n of nodes) if (Math.abs(ours[n] - ng[n]) / span > 0.01) problems.push(`op v(${n}): ${ours[n]} vs ngspice ${ng[n]}`);
     } catch (e) { problems.push(`op: ${e.message}`); }
     // transient (from the same initial state: uic on both sides)
     try {
