@@ -19,6 +19,7 @@ const BusUtil = {
     pinInfo(comp, pinName) {
         if (comp.type === "PORT") return BusUtil.parse(comp.net);
         if (comp.type === "SHEET") return BusUtil.parse(pinName);
+        if (comp.busPins && String(pinName).includes("[")) return BusUtil.parse(pinName);        // a logic IC with its vector pins folded into bus pins
         return null;
     },
 
@@ -46,3 +47,16 @@ PartLib.add("BUSTAP", {
 });
 
 SchematicEditor.REF_PREFIX.BUSTAP = "BE";
+
+// toggling a part's bus pins changes its terminals: wires that end on a pin that is gone are removed
+class BusPinTools {
+    pruneDanglingWires(comp) {
+        const names = new Set(this.getTerminals(comp).map(t => t.name));
+        const gone = (end) => end && end.type === "terminal" && end.component === comp.id && !names.has(end.terminal);
+        const before = this.wires.length;
+        this.wires = this.wires.filter(w => !gone(w.start) && !gone(w.end));
+        if (this.wires.length !== before) this.refreshWires();
+        return before - this.wires.length;
+    }
+}
+applyMixin(SchematicEditor, BusPinTools);

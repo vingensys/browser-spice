@@ -1073,6 +1073,46 @@ window.analysisTests = async function () {
         clear();
     }
 
+    // ======================================================== bus pins on logic ICs
+    {
+        clear(); editor.resetSheets();
+        const spec = LOGIC_ICS["74374"], vecs = LogicIC.vectors(spec);
+        ok("runs of counting pins are found (D1..D8 and Q1..Q8 on a 74374)", vecs.length === 2 && vecs[0].name === "D[1..8]" && vecs[1].name === "Q[1..8]", vecs.map(v => v.name));
+        ok("a 7490's R01 R02 R91 R92 are not a vector", LogicIC.vectors(LOGIC_ICS["7490"]).length === 0);
+        editor.addComponent("GND", 100, 500, 0);
+        const reg = editor.addComponent("74374", 400, 300, 0), flat = editor.getTerminals(reg).length;
+        reg.busPins = true;
+        const folded = editor.getTerminals(reg);
+        ok("with vector pins as buses the 8+8 pins fold into two bus pins", folded.length === flat - 14 && folded.some(t => t.name === "D[1..8]") && folded.some(t => t.name === "Q[1..8]"), folded.map(t => t.name));
+        // 8 bits in on a bus D[0..7] from eight sources, 8 bits out on a bus to eight resistors; clocked once
+        const place = (type, x, y) => editor.addComponent(type, x, y, 0);
+        const tD = editor.getTerminalPosition(reg, folded.find(t => t.name === "D[1..8]")), tQ = editor.getTerminalPosition(reg, folded.find(t => t.name === "Q[1..8]"));
+        const bw = (x1, y1, x2, y2, name) => { editor.wires.push({ id: editor.nextId++, start: { type: "point", x: x1, y: y1 }, end: { type: "point", x: x2, y: y2 }, route: [{ x: x1, y: y1 }, { x: x2, y: y2 }], bus: true, busName: name }); };
+        bw(tD.x, tD.y, tD.x - 200, tD.y, "IN[0..7]");
+        bw(tQ.x, tQ.y, tQ.x + 200, tQ.y, "OUT[0..7]");
+        editor.refreshWires();
+        const info = NetlistExtractor.extract(editor), nets = info.nets;
+        ok("a bus pin touching a bus counts as wired", nets.wired.has(`${reg.id}:D[1..8]`) && nets.wired.has(`${reg.id}:Q[1..8]`));
+        const e = info.elements.find(x => x.kind === "DIGITAL");
+        const dNodes = e.nodes.slice(0, 8), qNodes = e.nodes.slice(spec.left.length, spec.left.length + 8);
+        ok("the member nets are IN0..IN7 on the data side (the first pin of the run meets the first bus member)", dNodes.every((n, j) => n === nets.labelNode(`IN${j}`)) && new Set(dNodes).size === 8, dNodes);
+        ok("and OUT0..OUT7 on the outputs", qNodes.every((n, j) => n === nets.labelNode(`OUT${j}`)) && new Set(qNodes).size === 8, qNodes);
+        // taps on the input bus join the same nets: entry 3 on bus IN is the net IN3, the same as chip pin D4
+        const tap = place("BUSTAP", tD.x - 100, tD.y); tap.index = 3; tap.bus = "IN";
+        editor.refreshWires();
+        const info2 = NetlistExtractor.extract(editor), e2 = info2.elements.find(x => x.kind === "DIGITAL");
+        const tapNode = info2.nets.terminalNode(tap, "1");
+        ok("a bus entry on the bus meets the chip's matching bus member", e2.nodes[3] === tapNode, [e2.nodes[3], tapNode]);
+        // switching the option off again removes the wires on the folded pins and restores eight pins
+        reg.busPins = false; editor.pruneDanglingWires(reg);
+        ok("switching bus pins off restores the individual pins and drops wires on the folded ones", editor.getTerminals(reg).length === flat && !editor.wires.some(w => w.start && w.start.component === reg.id && w.start.terminal === "D[1..8]"));
+        // a bus pin on a part that touches no bus leaves its members floating, not shorted together
+        reg.busPins = true;
+        const lone = NetlistExtractor.extract(editor).elements.find(x => x.kind === "DIGITAL");
+        ok("an unattached bus pin leaves its eight members on separate floating nodes", new Set(lone.nodes.slice(0, 8)).size === 8 && !lone.nodes.slice(0, 8).includes("0"), lone.nodes.slice(0, 8));
+        clear();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

@@ -463,6 +463,21 @@ const LOGIC_ICS = {};
 // Pins of a chip in node order, and whether an input floats high
 const LogicIC = {
     pins(spec) { return [...spec.left, ...spec.right]; },
+    // runs of pins that count up (D0 D1 D2 ..., A1 A2 A3 A4) on one side: they can be shown as one bus pin
+    vectors(spec) {
+        const out = [];
+        for (const side of ["left", "right"]) {
+            let run = null;
+            const flush = () => { if (run && run.pins.length >= 3) out.push({ base: run.base.toUpperCase(), side, pins: run.pins, lo: run.lo, hi: run.hi, name: `${run.base.toUpperCase()}[${run.lo}..${run.hi}]` }); run = null; };
+            for (const n of spec[side]) {
+                const m = /^([A-Za-z]+)(\d+)$/.exec(n);
+                if (m && run && run.base === m[1] && Number(m[2]) === run.hi + 1 && m[2].length === run.len) { run.pins.push(n); run.hi++; }
+                else { flush(); if (m) run = { base: m[1], pins: [n], lo: Number(m[2]), hi: Number(m[2]), len: m[2].length }; }
+            }
+            flush();
+        }
+        return out;
+    },
     pullsUp(spec, name) { return !spec.pulldown.includes(name) && (/_N$/.test(name) || spec.pullup.includes(name)); },
     // run a chip through a list of input vectors (a test / documentation helper); returns the output after each
     run(key, vectors) {

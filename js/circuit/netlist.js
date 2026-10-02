@@ -157,6 +157,22 @@ class NetlistExtractor {
 
         // net labels / power ports with the same name are one net (no wire needed)
         const labelled = new Map();
+        // a bus pin on an ordinary part (a logic IC): member j of the pin is member lo+j of the bus it touches
+        const memberKeys = new Map();
+        for (const a of attach) {
+            if (a.kind !== "pin" || !a.touches || a.comp.type === "PORT" || a.comp.type === "SHEET") continue;
+            const g = groupInfo.get(bds.find(a.key));
+            if (!g || g.base === null) continue;
+            for (let j = 0; j <= a.info.hi - a.info.lo; j++) {
+                const idx = g.lo + j;
+                if (idx > g.hi) break;
+                const key = `bm:${a.comp.id}:${a.pin}:${j}`;
+                ds.makeSet(key);
+                memberKeys.set(`${a.comp.id}:${a.pin}:${j}`, key);
+                const name = `${g.base}${idx}`;
+                if (labelled.has(name)) ds.union(labelled.get(name), key); else labelled.set(name, key);
+            }
+        }
         for (const comp of editor.components) {
             if (comp.type !== "NETLABEL" && comp.type !== "POWER" && comp.type !== "PORT" && comp.type !== "BUSTAP") continue;
             if (comp.type === "PORT" && BusUtil.parse(comp.net)) continue;       // a vector port names a bus, it is not a net
@@ -197,6 +213,7 @@ class NetlistExtractor {
         };
         const wireNode = (wire) => (wire.route && wire.route.length ? nameForKey(vertexKey(wire, 0)) : null);
 
+        const memberNode = (comp, pin, j) => { const key = memberKeys.get(`${comp.id}:${pin}:${j}`); return key ? nameForKey(key) : null; };
         const terminalNode = (comp, pin) => {
             const key = terminalNodeKeys.get(`${comp.id}:${pin}`);
             return key ? nameForKey(key) : null;
@@ -222,7 +239,7 @@ class NetlistExtractor {
 
         const labelNode = (name) => { const k = labelled.get(String(name).trim().toUpperCase()); return k ? nameForKey(k) : null; };
         for (const a of attach) if (a.kind === "pin" && a.touches) wired.add(`${a.comp.id}:${a.pin}`);      // a bus pin on a bus is connected
-        return { terminalNode, getPointNodeName, hasGround, wired, wireNode, displayName, labelled, labelNode, busBase, taps, busGroups: [...groupInfo.values()] };
+        return { terminalNode, getPointNodeName, hasGround, wired, wireNode, displayName, labelled, labelNode, busBase, memberNode, taps, busGroups: [...groupInfo.values()] };
     }
 
     // ---- element list --------------------------------------------------------

@@ -242,6 +242,7 @@ class PropertiesPanel {
 
         if (e.target.type === "checkbox") {
             this.assign(comp, prop, e.target.checked);
+            if (prop === "busPins" && this.editor.pruneDanglingWires) this.editor.pruneDanglingWires(comp);
             this.refreshLabel(comp);
             this.commit();
         } else if (e.target.tagName === "SELECT") {
