@@ -540,3 +540,29 @@ table.meas td:last-child { text-align: right; font-family: Consolas, monospace; 
 .erc-text { flex: 1; line-height: 1.35; }
 .erc-rule { font-family: Consolas, monospace; font-size: 10px; color: var(--ui-dim); }
 .erc-row:hover .erc-rule { color: #dfe8ff; }
+
+/* oscilloscope window */
+.scope-win { position: fixed; z-index: 1000; display: flex; flex-direction: column; background: #20252b; color: #d8dee9; border: 1px solid #0b0d10; border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55); font-size: 12px; user-select: none; }
+.scope-title { display: flex; align-items: center; gap: 10px; padding: 5px 8px; background: #11151a; border-radius: 6px 6px 0 0; cursor: move; font-size: 11px; letter-spacing: 0.04em; }
+.scope-title b { color: #ffd54a; }
+.scope-status { margin-left: auto; font-family: Consolas, monospace; padding: 1px 7px; background: #0b130b; border: 1px solid #2f7a3f; color: #7cf08a; }
+.scope-close { background: none; border: none; color: #d8dee9; cursor: pointer; font-size: 14px; }
+.scope-main { display: flex; gap: 10px; padding: 10px; }
+.scope-screen { border: 3px solid #0b0d10; border-radius: 4px; display: block; width: 480px; height: 384px; }
+.scope-controls { width: 332px; display: flex; flex-direction: column; gap: 6px; }
+.scope-controls button { background: #2d343c; border: 1px solid #0b0d10; color: #d8dee9; padding: 4px 9px; border-radius: 3px; cursor: pointer; }
+.scope-controls button:hover { background: #3a434d; }
+.scope-controls button.on { background: #b88a00; color: #fff; }
+.scope-buttons { display: flex; gap: 5px; }
+.scope-controls fieldset { border: 1px solid #39424c; padding: 4px 8px 6px; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.scope-controls legend { padding: 0 4px; color: #8c98a8; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; }
+.scope-controls select, .scope-controls input[type=number] { background: #11151a; color: #d8dee9; border: 1px solid #39424c; padding: 1px 3px; }
+.scope-controls label { display: inline-flex; align-items: center; gap: 5px; }
+.scope-ch { display: flex; align-items: center; gap: 4px; width: 100%; }
+.scope-ch .scope-on { width: 42px; color: var(--ch); }
+.scope-ch input[type=range] { width: 64px; accent-color: var(--ch); }
+.scope-ch .u { color: #8c98a8; margin-left: -2px; }
+.scope-meas { width: 100%; border-collapse: collapse; font-family: Consolas, monospace; font-size: 11px; margin-top: 2px; }
+.scope-meas th { color: #8c98a8; font-weight: normal; text-align: right; padding: 0 3px; }
+.scope-meas td { text-align: right; padding: 1px 3px; }
+.scope-meas td:first-child { text-align: left; font-weight: bold; }

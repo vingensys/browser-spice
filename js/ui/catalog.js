@@ -102,6 +102,13 @@ const DeviceCatalog = {
         ];
     },
 
+    probes() {
+        return [
+            { name: "VOLTAGE PROBE", tool: "vProbe", desc: "Voltage probe: click a wire or a pin. Shows the voltage live and plots it on the graphs." },
+            { name: "CURRENT PROBE", tool: "iProbe", desc: "Current probe: click a part (or a wire next to it). Shows the current through it live and plots it." }
+        ];
+    },
+
     graphs() {
         return [
             { name: "ANALOGUE", graph: "tran", desc: "Transient (time domain) analysis" },
@@ -134,6 +141,13 @@ class SymbolPreview {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.fillStyle = Theme.token("sheet");
         ctx.fillRect(0, 0, rect.width, rect.height);
+        if (entry && entry.tool) {              // a probe: a dot and its name
+            ctx.fillStyle = Theme.token(entry.tool === "vProbe" ? "probeV" : "probeI");
+            ctx.beginPath(); ctx.arc(rect.width / 2, rect.height / 2 - 6, 10, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = Theme.token("label"); ctx.font = "11px system-ui"; ctx.textAlign = "center";
+            ctx.fillText(entry.tool === "vProbe" ? "V" : "I", rect.width / 2, rect.height / 2 + 28);
+            return;
+        }
         if (!entry || !entry.type || !SYMBOL_DEFS[entry.type]) return;
 
         const comp = Object.assign({ type: entry.type, x: 0, y: 0, rotation: 0, name: "", value: "" },

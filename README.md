@@ -46,6 +46,10 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
 - **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
 
+**Probes** have their own list (the **PROBES** pane, via the probe buttons or Tool > Voltage / Current Probe). They stay armed so you can drop several; clicks only need to be near a wire or pin, and a current probe goes on a part or on the wire right next to it. Double-click a probe to rename it, pick its trace colour, or set it to "live only" (shown on the sheet but not plotted).
+
+**Oscilloscope**: double-click the scope instrument (or right-click > Open Oscilloscope) for a real scope window: 10 x 8 division screen, time/div, horizontal position, a **trigger** (source A-D, rising / falling, level or auto level, **Auto / Normal / Single** modes), four channels with volts/div, position and DC / AC / GND coupling, Run / Stop, **Auto set**, XY mode and Vpp / Vrms / Vavg / frequency readouts. The picture is triggered, so it stays put while the simulation runs; the engine's step shrinks automatically for fast timebases. Settings are saved with the design.
+
 **Net highlighting**: press **H** over a pin or wire (or right-click it > Highlight Net, or Design > Highlight Net) and every wire and pin of that net lights up while the rest fades; the status bar names the net and its pins. Nets joined by a port or label show under its name. **Esc** clears it, and it follows edits.
 
 **Electrical rule check** (Design > Electrical Rule Check): lists problems with a click-to-go list, **Mark on Sheet** puts a **!** on each, and **F4** steps through them. Rules: missing ground; a voltage source shorted or in a loop with other voltage sources (an error: Play and the analyses refuse with that explanation instead of a singular-matrix message); inductors or windings directly across a source; nets with no DC path to ground; unconnected pins; wires ending in mid air; single-pin nets; duplicate designators; parts with all pins on one net; outputs tied to ground or a supply and two outputs on one net (three-state buses are fine); an LED across a supply with no resistor; probes on ground; power ports that disagree on voltage.
@@ -115,6 +119,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
   sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
+- `tests/scope.test.js` the oscilloscope core (trigger modes, coupling, auto set, buffering).
 - `tests/logic.test.js` every logic IC against its truth table / count sequence.
 - `tests/plot.test.js` the graph maths (interpolation, statistics, frequency, edges, AC figures, CSV).
 
@@ -130,6 +135,7 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/parts.js')).text());       await partsTests();    // part library, mirror / flip, sources, exports, live displays
 (0, eval)(await (await fetch('tests/graph.js')).text());       await graphTests();    // cursors, measurements, CSV / PNG export, true time axis
 (0, eval)(await (await fetch('tests/erc.js')).text());         await ercTests();      // rule check rules, dialog, net highlighting
+(0, eval)(await (await fetch('tests/scope.js')).text());       await scopeTests();    // probes list / placement, oscilloscope window
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each

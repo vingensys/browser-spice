@@ -47,6 +47,7 @@
     window.downloadFile = download;
 
     const afterLoad = () => {
+        ScopeWindow.closeAll();
         runner.refreshSweepSources();
         editor.notify();
         Commands.refresh();
@@ -151,8 +152,8 @@
     C("net.highlightwire", "Highlight Net", { enabled: () => !!editor.selectedWire, run: () => { if (editor.selectedWire) editor.highlightNet({ wire: editor.selectedWire }); } });
     C("net.clear", "Clear Net Highlight", { enabled: () => !!editor.netHighlight, run: () => editor.clearHighlight() });
     C("design.titleblock", "Title Block…", { icon: "", run: () => openTitleBlock() });
-    C("tool.vprobe", "Voltage Probe", { icon: "vprobe", checked: toolIs("vProbe"), run: () => editor.setTool("vProbe") });
-    C("tool.iprobe", "Current Probe", { icon: "iprobe", checked: toolIs("iProbe"), run: () => editor.setTool("iProbe") });
+    C("tool.vprobe", "Voltage Probe", { icon: "vprobe", checked: toolIs("vProbe"), run: () => { pane.setMode("probes"); pane.select(DeviceCatalog.probes()[0]); } });
+    C("tool.iprobe", "Current Probe", { icon: "iprobe", checked: toolIs("iProbe"), run: () => { pane.setMode("probes"); pane.select(DeviceCatalog.probes()[1]); } });
 
     C("design.settings", "Simulation Settings…", { icon: "settings", run() {
         runner.refreshSweepSources();
@@ -245,8 +246,8 @@
         { id: "text", icon: "text", title: "Text (A): add a note to the sheet", run: () => editor.setTool("TEXT") },
         { id: "terminals", icon: "terminal", title: "Terminals Mode: ground, initial conditions", run: () => pane.setMode("terminals") },
         { id: "generators", icon: "generator", title: "Generator Mode: sources", run: () => pane.setMode("generators") },
-        { id: "vprobe", icon: "vprobe", title: "Voltage Probe", run: () => editor.setTool("vProbe") },
-        { id: "iprobe", icon: "iprobe", title: "Current Probe", run: () => editor.setTool("iProbe") },
+        { id: "vprobe", icon: "vprobe", title: "Voltage Probe (lists the probes)", run: () => { pane.setMode("probes"); pane.select(DeviceCatalog.probes()[0]); } },
+        { id: "iprobe", icon: "iprobe", title: "Current Probe (lists the probes)", run: () => { pane.setMode("probes"); pane.select(DeviceCatalog.probes()[1]); } },
         { id: "instruments", icon: "instrument", title: "Virtual Instruments Mode", run: () => pane.setMode("instruments") },
         { id: "graphs", icon: "graph", title: "Graph Mode: analyses", run: () => pane.setMode("graphs") }
     ];
@@ -269,8 +270,8 @@
         if (live.state !== "stopped") text = "Simulation " + (live.state === "running" ? "running" : "paused") + ". Double-click a switch to toggle it; editing the circuit restarts the run.";
         else if (editor.wiring) text = "Click a pin or wire to finish, empty grid to add a corner, Backspace removes a corner, Esc cancels.";
         else if (editor.tool === "wire") text = "Wire tool: click a pin or wire to start.";
-        else if (editor.tool === "vProbe") text = "Click a wire or pin to attach a voltage probe.";
-        else if (editor.tool === "iProbe") text = "Click a component to attach a current probe.";
+        else if (editor.tool === "vProbe") text = "Voltage probe: click a wire or a pin (click again for more, right-click or Esc to stop).";
+        else if (editor.tool === "iProbe") text = "Current probe: click a part, or a wire next to it (click again for more, right-click or Esc to stop)."; 
         else if (editor.netHighlight) text = editor.netHighlight.summary + ". Esc clears.";
         else if (editor.pasteMode) text = "Click to place the pasted block. Esc or right-click cancels.";
         else if (editor.dragObject) text = "Move the pointer, click to drop the object. Esc puts it back.";
@@ -290,8 +291,11 @@
         Commands.refresh();
     };
 
+    editor.onNotice = (message) => runner.toast(message, "info");
+
     editor.onEdit = (comp) => {
         if (!comp) return;
+        if (comp.type === "SCOPE") { ScopeWindow.open(editor, live, comp); return; }
         if (comp.type === "SW") {
             editor.saveState();
             comp.closed = !comp.closed;
@@ -312,10 +316,11 @@
     C("probe.rename", "Rename Probe…", { enabled: () => !!editor.selectedProbe, run: () => editor.onEditProbe(editor.selectedProbe) });
     C("probe.addI", "Add Current Probe", { enabled: () => editor.selection.length === 1 && editor.selection[0].type !== "GND", run: () => editor.addCurrentProbe(editor.selection[0]) });
     C("probe.addV", "Add Voltage Probe Here", { run: () => editor.addVoltageProbe(editor.contextPos.x, editor.contextPos.y) });
+    C("scope.open", "Open Oscilloscope", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "SCOPE", run: () => ScopeWindow.open(editor, live, editor.selection[0]) });
     C("part.toggle", "Toggle Switch", { enabled: () => editor.selection.length === 1 && editor.selection[0].type === "SW", run: () => editor.onEdit(editor.selection[0]) });
 
     const CTX = {
-        part: [["edit.properties", "Edit Properties"], "part.toggle", "edit.drag", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
+        part: ["scope.open", ["edit.properties", "Edit Properties"], "part.toggle", "edit.drag", ["edit.delete", "Delete Object"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-",
             "edit.cut", "edit.copy", "-", "probe.addI"],
         multi: ["edit.cut", "edit.copy", "edit.drag", ["edit.delete", "Delete Objects"], "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory"],
         wire: ["net.highlightwire", ["edit.delete", "Delete Wire"], ["edit.tidy", "Redraw Wire"], "-", "probe.addV"],
@@ -349,7 +354,7 @@
             const cmd = Commands.get(id);
             if (!cmd) continue;
             const enabled = Commands.enabled(id) !== false;
-            if (!enabled && /^(part\.toggle|probe\.)/.test(id)) continue;   // contextual extras are hidden rather than greyed
+            if (!enabled && /^(part\.toggle|probe\.|scope\.)/.test(id)) continue;   // contextual extras are hidden rather than greyed
             entries.push({ label: (label || cmd.label).replace(/…$/, ""), key: cmd.keys || "", disabled: !enabled, run: () => { Commands.run(id); editor.canvas.focus({ preventScroll: true }); } });
         }
         window.popupMenu(e, entries);
@@ -358,16 +363,25 @@
 
     editor.onEditProbe = (probe) => {
         const wrap = document.createElement("div");
-        wrap.innerHTML = `<div class="property"><label>Label</label><input type="text" id="probe-label"></div>`;
-        const input = wrap.querySelector("input");
+        const colors = [["", "Automatic"], ["#e53935", "Red"], ["#fb8c00", "Orange"], ["#fdd835", "Yellow"], ["#43a047", "Green"], ["#00acc1", "Cyan"], ["#1e88e5", "Blue"], ["#8e24aa", "Purple"], ["#f06292", "Pink"]];
+        wrap.innerHTML = `<div class="property"><label>Label</label><input type="text" id="probe-label"></div>
+            <div class="property"><label>Trace colour on graphs</label><select id="probe-color">${colors.map(([v, t]) => `<option value="${v}" ${(probe.color || "") === v ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+            <div class="property"><label class="checkrow"><input type="checkbox" id="probe-graph" ${probe.graph === false ? "" : "checked"}> Plot on the graphs (otherwise it only shows its live value)</label></div>`;
+        const input = wrap.querySelector("#probe-label");
         input.value = probe.label;
         Dialog.open({
             title: probe.type === "V" ? "Edit Voltage Probe" : "Edit Current Probe",
             content: wrap,
             buttons: [
                 { label: "OK", primary: true, onClick: () => {
-                    const v = input.value.trim();
-                    if (v && v !== probe.label) { editor.saveState(); const live = editor.probes.find(p => p.id === probe.id); if (live) live.label = v; editor.draw(); }
+                    const v = input.value.trim() || probe.label;
+                    const color = wrap.querySelector("#probe-color").value, graph = wrap.querySelector("#probe-graph").checked;
+                    if (v !== probe.label || color !== (probe.color || "") || graph !== (probe.graph !== false)) {
+                        editor.saveState();
+                        const live = editor.probes.find(p => p.id === probe.id);
+                        if (live) { live.label = v; if (color) live.color = color; else delete live.color; if (graph) delete live.graph; else live.graph = false; }
+                        editor.draw();
+                    }
                 } },
                 { label: "Cancel" }
             ]

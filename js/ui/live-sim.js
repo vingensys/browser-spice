@@ -19,6 +19,7 @@ class LiveSim {
         this.signature = "";
         this.lastSig = 0;
         this.lastDraw = 0;
+        this.scopes = new Map();      // SCOPE component id -> { comp, nets, wired, core }
     }
 
     onState(fn) { this.listeners.push(fn); }
@@ -27,7 +28,7 @@ class LiveSim {
     // everything that changes the circuit's equations (switch / wiper settings excluded)
     circuitSignature() {
         const comps = this.editor.components.map(c => {
-            const { closed, position, live, scopeTrace, scopeScale, glow, seg, energized, blown, on, ...rest } = c;
+            const { closed, position, live, scopeTrace, scopeScale, glow, seg, energized, blown, on, scope, ...rest } = c;
             const part = PartLib.defs[c.type];
             for (const k of (part && part.tweak) || []) delete rest[k];   // knobs you can turn during a run
             if (part && part.tweak) delete rest.value;                     // its label shows the knob
@@ -82,6 +83,16 @@ class LiveSim {
         this.times = [];
         this.values = this.channels.map(() => []);
         this.nextSample = 0;
+
+        // oscilloscopes keep their own full-resolution buffers (and their settings live on the part)
+        this.scopes = new Map();
+        for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
+            sc.comp.scope = ScopeCore.merge(sc.comp.scope);
+            this.scopes.set(sc.comp.id, { comp: sc.comp, nets: sc.nets, wired: sc.wired, core: new ScopeCore(sc.comp.scope) });
+        }
+        this.baseStep = s.tStep;
+        this.feedScopes();
+        this.applyScopeResolution();
         this.readout();
     }
 
@@ -159,6 +170,7 @@ class LiveSim {
         const minGap = this.span / 3000; // keep the plot buffers bounded
         while (!run.done && performance.now() - t0 < ms && (this.speed <= 0 || run.t < this.target)) {
             run.step();
+            if (this.scopes.size) this.feedScopes();
             if (run.t >= this.nextSample) {
                 this.times.push(run.t);
                 this.channels.forEach((ch, i) => this.values[i].push(ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element)));
@@ -191,22 +203,39 @@ class LiveSim {
     }
 
     // Feed each oscilloscope symbol the recent samples of its channels (auto-scaled).
+    // The scope symbol on the sheet shows the same triggered picture as the scope window (so it does not scroll)
     updateScopes() {
-        const scopes = new Map();
-        this.channels.forEach((ch, i) => { if (ch.scope) { if (!scopes.has(ch.scope)) scopes.set(ch.scope, []); scopes.get(ch.scope).push({ ch, i }); } });
-        for (const [comp, list] of scopes) {
+        for (const { comp, core } of this.scopes.values()) {
+            const cap = core.capture();
             const trace = [[], [], [], []];
-            let peak = 1e-9;
-            for (const { ch, i } of list) {
-                const v = this.values[i], n = v.length, pts = 96;
-                const out = [];
-                for (let k = 0; k < pts; k++) out.push(n ? v[Math.min(n - 1, Math.floor(k * n / pts))] : 0);
-                trace[ch.index] = out;
-                peak = Math.max(peak, ...out.map(Math.abs));
-            }
+            ["A", "B", "C", "D"].forEach((c, i) => {
+                const ch = comp.scope.chan[c];
+                if (!cap || !ch.on) return;
+                trace[i] = core.samples(c, 96, cap).map(v => (Number.isFinite(v) ? (v / ch.vdiv + ch.pos) / 4 : 0));
+            });
             comp.scopeTrace = trace;
-            comp.scopeScale = peak * 1.1;
+            comp.scopeScale = 1;          // the trace is already in screen units (+-1 = the screen edge)
         }
+    }
+
+    // every accepted time point goes to each scope's sample buffer
+    feedScopes() {
+        const run = this.run;
+        for (const e of this.scopes.values()) {
+            const values = {};
+            ["A", "B", "C", "D"].forEach((c, k) => { if (e.wired[k]) values[c] = run.voltage(e.nets[k]); });
+            e.core.push(run.t, values);
+        }
+    }
+
+    // an open scope with a fast timebase needs time steps small enough to draw the waveform
+    applyScopeResolution() {
+        if (!this.run) return;
+        let want = this.baseStep || this.run.tStep;
+        for (const [id, w] of ScopeWindow.windows) if (this.scopes.has(id)) want = Math.min(want, w.s.tdiv / 40);
+        want = Math.max(want, (this.baseStep || want) * 1e-3);
+        this.run.tStep = want;
+        this.run.hNext = Math.min(this.run.hNext, want);
     }
 
     paint(force, now = performance.now()) {

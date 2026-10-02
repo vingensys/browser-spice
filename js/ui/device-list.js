@@ -61,6 +61,7 @@ class DevicePane {
             case "terminals": return DeviceCatalog.terminals();
             case "generators": return DeviceCatalog.generators();
             case "instruments": return DeviceCatalog.instruments();
+            case "probes": return DeviceCatalog.probes();
             case "graphs": return DeviceCatalog.graphs();
             default: return this.devices.map(n => DeviceCatalog.find(n)).filter(Boolean);
         }
@@ -69,7 +70,7 @@ class DevicePane {
     setMode(mode) {
         this.mode = mode;
         this.selected = null;
-        this.titleEl.textContent = { devices: "DEVICES", terminals: "TERMINALS", generators: "GENERATORS", instruments: "INSTRUMENTS", graphs: "GRAPH" }[mode];
+        this.titleEl.textContent = { devices: "DEVICES", terminals: "TERMINALS", generators: "GENERATORS", instruments: "INSTRUMENTS", probes: "PROBES", graphs: "GRAPH" }[mode];
         this.render();
     }
 
@@ -77,6 +78,8 @@ class DevicePane {
         this.selected = entry;
         if (entry && entry.graph) {
             if (this.onGraph) this.onGraph(entry.graph);
+        } else if (entry && entry.tool) {
+            this.editor.setTool(entry.tool);
         } else if (entry) {
             this.editor.setTool(entry.type, entry.props || null);
         }
@@ -114,7 +117,7 @@ class DevicePane {
 
     // clicking the sheet in select mode drops the selection in the list
     syncTool(tool) {
-        if (tool === "select" && this.mode === "devices" && this.selected) { this.selected = null; this.render(); }
+        if (tool === "select" && (this.mode === "devices" || this.mode === "probes") && this.selected) { this.selected = null; this.render(); }
     }
 }
 

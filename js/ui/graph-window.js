@@ -281,7 +281,7 @@ class GraphWindow {
     paintLive(live) {
         if (!this.visible || this.kind !== "live") return;
         const colors = this.plotter.colors;
-        const series = live.channels.map((ch, i) => ({ name: ch.name, color: colors[i % colors.length], values: live.values[i] }));
+        const series = live.channels.map((ch, i) => ({ name: ch.name, color: (ch.probe && ch.probe.color) || colors[i % colors.length], values: live.values[i], hidden: ch.probe && ch.probe.graph === false })).filter(s => !s.hidden);
         if (!series.length || live.times.length < 2) {
             this.plotter.data = null;
         } else {

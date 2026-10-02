@@ -158,14 +158,14 @@ class WaveformPlotter {
             if (item.type === 'V' && transientResult.nodeHistories[item.node]) {
                 series.push({
                     name: item.label,
-                    color: this.colors[colorIdx % this.colors.length],
+                    color: item.color || this.colors[colorIdx % this.colors.length],
                     values: transientResult.nodeHistories[item.node]
                 });
                 colorIdx++;
             } else if (item.type === 'I' && transientResult.currentHistories[item.targetName]) {
                 series.push({
                     name: item.label,
-                    color: this.colors[colorIdx % this.colors.length],
+                    color: item.color || this.colors[colorIdx % this.colors.length],
                     values: transientResult.currentHistories[item.targetName]
                 });
                 colorIdx++;
@@ -205,7 +205,7 @@ class WaveformPlotter {
         for (const item of this.buildProbeSeriesMap(probes, netlistInfo)) {
             const values = item.type === "V" ? sweepResult.nodeHistories[item.node] : sweepResult.currentHistories[item.targetName];
             if (!values) continue;
-            series.push({ name: item.label, color: this.colors[colorIdx++ % this.colors.length], values });
+            series.push({ name: item.label, color: item.color || this.colors[colorIdx++ % this.colors.length], values });
         }
         if (!series.length) {
             this.data = null;
@@ -233,7 +233,7 @@ class WaveformPlotter {
         const phasors = [];   // { label, z: Complex[] }
         for (const item of this.buildProbeSeriesMap(probes, netlistInfo)) {
             const pick = item.type === 'V' ? (r => r.nodeVoltages[item.node]) : (r => r.sourceCurrents[item.targetName]);
-            phasors.push({ label: item.label, z: acSweepResults.map(r => pick(r) || new Complex(0, 0)) });
+            phasors.push({ label: item.label, color: item.color, z: acSweepResults.map(r => pick(r) || new Complex(0, 0)) });
         }
         if (phasors.length === 0) {
             this.data = null;
@@ -241,7 +241,7 @@ class WaveformPlotter {
             return;
         }
 
-        const color = (i) => this.colors[i % this.colors.length];
+        const color = (i) => phasors[i].color || this.colors[i % this.colors.length];
         const mag = (z) => z.magnitude();
         const db = (z) => 20 * Math.log10(Math.max(z.magnitude(), 1e-20));
         // phase in degrees, unwrapped so a 180 degree crossing does not jump by 360
@@ -305,7 +305,7 @@ class WaveformPlotter {
                 const v = dcResult.nodeVoltages[item.node] || 0;
                 series.push({
                     name: item.label,
-                    color: this.colors[colorIdx % this.colors.length],
+                    color: item.color || this.colors[colorIdx % this.colors.length],
                     values: timePoints.map(() => v)
                 });
                 colorIdx++;
@@ -313,7 +313,7 @@ class WaveformPlotter {
                 const i = dcResult.sourceCurrents[item.targetName] || 0;
                 series.push({
                     name: item.label,
-                    color: this.colors[colorIdx % this.colors.length],
+                    color: item.color || this.colors[colorIdx % this.colors.length],
                     values: timePoints.map(() => i)
                 });
                 colorIdx++;
@@ -342,17 +342,20 @@ class WaveformPlotter {
         if (!probes || probes.length === 0 || !netlistInfo) return result;
 
         for (const prb of probes) {
+            if (prb.graph === false) continue;            // "live only" probes are not plotted
             if (prb.type === 'V') {
                 const nodeName = netlistInfo.getPointNodeName(prb.x, prb.y) || "0";
                 result.push({
                     type: 'V',
                     label: `${prb.label} (Node ${nodeName})`,
+                    color: prb.color,
                     node: nodeName
                 });
             } else if (prb.type === 'I') {
                 result.push({
                     type: 'I',
                     label: prb.label,
+                    color: prb.color,
                     targetName: prb.targetName
                 });
             }

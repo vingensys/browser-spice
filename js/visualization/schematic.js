@@ -566,6 +566,46 @@ class SchematicEditor {
         this.draw();
     }
 
+    notice(message) { if (typeof this.onNotice === "function") this.onNotice(message); }
+
+    // the wire closest to a point (within tolerancePx), not just the first one that is near enough
+    findWireNearest(x, y, tolerancePx = 12) {
+        const tol = tolerancePx / this.zoom;
+        let best = null, bd = tol;
+        for (const wire of this.wires) {
+            if (!wire.route || wire.route.length < 2) continue;
+            for (let j = 0; j < wire.route.length - 1; j++) {
+                const a = wire.route[j], b = wire.route[j + 1];
+                const d = this.distanceToSegment(x, y, a.x, a.y, b.x, b.y);
+                if (d <= bd) { bd = d; best = { wire, type: "segment", index: j }; }
+            }
+        }
+        return best;
+    }
+
+    // a wire or pin within easy reach (probes are small targets): pins first, then wires with a wider margin
+    findProbeTarget(x, y) {
+        const term = this.findTerminal(x, y, 18);
+        if (term) return { x: term.x, y: term.y };
+        const hit = this.findWireNearest(x, y, 12);
+        if (hit) { const p = this.projectPointToWire(x, y, hit.wire); return { x: this.snap(p.x), y: this.snap(p.y) }; }
+        return null;
+    }
+
+    // the part to measure the current of: the part clicked, or the nearer end of the wire clicked
+    findCurrentProbeTarget(x, y) {
+        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "NODEIC", "POWER", "NETLABEL"].includes(c.type);
+        const direct = this.findComponent(x, y);
+        if (ok(direct)) return direct;
+        const hit = this.findWireNearest(x, y, 12);
+        if (!hit) return null;
+        const w = hit.wire, r = w.route;
+        const ends = [[w.start, r[0]], [w.end, r[r.length - 1]]].filter(([e]) => e && e.type === "terminal");
+        ends.sort((a, b) => Math.hypot(a[1].x - x, a[1].y - y) - Math.hypot(b[1].x - x, b[1].y - y));
+        for (const [e] of ends) { const c = this.components.find(k => k.id === e.component); if (ok(c)) return c; }
+        return null;
+    }
+
     addVoltageProbe(x, y) {
         this.saveState();
         const snap = this.findSnapTarget(x, y);
@@ -991,8 +1031,8 @@ class SchematicEditor {
         return hit ? hit.wire : null;
     }
 
-    findWireTarget(x, y) {
-        const tolerance = 7 / this.zoom;
+    findWireTarget(x, y, tolerancePx = 7) {
+        const tolerance = tolerancePx / this.zoom;
 
         for (let i = this.wires.length - 1; i >= 0; i--) {
             const wire = this.wires[i];
@@ -1182,16 +1222,19 @@ class SchematicEditor {
             return;
         }
 
+        // probes stay armed so several can be dropped in a row; right-click or Esc stops
         if (this.tool === "vProbe") {
-            this.addVoltageProbe(pos.x, pos.y);
-            this.setTool("select");
+            const snap = this.findProbeTarget(pos.x, pos.y);
+            if (!snap) { this.notice("Click on a wire or a pin to attach a voltage probe."); return; }
+            this.addVoltageProbe(snap.x, snap.y);
             return;
         }
 
         if (this.tool === "iProbe") {
-            const component = this.findComponent(pos.x, pos.y);
-            if (component && component.type !== "GND" && !this.isOverlay(component)) this.addCurrentProbe(component);
-            this.setTool("select");
+            const component = this.findCurrentProbeTarget(pos.x, pos.y);
+            if (!component) { this.notice("Click on a part (or the wire right next to it) to measure the current through it."); return; }
+            if (this.probes.some(p => p.type === "I" && p.target === component.id)) { this.notice(`${component.name} already has a current probe.`); return; }
+            this.addCurrentProbe(component);
             return;
         }
 
@@ -1835,7 +1878,7 @@ class SchematicEditor {
     drawProbes() {
         const ctx = this.ctx;
         for (const prb of this.probes) {
-            const color = prb.type === "V" ? this.tok("probeV") : this.tok("probeI");
+            const color = prb.color || (prb.type === "V" ? this.tok("probeV") : this.tok("probeI"));
             ctx.fillStyle = color;
             ctx.strokeStyle = this.tok("sheet");
             ctx.lineWidth = 2;

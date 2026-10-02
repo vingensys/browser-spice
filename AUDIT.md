@@ -43,7 +43,7 @@ against Proteus / ngspice, **P3** polish.
 | --- | --- | --- |
 | ~~No cursors / measurements~~ | P2 | **Done**: cursors A / B, per-trace readouts, frequency / duty / rise-fall, AC peak / −3 dB / unity gain / phase margin. Still missing: multi-axis graphs, user-defined `.measure` expressions. |
 | ~~No export of graph data~~ | P2 | **Done**: CSV (all / visible / between cursors), measurements CSV, PNG. |
-| Oscilloscope is a trace preview on the sheet, not an interactive instrument (no time/div, trigger, channels volts/div) | P2 | |
+| ~~Oscilloscope is only a preview~~ | P2 | **Done**: a real scope window with timebase, triggers (auto / normal / single), channel scaling and coupling, XY, readouts. Still missing: scope cursors, FFT mode, saved captures. |
 | No logic analyser, signal generator panel, or spectrum view | P3 | |
 
 ## 4. Interoperability
