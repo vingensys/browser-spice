@@ -167,6 +167,16 @@ class GraphWindow {
             });
             return { header, series: noiseSeries, scope, hasCursors: a !== null || b !== null };
         }
+        if (d.study && d.study.kind === "corners") {
+            const st = d.study, ok = st.rows.map((r, i) => ({ ...r, i })).filter(r => Number.isFinite(r.metric));
+            const f = (v) => Number(v.toPrecision(5)).toString();
+            const lowest = ok.reduce((m, r) => (r.metric < m.metric ? r : m), ok[0]), highest = ok.reduce((m, r) => (r.metric > m.metric ? r : m), ok[0]);
+            const rows = [["Corners", `${st.rows.length}, ${ok.length} measured`]];
+            if (st.nominal >= 0 && st.rows[st.nominal] && Number.isFinite(st.rows[st.nominal].metric)) rows.push(["Nominal", f(st.rows[st.nominal].metric)]);
+            rows.push(["Lowest", `${f(lowest.metric)} (corner ${lowest.i + 1})`], [`  at`, lowest.label], ["Highest", `${f(highest.metric)} (corner ${highest.i + 1})`], [`  at `, highest.label]);
+            if (st.nominal >= 0 && Number.isFinite(st.rows[st.nominal].metric) && st.rows[st.nominal].metric !== 0) rows.push(["Spread vs nominal", `${f(100 * (lowest.metric - st.rows[st.nominal].metric) / Math.abs(st.rows[st.nominal].metric))} % … ${f(100 * (highest.metric - st.rows[st.nominal].metric) / Math.abs(st.rows[st.nominal].metric))} %`]);
+            return { header, series: [{ name: `${st.probe}: ${st.metric}`, color: d.series[0].color, rows }], scope: "all corners", hasCursors: a !== null || b !== null };
+        }
         if (d.study && d.study.kind === "montecarlo") {
             const st = d.study.stats, f = (v) => Number(v.toPrecision(5)).toString();
             const rows = [["Runs", `${st.n} of ${st.runs} measured, ${st.parts} varying part${st.parts === 1 ? "" : "s"}`], ["Mean", f(st.mean)], ["Std deviation", f(st.std)], ["Min / max", `${f(st.min)} / ${f(st.max)}`], ["Median", f(st.median)], ["±3σ", `${f(st.mean - 3 * st.std)} … ${f(st.mean + 3 * st.std)}`]];

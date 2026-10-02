@@ -44,7 +44,7 @@ const StudyDialog = {
 
     title(kind, spec, data) {
         if (kind === "mc") { const s = data.study.stats; return `Monte Carlo, ${s.n} runs: ${data.study.probe} ${data.study.metric}, mean ${Number(s.mean.toPrecision(4))}, σ ${Number(s.std.toPrecision(3))}`; }
-        return `Parametric sweep of ${data.study.param}`;
+        return data.study.kind === "corners" ? `Corner analysis of ${data.study.param}: ${data.study.metric}` : `Parametric sweep of ${data.study.param}`;
     },
 
     // re-run the last study (the graph window's play button on the STUDY tab)
@@ -62,65 +62,115 @@ const StudyDialog = {
         return root;
     },
 
-    // ---- parametric sweep ----------------------------------------------------------------------------------------
+    // ---- parametric sweep (one or several parameters, a grid or corners) -----------------------------------------------------
     openSweep(spec = null) {
         const editor = window.editor, runner = window.runner, graph = window.graph;
         if (!editor) return;
         const params = Study.parameters(editor, runner);
-        const memo = Object.assign({ analysis: "tran", show: "overlay", scale: "lin", points: 5, metric: "final", freq: 1000 }, StudyDialog.memo.sweep, spec || {});
-        const paramOpts = params.map(p => `<option value="${p.id}" ${p.id === memo.param ? "selected" : ""}>${StudyDialog.esc(p.label)}${p.unit ? ` (${p.unit})` : ""}</option>`).join("");
-        const first = params[0];
+        const saved = Study.normalize(Object.assign({}, StudyDialog.memo.sweep, spec || {}));
+        const memo = Object.assign({ analysis: "tran", show: "overlay", mode: "grid", metric: "final", freq: 1000 }, saved);
+        const esc = StudyDialog.esc;
+        const paramOpts = (sel) => params.map(p => `<option value="${p.id}" ${p.id === sel ? "selected" : ""}>${esc(p.label)}${p.unit ? ` (${p.unit})` : ""}</option>`).join("");
         const root = StudyDialog.shell(`
-            <label>Parameter</label><select id="stParam">${paramOpts}</select>
-            <label>Values</label><span class="study-row">
-                <select id="stScale" style="width:auto"><option value="lin">Linear</option><option value="log">Log</option><option value="list">List</option></select>
-                <input id="stStart" placeholder="from" style="width:80px"><input id="stStop" placeholder="to" style="width:80px"><input id="stPoints" placeholder="points" style="width:60px">
-                <input id="stList" placeholder="e.g. 1k 2.2k 4.7k 10k" class="hidden" style="width:260px">
-            </span>
+            <label>Mode</label><select id="stMode"><option value="grid">Every combination of the value lists</option><option value="corners">Corners: each part low / nominal / high</option></select>
+            <span class="span" id="stRows"></span>
+            <span class="span"><button type="button" id="stAdd" class="btn">+ Add parameter</button> <span class="dim" id="stCount"></span></span>
             <label>Analysis</label><select id="stAnalysis"><option value="tran">Transient</option><option value="ac">AC (frequency response)</option><option value="op">Operating point</option></select>
-            <label>Show</label><select id="stShow"><option value="overlay">Waveforms of every run, overlaid</option><option value="metric">A measurement against the parameter</option></select>
+            <label>Show</label><select id="stShow"><option value="overlay">Waveforms of every run, overlaid</option><option value="metric">A measurement per run</option></select>
             <label class="st-m">Measure</label><select id="stMetric" class="st-m"></select>
             <label class="st-m">On probe</label><select id="stProbe" class="st-m">${StudyDialog.probeOptions(editor)}</select>
             <label class="st-f">At frequency (Hz)</label><input id="stFreq" class="st-f" value="${memo.freq}">`);
         const q = (id) => root.querySelector("#" + id);
-        q("stParam").value = memo.param || (first && first.id);
-        q("stScale").value = memo.scale; q("stAnalysis").value = memo.analysis; q("stShow").value = memo.show;
-        const fill = () => {
-            const p = params.find(x => x.id === q("stParam").value), cur = p ? p.get() : 1;
-            if (!q("stStart").dataset.touched) { q("stStart").value = memo.start !== undefined && memo.param === q("stParam").value ? memo.start : Units.formatSI(cur / 2, "").replace(/\s/g, ""); q("stStop").value = memo.stop !== undefined && memo.param === q("stParam").value ? memo.stop : Units.formatSI(cur * 2, "").replace(/\s/g, ""); }
-            q("stPoints").value = memo.points;
+        const rowsEl = q("stRows");
+        let rows = (memo.params && memo.params.length ? memo.params : [{}]).map(r => ({ ...r }));
+
+        const rowHtml = (r, i) => `<div class="st-prow" data-i="${i}">
+            <select class="st-p">${paramOpts(r.param)}</select>
+            <span class="st-grid"><select class="st-scale" style="width:auto"><option value="lin">Linear</option><option value="log">Log</option><option value="list">List</option></select>
+                <input class="st-start" placeholder="from" style="width:80px"><input class="st-stop" placeholder="to" style="width:80px"><input class="st-points" placeholder="points" style="width:56px">
+                <input class="st-list hidden" placeholder="e.g. 1k 2.2k 4.7k" style="width:200px"></span>
+            <span class="st-corner hidden">± <input class="st-tol" value="${Number.isFinite(r.tol) ? r.tol : 5}" style="width:56px"> %</span>
+            ${rows.length > 1 ? `<button type="button" class="st-del" title="Remove">✕</button>` : ""}</div>`;
+        const defaults = (r, p) => {
+            const cur = p ? p.get() : 1, f = (v) => Units.formatSI(v, "").replace(/\s/g, "");
+            return { start: Number.isFinite(r.start) ? r.start : f(cur / 2), stop: Number.isFinite(r.stop) ? r.stop : f(cur * 2) };
+        };
+        const readRows = () => [...rowsEl.querySelectorAll(".st-prow")].map(el => {
+            const g = (c) => el.querySelector(c), scale = g(".st-scale").value;
+            const row = { param: g(".st-p").value, scale: scale === "list" ? "lin" : scale, points: Units.parseSI(g(".st-points").value) || 5, start: Units.parseSI(g(".st-start").value), stop: Units.parseSI(g(".st-stop").value), tol: Units.parseSI(g(".st-tol").value) };
+            if (scale === "list") row.list = Study.parseList(g(".st-list").value);
+            return row;
+        });
+        const count = () => {
+            try {
+                const rs = readRows(), corners = q("stMode").value === "corners";
+                const n = rs.reduce((t, r) => t * (corners ? (3) : (r.list ? r.list.length : Math.max(2, Math.round(r.points || 5)))), 1);
+                q("stCount").textContent = `${n} run${n === 1 ? "" : "s"}${n > Study.MAX_RUNS ? ` (more than the limit of ${Study.MAX_RUNS})` : ""}`;
+            } catch (e) { q("stCount").textContent = ""; }
+        };
+        const syncRows = () => {
+            const corners = q("stMode").value === "corners";
+            rowsEl.querySelectorAll(".st-prow").forEach(el => {
+                const list = el.querySelector(".st-scale").value === "list";
+                el.querySelector(".st-grid").classList.toggle("hidden", corners);
+                el.querySelector(".st-corner").classList.toggle("hidden", !corners);
+                el.querySelector(".st-list").classList.toggle("hidden", !list);
+                for (const c of [".st-start", ".st-stop", ".st-points"]) el.querySelector(c).classList.toggle("hidden", list);
+            });
+            q("stAdd").style.display = rows.length >= 3 ? "none" : "";
+            count();
+        };
+        const build = () => {
+            rowsEl.innerHTML = rows.map(rowHtml).join("");
+            rowsEl.querySelectorAll(".st-prow").forEach((el, i) => {
+                const r = rows[i], p = params.find(x => x.id === (r.param || (el.querySelector(".st-p").value)));
+                if (!r.param && p) r.param = p.id;
+                el.querySelector(".st-p").value = r.param || (params[0] && params[0].id);
+                const d = defaults(r, params.find(x => x.id === el.querySelector(".st-p").value));
+                el.querySelector(".st-scale").value = r.list ? "list" : (r.scale || "lin");
+                el.querySelector(".st-start").value = d.start; el.querySelector(".st-stop").value = d.stop; el.querySelector(".st-points").value = r.points || 5;
+                if (r.list) el.querySelector(".st-list").value = r.list.join(" ");
+                el.querySelector(".st-p").onchange = () => { const dd = defaults({}, params.find(x => x.id === el.querySelector(".st-p").value)); el.querySelector(".st-start").value = dd.start; el.querySelector(".st-stop").value = dd.stop; };
+                const del = el.querySelector(".st-del");
+                if (del) del.onclick = () => { rows = readRows(); rows.splice(i, 1); build(); };
+            });
+            rowsEl.oninput = rowsEl.onchange = syncRows;
+            syncRows();
+        };
+        q("stAdd").onclick = () => {
+            rows = readRows();
+            if (rows.length >= 3) return;
+            const used = new Set(rows.map(r => r.param)), next = params.find(p => !used.has(p.id));
+            if (next) rows.push({ param: next.id });
+            build();
         };
         const sync = () => {
-            const list = q("stScale").value === "list", an = q("stAnalysis").value, metric = q("stShow").value === "metric";
-            q("stList").classList.toggle("hidden", !list);
-            for (const id of ["stStart", "stStop", "stPoints"]) q(id).classList.toggle("hidden", list);
+            const an = q("stAnalysis").value, metric = q("stShow").value === "metric", corners = q("stMode").value === "corners";
+            if (corners && !metric && an !== "op") { /* overlaying corner waveforms is allowed */ }
             root.querySelectorAll(".st-m").forEach(e => e.classList.toggle("hidden", !metric));
             root.querySelectorAll(".st-f").forEach(e => e.classList.toggle("hidden", !(metric && an === "ac")));
             const cur = q("stMetric").value;
             q("stMetric").innerHTML = StudyDialog.metricOptions(an, Study.METRICS[an].some(m => m[0] === cur) ? cur : Study.METRICS[an][0][0]);
+            syncRows();
         };
-        q("stParam").onchange = () => { delete q("stStart").dataset.touched; memo.param = null; memo.start = undefined; fill(); };
-        q("stStart").oninput = q("stStop").oninput = () => { q("stStart").dataset.touched = "1"; };
-        q("stScale").onchange = q("stAnalysis").onchange = q("stShow").onchange = sync;
-        fill(); sync();
-        if (memo.list) q("stList").value = memo.list.join(" ");
+        q("stMode").value = memo.mode; q("stAnalysis").value = memo.analysis; q("stShow").value = memo.show;
+        q("stMode").onchange = q("stAnalysis").onchange = q("stShow").onchange = sync;
+        build(); sync();
         if (memo.metric) q("stMetric").value = memo.metric;
 
         Dialog.open({
-            title: "Parametric Sweep", content: root, width: "640px",
+            title: "Parametric Sweep", content: root, width: "720px",
             buttons: [
                 { label: "Cancel", onClick: () => { if (StudyDialog.running) { StudyDialog.running.cancel = true; SimWorker.cancel(); } } },
                 { label: "Run", primary: true, onClick: () => {
                     if (StudyDialog.running) return false;
-                    const scale = q("stScale").value;
+                    const rs = readRows(), corners = q("stMode").value === "corners";
+                    const bad = rs.find(r => !corners && !r.list && (!Number.isFinite(r.start) || !Number.isFinite(r.stop)));
+                    if (bad) { const m = root.querySelector(".study-msg"); m.textContent = "Enter the from and to values."; m.className = "study-msg err"; return false; }
                     const s = {
-                        param: q("stParam").value, analysis: q("stAnalysis").value, show: q("stShow").value, scale, metric: q("stMetric").value,
-                        probe: Number(q("stProbe").value) || 0, freq: Units.parseSI(q("stFreq").value) || 1000, points: Units.parseSI(q("stPoints").value) || 5,
-                        start: Units.parseSI(q("stStart").value), stop: Units.parseSI(q("stStop").value)
+                        mode: q("stMode").value, params: rs, analysis: q("stAnalysis").value, show: q("stShow").value, metric: q("stMetric").value,
+                        probe: Number(q("stProbe").value) || 0, freq: Units.parseSI(q("stFreq").value) || 1000
                     };
-                    if (scale === "list") s.list = Study.parseList(q("stList").value);
-                    else if (!Number.isFinite(s.start) || !Number.isFinite(s.stop)) { const m = root.querySelector(".study-msg"); m.textContent = "Enter the from and to values."; m.className = "study-msg err"; return false; }
-                    if (s.scale === "list") s.scale = "lin";
                     StudyDialog.memo.sweep = s;
                     StudyDialog.execute(root, "sweep", s, Study.sweep, editor, runner, graph);
                     return false;

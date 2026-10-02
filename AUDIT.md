@@ -75,4 +75,4 @@ against Proteus / ngspice, **P3** polish.
 4. ~~Text annotation, title block, net highlighting~~ done.
 5. ~~ERC rules~~ done; CI for the test suites is next.
 
-- **Done**: parametric sweep and Monte Carlo analysis (Design menu, STUDY tab). Analyses now run on a Web Worker with progress and cancel. Still open: no corner analysis, no multi-parameter sweeps.
+- **Done**: parametric sweep and Monte Carlo analysis (Design menu, STUDY tab). Analyses now run on a Web Worker with progress and cancel. Multi-parameter grids (up to three parameters) and corner analysis are done.

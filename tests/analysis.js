@@ -125,7 +125,7 @@ window.analysisTests = async function () {
 
     // the dialog and the graph tab
     Commands.run("design.sweep");
-    ok("Design > Parametric Sweep… opens its dialog", !!document.querySelector(".dialog .study #stParam") && document.querySelectorAll("#stParam option").length === params.length);
+    ok("Design > Parametric Sweep… opens its dialog", !!document.querySelector(".dialog .study .st-p") && document.querySelectorAll(".st-p option").length === params.length);
     Dialog.close("t");
     graph.showStudy(sw, "x");
     ok("the STUDY tab shows the result", graph.kind === "step" && plotter.data === sw && plotter.cache.step === sw);
@@ -314,6 +314,50 @@ window.analysisTests = async function () {
     const tfText = document.querySelector(".dialog .tf-result").textContent;
     ok("it reports gain (1 for a DC-passed ladder), input and output resistance", /Gain.*1/.test(tfText) && /Input resistance/.test(tfText) && /Output resistance/.test(tfText), tfText);
     Dialog.close("t");
+    graph.hide();
+
+
+    // ======================================================== several parameters at once, and corners
+    clear(); loadExampleById(editor, "rc-ladder");
+    document.getElementById("simTstop").value = "20m"; document.getElementById("simTstep").value = "100u"; document.getElementById("simUic").checked = true;
+    document.getElementById("simFstart").value = "1"; document.getElementById("simFstop").value = "10k";
+    const mp = Study.parameters(editor, runner), pV = mp.find(p => /^\d+\.dcVoltage$/.test(p.id)).id, pR1 = mp.find(p => /R1 value/.test(p.label)).id, pC1 = mp.find(p => /C1 value/.test(p.label)).id, pR2 = mp.find(p => /R2 value/.test(p.label)).id;
+    const mpBefore = JSON.stringify(editor.components);
+    let two = await Study.sweep(editor, runner, { analysis: "tran", show: "metric", metric: "max", probe: 0, params: [{ param: pV, start: 5, stop: 15, points: 3 }, { param: pR1, list: [500, 2000] }] });
+    ok("two parameters in a grid: x is the first, one trace per value of the second", two.series.length === 2 && two.xValues.join() === "5,10,15" && near(two.series[0].values[2], 15, 1e-6) && near(two.series[1].values[0], 5, 1e-6) && /R1 value = /.test(two.series[0].name) && two.xLabel.includes("V1"), two.series.map(s => s.name));
+    ok("the circuit is exactly as before", JSON.stringify(editor.components) === mpBefore);
+    const three = await Study.sweep(editor, runner, { analysis: "op", params: [{ param: pV, list: [1, 2] }, { param: pR1, list: [100, 200] }, { param: pR2, list: [100, 200, 300] }] });
+    ok("three parameters: 12 runs, a trace per probe and per combination of the other two", three.series.length === 3 * 6 && three.xValues.length === 2, three.series.length);
+    let msg = ""; try { await Study.sweep(editor, runner, { analysis: "tran", show: "overlay", params: [{ param: pV, start: 1, stop: 2, points: 13 }, { param: pR1, start: 1, stop: 2, points: 13 }] }); } catch (e) { msg = e.message; }
+    ok("overlaying too many curves is refused with advice", /unreadable/.test(msg), msg);
+    msg = ""; try { await Study.sweep(editor, runner, { analysis: "op", params: [{ param: pV, start: 1, stop: 2, points: 10 }, { param: pR1, start: 1, stop: 2, points: 10 }, { param: pR2, start: 1, stop: 2, points: 10 }] }); } catch (e) { msg = e.message; }
+    ok("more than 400 runs is refused", /1000 runs/.test(msg), msg);
+    msg = ""; try { await Study.sweep(editor, runner, { analysis: "op", params: [{ param: pV, list: [1, 2] }, { param: pV, list: [3, 4] }] }); } catch (e) { msg = e.message; }
+    ok("the same parameter twice is refused", /only once/.test(msg), msg);
+
+    const cor = await Study.sweep(editor, runner, { mode: "corners", analysis: "ac", show: "metric", metric: "bw", probe: 1, params: [{ param: pR1, tol: 10 }, { param: pC1, tol: 10 }] });
+    ok("corners: 3 values per part, 9 runs, the nominal one is identified", cor.study.kind === "corners" && cor.study.rows.length === 9 && cor.study.nominal === 4 && cor.bars, cor.study && [cor.study.rows.length, cor.study.nominal]);
+    const bws = cor.study.rows.map(r => r.metric);
+    ok("the bandwidth is highest with both parts low and lowest with both high", bws.indexOf(Math.max(...bws)) === 0 && bws.indexOf(Math.min(...bws)) === 8, bws);
+    ok("the corner values are 10 % either side of nominal", near(cor.study.rows[0].values[0] / cor.study.rows[4].values[0], 0.9, 1e-9) && near(cor.study.rows[2].values[0] / cor.study.rows[4].values[0], 1.1, 1e-9));
+    graph.showStudy(cor, "corners"); graph.toggleMeasure(true);
+    const cm = graph.measurements();
+    ok("the Measure panel names the lowest and highest corners and the spread", cm && cm.series[0].rows.some(r => r[0] === "Lowest") && cm.series[0].rows.some(r => r[0] === "Highest") && cm.series[0].rows.some(r => /Spread/.test(r[0])), cm && cm.series[0].rows);
+    graph.toggleMeasure(false);
+    const cor2 = await Study.sweep(editor, runner, { mode: "corners", nominal: false, analysis: "op", params: [{ param: pV, tol: 20 }] });
+    ok("corners without the nominal run only the extremes", cor2.series.length === 1 && cor2.xValues.length === 2, cor2.xValues);
+
+    Commands.run("design.sweep");
+    ok("the dialog starts with one parameter row and can add up to three", document.querySelectorAll(".st-prow").length === 1 && (document.getElementById("stAdd").click(), document.getElementById("stAdd").click(), document.getElementById("stAdd").click(), document.querySelectorAll(".st-prow").length === 3), document.querySelectorAll(".st-prow").length);
+    ok("it shows how many runs that will be", /\d+ runs/.test(document.getElementById("stCount").textContent), document.getElementById("stCount").textContent);
+    document.querySelector(".st-del").click();
+    ok("a row can be removed", document.querySelectorAll(".st-prow").length === 2);
+    document.getElementById("stMode").value = "corners"; document.getElementById("stMode").dispatchEvent(new Event("change", { bubbles: true }));
+    ok("corners mode swaps the value fields for a tolerance", !document.querySelector(".st-corner").classList.contains("hidden") && document.querySelector(".st-grid").classList.contains("hidden") && /9 runs/.test(document.getElementById("stCount").textContent), document.getElementById("stCount").textContent);
+    document.getElementById("stAnalysis").value = "op"; document.getElementById("stAnalysis").dispatchEvent(new Event("change", { bubbles: true }));
+    [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Run").click();
+    for (let k = 0; k < 40 && !document.querySelector(".dialog") === false; k++) await wait(100);
+    ok("Run from the dialog opens the STUDY tab with the corner results", graph.kind === "step" && plotter.data && plotter.data.study && plotter.data.study.kind === "corners" && /Corner analysis/.test(document.getElementById("plotTitle").textContent), document.getElementById("plotTitle").textContent);
     graph.hide();
 
     clear();

@@ -137,29 +137,58 @@ class Study {
 
     // ---- parametric sweep ---------------------------------------------------------------------------------------------
 
-    static async sweep(editor, runner, spec, hooks = {}) {
-        const params = Study.parameters(editor, runner);
-        const p = params.find(x => x.id === spec.param);
-        if (!p) throw new Error("Pick a parameter to sweep.");
-        const values = Study.values(spec);
-        if (values.length < 2) throw new Error("A sweep needs at least two values.");
-        if (values.length > 400) throw new Error("That is more than 400 runs. Use fewer points.");
-        const probes = editor.probes.filter(pr => pr.graph !== false);
-        if (!probes.length && spec.show !== "metric") throw new Error("Add voltage or current probes: the sweep plots what they measure.");
-        if (!probes.length) throw new Error("Add a probe to measure.");
+    // A spec names one or several parameters: spec.params = [{ param, scale, start, stop, points, list, tol }]. The older
+    // single-parameter form (spec.param, spec.start ...) still works. mode "grid" runs every combination of the value
+    // lists; mode "corners" runs every combination of each part's low / nominal / high value (tol percent either side).
+    static normalize(spec) {
+        if (spec.params) return spec;
+        const { param, scale, start, stop, points, list, tol } = spec;
+        return { ...spec, params: [{ param, scale, start, stop, points, list, tol }] };
+    }
 
+    static MAX_RUNS = 400;
+    static MAX_OVERLAY = 150;
+
+    // the value list of one parameter row
+    static rowValues(row, p, mode, spec) {
+        if (mode === "corners") {
+            const nom = p.get(), t = (Number.isFinite(row.tol) ? row.tol : 5) / 100;
+            const lo = nom === 0 ? -t : nom * (1 - t), hi = nom === 0 ? t : nom * (1 + t);
+            return spec.nominal === false ? [lo, hi] : [lo, nom, hi];
+        }
+        return Study.values(row);
+    }
+
+    static async sweep(editor, runner, specIn, hooks = {}) {
+        const spec = Study.normalize(specIn), mode = spec.mode === "corners" ? "corners" : "grid";
+        const all = Study.parameters(editor, runner);
+        if (!spec.params.length) throw new Error("Pick a parameter to sweep.");
+        const ps = spec.params.map(r => { const p = all.find(x => x.id === r.param); if (!p) throw new Error("Pick a parameter to sweep."); return p; });
+        if (new Set(ps.map(p => p.id)).size !== ps.length) throw new Error("Each parameter can be swept only once.");
+        const lists = spec.params.map((r, i) => Study.rowValues(r, ps[i], mode, spec));
+        if (lists.some(l => l.length < 2)) throw new Error("A sweep needs at least two values.");
+        const total = lists.reduce((n, l) => n * l.length, 1);
+        if (total > Study.MAX_RUNS) throw new Error(`That is ${total} runs (the limit is ${Study.MAX_RUNS}). Use fewer values or parameters.`);
+        const probes = editor.probes.filter(pr => pr.graph !== false);
+        if (!probes.length) throw new Error(spec.show === "metric" ? "Add a probe to measure." : "Add voltage or current probes: the sweep plots what they measure.");
+        if (spec.show !== "metric" && spec.analysis !== "op" && total > Study.MAX_OVERLAY) throw new Error(`${total} overlaid curves would be unreadable (the limit is ${Study.MAX_OVERLAY}). Show a measurement instead, or use fewer values.`);
+
+        // combinations: the first parameter varies fastest
+        const combos = [];
+        for (let k = 0; k < total; k++) { let r = k; combos.push(lists.map(l => { const v = l[r % l.length]; r = Math.floor(r / l.length); return v; })); }
+        const originalValues = ps.map(p => p.get());
         const solved = [];
-        await Study.withRestore(editor, [p], async () => {
-            for (let i = 0; i < values.length; i++) {
+        await Study.withRestore(editor, ps, async () => {
+            for (let i = 0; i < total; i++) {
                 if (hooks.cancelled && hooks.cancelled()) throw new Error("Cancelled");
-                p.set(values[i]);
+                ps.forEach((p, k) => p.set(combos[i][k]));
                 editor.refreshWires();
                 solved.push(await Study.solve(editor, runner, spec.analysis));
-                if (hooks.progress) hooks.progress(i + 1, values.length);
+                if (hooks.progress) hooks.progress(i + 1, total);
                 if (i % 2 === 1) await new Promise(r => setTimeout(r));     // let the page breathe (and the cancel button work)
             }
         });
-        return Study.sweepData(runner, spec, p, values, solved);
+        return Study.sweepData(runner, spec, ps, lists, combos, solved, mode, originalValues);
     }
 
     static fmtParam(p, v) { return Units.formatSI(v, p.unit || ""); }
@@ -167,40 +196,61 @@ class Study {
     // colours from cool to warm across the runs
     static runColor(i, n) { return `hsl(${Math.round(220 - (200 * i) / Math.max(n - 1, 1))}, 75%, 55%)`; }
 
-    static sweepData(runner, spec, p, values, solved) {
-        const plotter = runner.plotter, n = values.length, kind = spec.analysis;
+    static sweepData(runner, spec, ps, lists, combos, solved, mode = "grid", nominal = []) {
+        const plotter = runner.plotter, n = combos.length, kind = spec.analysis;
         const items = solved[0].items;
-        const tag = (v) => `${p.label} = ${Study.fmtParam(p, v)}`;
-        if (spec.show === "metric" && kind !== undefined) {
+        const names = ps.map(p => p.label).join(", ");
+        const tagOf = (combo, skip = -1) => combo.map((v, k) => (k === skip ? null : `${ps[k].label} = ${Study.fmtParam(ps[k], v)}`)).filter(Boolean).join(", ");
+        const xlabel = (p) => `${p.label}${p.unit ? ` (${p.unit})` : ""}`;
+        const row0 = spec.params[0];
+
+        if (spec.show === "metric" || kind === "op") {
+            const metric = kind === "op" ? "value" : spec.metric;
+            const label = kind === "op" ? "Voltage (V) / Current (A)" : (Study.METRICS[kind].find(m => m[0] === metric) || [metric, metric])[1];
             const probeIdx = Math.min(Math.max(spec.probe || 0, 0), items.length - 1);
-            const label = (Study.METRICS[kind].find(m => m[0] === spec.metric) || [spec.metric, spec.metric])[1];
-            const series = (spec.allProbes ? items.map((_, i) => i) : [probeIdx]).map((pi, k) => ({
-                name: items[pi].label, color: plotter.colors[k % plotter.colors.length],
-                values: solved.map(sv => Study.metric(sv, pi, spec.metric, spec.freq))
-            }));
-            return { mode: "sweep", logX: spec.scale === "log", xLabel: `${p.label}${p.unit ? ` (${p.unit})` : ""}`, xUnit: p.unit || "", yLabel: label, yUnit: "", xValues: values, series, study: { kind: "metric", param: p.label, metric: label } };
+            const which = (kind === "op" || (spec.allProbes && ps.length === 1)) ? items.map((_, i) => i) : [probeIdx];
+            const value = (i, pi) => Study.metric(solved[i], pi, metric, spec.freq);
+            const info = { kind: kind === "op" && spec.show !== "metric" ? "op" : "metric", param: names, metric: label };
+
+            if (mode === "corners") {
+                const pi = which[0], vals = combos.map((_, i) => value(i, pi));
+                const rows = combos.map((c, i) => ({ label: tagOf(c), values: c, metric: vals[i] }));
+                const nomIdx = combos.findIndex(c => c.every((v, k) => Math.abs(v - nominal[k]) <= 1e-12 * Math.abs(nominal[k]) + 1e-300));
+                return { mode: "sweep", bars: true, xLabel: "Corner number", xUnit: "", yLabel: label, yUnit: "", xValues: combos.map((_, i) => i + 1), series: [{ name: items[pi].label, color: plotter.colors[0], values: vals }], study: { ...info, kind: "corners", rows, nominal: nomIdx, probe: items[pi].label } };
+            }
+            // x = the first parameter; one trace per combination of the others (and per probe)
+            const groups = new Map();
+            combos.forEach((c, i) => { const key = c.slice(1).join("|"); if (!groups.has(key)) groups.set(key, []); groups.get(key).push(i); });
+            const series = [];
+            let g = 0;
+            for (const idxs of groups.values()) {
+                const other = tagOf(combos[idxs[0]], 0);
+                which.forEach((pi, k) => series.push({
+                    name: [which.length > 1 || ps.length === 1 ? items[pi].label : null, other || null].filter(Boolean).join(" @ ") || items[pi].label,
+                    color: groups.size > 1 ? Study.runColor(g, groups.size) : plotter.colors[k % plotter.colors.length],
+                    values: idxs.map(i => value(i, pi))
+                }));
+                g++;
+            }
+            return { mode: "sweep", logX: row0.scale === "log", xLabel: xlabel(ps[0]), xUnit: ps[0].unit || "", yLabel: label, yUnit: "", xValues: lists[0].slice(), series, study: info };
         }
         if (kind === "ac") {
             const fr = solved[0].f, phasors = [];
-            solved.forEach((sv, i) => items.forEach((it, k) => phasors.push({ label: `${it.label} @ ${tag(values[i])}`, color: items.length === 1 ? Study.runColor(i, n) : undefined, z: sv.z[k] })));
+            solved.forEach((sv, i) => items.forEach((it, k) => phasors.push({ label: `${it.label} @ ${tagOf(combos[i])}`, color: items.length === 1 ? Study.runColor(i, n) : undefined, z: sv.z[k] })));
             const data = plotter.acData(fr, phasors);
-            data.study = { kind: "overlay", param: p.label };
+            data.study = { kind: "overlay", param: names };
             return data;
-        }
-        if (kind === "op") {
-            const series = items.map((it, k) => ({ name: it.label, color: plotter.colors[k % plotter.colors.length], values: solved.map(sv => sv.values[k]) }));
-            return { mode: "sweep", logX: spec.scale === "log", xLabel: `${p.label}${p.unit ? ` (${p.unit})` : ""}`, xUnit: p.unit || "", yLabel: "Voltage (V) / Current (A)", xValues: values, series, study: { kind: "op", param: p.label } };
         }
         // transient overlay on one uniform time grid
         const tEnd = Math.max(...solved.map(sv => sv.t[sv.t.length - 1])), N = 1200;
         const grid = Array.from({ length: N }, (_, i) => (tEnd * i) / (N - 1));
         const series = [];
         solved.forEach((sv, i) => items.forEach((it, k) => series.push({
-            name: `${it.label} @ ${tag(values[i])}`,
+            name: `${it.label} @ ${tagOf(combos[i])}`,
             color: items.length === 1 ? Study.runColor(i, n) : plotter.colors[(k + i) % plotter.colors.length],
             values: grid.map(t => PlotMath.valueAt(sv.t, sv.series[k], t))
         })));
-        return { mode: "transient", xLabel: "Time", yLabel: "Voltage (V) / Current (A)", xValues: grid, series, study: { kind: "overlay", param: p.label } };
+        return { mode: "transient", xLabel: "Time", yLabel: "Voltage (V) / Current (A)", xValues: grid, series, study: { kind: "overlay", param: names } };
     }
 
     // ---- Monte Carlo ----------------------------------------------------------------------------------------------------
