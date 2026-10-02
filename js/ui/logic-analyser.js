@@ -7,16 +7,17 @@ class LogicWindow {
     static COLORS = ["#ffd54a", "#4fc3f7", "#ff6e9a", "#7cf08a", "#ffab40", "#b388ff", "#80deea", "#e6ee9c"];
 
     static open(editor, live, comp) {
-        let w = LogicWindow.windows.get(comp.id);
+        const key = Instruments.key(editor, comp);
+        let w = LogicWindow.windows.get(key);
         if (w) { w.root.style.display = "flex"; w.toFront(); return w; }
         w = new LogicWindow(editor, live, comp);
-        LogicWindow.windows.set(comp.id, w);
+        LogicWindow.windows.set(key, w);
         return w;
     }
     static closeAll() { for (const w of [...LogicWindow.windows.values()]) w.close(); }
 
     constructor(editor, live, comp) {
-        this.editor = editor; this.live = live; this.compId = comp.id;
+        this.editor = editor; this.live = live; this.compId = comp.id; this.key = Instruments.key(editor, comp); this.sheetId = editor.activeSheet.id;
         comp.logan = LogicCore.merge(comp.logan);
         this.comp = comp;
         this.idle = new LogicCore(comp.logan);
@@ -27,7 +28,7 @@ class LogicWindow {
     }
 
     get s() { return this.comp.logan; }
-    get core() { const e = this.live.logans && this.live.logans.get(this.compId); return e ? e.core : this.idle; }
+    get core() { const e = this.live.logans && this.live.logans.get(this.key); return e ? e.core : this.idle; }
 
     build() {
         const root = document.createElement("div");
@@ -116,7 +117,7 @@ class LogicWindow {
 
     close() {
         this.stopped = true; cancelAnimationFrame(this.raf); this.root.remove();
-        LogicWindow.windows.delete(this.compId);
+        LogicWindow.windows.delete(this.key);
         if (this.live.applyScopeResolution) this.live.applyScopeResolution();
     }
 
@@ -130,12 +131,12 @@ class LogicWindow {
     }
 
     render(now) {
-        const comp = this.editor.components.find(c => c.id === this.compId);
+        const st = this.editor.sheetState(this.sheetId), comp = st && st.components.find(c => c.id === this.compId);
         if (!comp) { this.close(); return; }
         if (comp !== this.comp) { this.comp = comp; comp.logan = LogicCore.merge(comp.logan); this.idle = new LogicCore(comp.logan); this.syncControls(); }
         const core = this.core, cap = core.capture();
         this.draw(core, cap);
-        const running = this.live.logans && this.live.logans.has(this.compId);
+        const running = this.live.logans && this.live.logans.has(this.key);
         this.root.querySelector('[data-role="status"]').textContent = running ? core.status : "NO SIM";
         if (!this.lastRead || now - this.lastRead > 250) { this.lastRead = now; this.readout(core, cap); this.syncControls(); }
     }
@@ -162,7 +163,7 @@ class LogicWindow {
         }
         if (!cap) {
             ctx.fillStyle = "#4f9d63"; ctx.font = "14px system-ui"; ctx.textAlign = "center";
-            const live = this.live.logans && this.live.logans.has(this.compId);
+            const live = this.live.logans && this.live.logans.has(this.key);
             ctx.fillText(live ? "Waiting for samples…" : "Press Play (F12) to start the simulation", left + (W - left) / 2, H / 2);
         } else if (s.cur.on) {
             ctx.save(); ctx.setLineDash([6, 4]); ctx.strokeStyle = "#e8edf5"; ctx.fillStyle = "#e8edf5"; ctx.textAlign = "center"; ctx.font = "bold 10px system-ui";

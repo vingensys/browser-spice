@@ -7,10 +7,11 @@ class ScopeWindow {
     static windows = new Map();     // component id -> ScopeWindow
 
     static open(editor, live, comp) {
-        let w = ScopeWindow.windows.get(comp.id);
+        const key = Instruments.key(editor, comp);
+        let w = ScopeWindow.windows.get(key);
         if (w) { w.root.style.display = "flex"; w.toFront(); return w; }
         w = new ScopeWindow(editor, live, comp);
-        ScopeWindow.windows.set(comp.id, w);
+        ScopeWindow.windows.set(key, w);
         return w;
     }
 
@@ -20,6 +21,8 @@ class ScopeWindow {
         this.editor = editor;
         this.live = live;
         this.compId = comp.id;
+        this.key = Instruments.key(editor, comp);
+        this.sheetId = editor.activeSheet.id;
         comp.scope = ScopeCore.merge(comp.scope);
         this.comp = comp;
         this.idle = new ScopeCore(comp.scope);          // used while no simulation has been started
@@ -32,7 +35,7 @@ class ScopeWindow {
     // the settings object may be replaced when the design is reloaded: always go through the component
     get s() { return this.comp.scope; }
     get core() {
-        const entry = this.live.scopes && this.live.scopes.get(this.compId);
+        const entry = this.live.scopes && this.live.scopes.get(this.key);
         return entry ? entry.core : this.idle;
     }
 
@@ -231,7 +234,7 @@ class ScopeWindow {
         this.stopped = true;
         cancelAnimationFrame(this.raf);
         this.root.remove();
-        ScopeWindow.windows.delete(this.compId);
+        ScopeWindow.windows.delete(this.key);
         if (this.live.applyScopeResolution) this.live.applyScopeResolution();
     }
 
@@ -248,7 +251,7 @@ class ScopeWindow {
 
     render(now = performance.now()) {
         // the component may have been replaced (undo, open): follow it by id
-        const comp = this.editor.components.find(c => c.id === this.compId);
+        const st = this.editor.sheetState(this.sheetId), comp = st && st.components.find(c => c.id === this.compId);
         if (!comp) { this.close(); return; }
         if (comp !== this.comp) { this.comp = comp; comp.scope = ScopeCore.merge(comp.scope); this.idle = new ScopeCore(comp.scope); this.syncControls(); }
         const core = this.core;
@@ -256,7 +259,7 @@ class ScopeWindow {
         if (this.shownRun !== this.s.run || this.shownMode !== this.s.trig.mode) { this.shownRun = this.s.run; this.shownMode = this.s.trig.mode; this.syncControls(); }   // e.g. SINGLE caught its trigger
         this.draw(core, cap);
         if (!this.lastMeas || now - this.lastMeas > 250) { this.lastMeas = now; this.measure(core, cap); this.syncControls(); }
-        this.root.querySelector('[data-role="status"]').textContent = (!this.live.scopes || !this.live.scopes.has(this.compId)) ? "NO SIM" : core.status;
+        this.root.querySelector('[data-role="status"]').textContent = (!this.live.scopes || !this.live.scopes.has(this.key)) ? "NO SIM" : core.status;
     }
 
     draw(core, cap) {
@@ -276,7 +279,7 @@ class ScopeWindow {
 
         if (!cap) {
             ctx.fillStyle = "#4f9d63"; ctx.font = "14px system-ui"; ctx.textAlign = "center";
-            const live = this.live.scopes && this.live.scopes.has(this.compId);
+            const live = this.live.scopes && this.live.scopes.has(this.key);
             ctx.fillText(live ? (s.trig.mode === "single" ? "Waiting for a trigger…" : s.trig.mode === "normal" ? "Waiting for a trigger…" : "Waiting for samples…") : "Press Play (F12) to start the simulation", W / 2, H / 2 - 8);
             if (!live) { ctx.font = "11px system-ui"; ctx.fillText("Wire the circuit to inputs A–D of the scope", W / 2, H / 2 + 12); }
         } else if (s.fft.on) {

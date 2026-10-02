@@ -92,7 +92,17 @@ class Hierarchy {
 
         const { els: cels, warnings: cw } = DesignParams.with(child, () => NetlistExtractor.elements(child, cnets));
         for (const w of cw) warnings.push(`${path}: ${w}`);
-        if ((cels.instruments || []).length) warnings.push(`${path}: instruments inside a sub-sheet are not shown; put them on the first sheet`);
+        // instruments on a sub-sheet work for the first use of the sheet (their windows and readouts belong to that sheet)
+        ctx.seenSheets = ctx.seenSheets || new Set();
+        const firstUse = !ctx.seenSheets.has(sheetId);
+        ctx.seenSheets.add(sheetId);
+        els.sheetPaths = els.sheetPaths || new Map();
+        if (firstUse) els.sheetPaths.set(sheetId, path);
+        els.instruments = els.instruments || [];
+        for (const ins of cels.instruments || []) {
+            if (!firstUse) { warnings.push(`${path}: ${ins.comp.name} is only active in the first use of its sheet`); continue; }
+            els.instruments.push({ ...ins, key: `${sheetId}:${ins.comp.id}`, path, nets: ins.nets.map(node), elementName: ins.type === "AM" ? `${path}__${ins.comp.name}` : undefined, sub: true });
+        }
         for (const e of cels) {
             if (e.comp && e.comp.type === "POWER") {
                 const name = String(e.comp.net || "VCC").trim().toUpperCase();

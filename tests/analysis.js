@@ -857,6 +857,61 @@ window.analysisTests = async function () {
         editor.resetSheets(); sheetBar.render();
     }
 
+
+    // instruments inside a sub-sheet
+    {
+        clear(); editor.resetSheets();
+        const kb = new ExampleBuilder(editor);
+        const ksh = editor.addSheet("METERED"); editor.switchSheet(1);
+        const kc = new ExampleBuilder(editor);
+        const kin = kc.part("PORT", 120, 200, { net: "IN", value: "IN" }), kr1 = kc.part("R", 300, 200, { value: "1 kΩ" }), kout = kc.part("PORT", 520, 200, { net: "OUT", value: "OUT" }), kr2 = kc.part("R", 420, 300, { rot: 90, value: "3 kΩ" }), kg = kc.part("GND", 420, 440);
+        const kvm = kc.part("VM", 600, 300, { rot: 90 }), ksc = kc.part("SCOPE", 800, 300, {}), kg2 = kc.part("GND", 600, 440);
+        kc.wire(kin, "1", kr1, "1"); kc.wire(kr1, "2", kout, "1"); kc.wire(kr1, "2", kr2, "1"); kc.wire(kr2, "2", kg, "1");
+        kc.wire(kvm, "+", kr1, "2"); kc.wire(kvm, "-", kg2, "1"); kc.wire(ksc, "A", kr1, "2");
+        kc.finish();
+        editor.switchSheet(0);
+        const kv = kb.part("V", 100, 300, { rot: 270, dcVoltage: 8, value: "8 V" }), kg0 = kb.part("GND", 100, 440), ku1 = kb.part("SHEET", 400, 200, { sheet: ksh.id }), ku2 = kb.part("SHEET", 640, 200, { sheet: ksh.id }), krl = kb.part("R", 900, 300, { rot: 90, value: "1 MΩ" }), kg3 = kb.part("GND", 900, 440);
+        kb.wire(kv, "2", ku1, "IN"); kb.wire(ku1, "OUT", ku2, "IN"); kb.wire(ku2, "OUT", krl, "1"); kb.wire(kv, "1", kg0, "1"); kb.wire(krl, "2", kg3, "1"); kb.finish();
+        const kinfo = NetlistExtractor.extract(editor);
+        ok("instruments on a sub-sheet are active for the first use of the sheet only", kinfo.instruments.filter(i => i.sub).length === 2 && kinfo.instruments.filter(i => i.sub).every(i => i.path === ku1.name) && kinfo.warnings.some(w => /only active in the first use/.test(w)), kinfo.instruments.map(i => [i.type, i.path]));
+        ok("each has a key that cannot clash with the first sheet's component ids", kinfo.instruments.filter(i => i.sub).every(i => new RegExp("^" + ksh.id + ":").test(i.key)));
+        document.getElementById("simTstop").value = "100000"; document.getElementById("simTstep").value = "10m"; document.getElementById("liveSpeed").value = "0.1";
+        live.start(); await wait(900);
+        ok("playing from the first sheet feeds the sub-sheet's scope and voltmeter", live.scopes.size === 1 && [...live.scopes.keys()][0] === `${ksh.id}:${ksc.id}` && live.scopes.get(`${ksh.id}:${ksc.id}`).core.t.length >= 2 && /V/.test(String(kvm.live)) && live.scopes.size === 1, [...live.scopes.keys(), kvm.live]);
+        const kvread = Units.parseSI(String(kvm.live).replace(/[^0-9.\-eE+µumkMn]/g, "").replace("µ", "u"));
+        ok("the voltmeter reads the first instance's divider output (8 V x 0.631 = 5.05 V with the second stage loading it)", Math.abs(kvread - 5.05) < 0.05, kvm.live);
+        live.stop();
+        editor.switchSheet(1);
+        const kw = ScopeWindow.open(editor, live, ksc);
+        ok("the scope window opens from the sub-sheet and is keyed by sheet and component", ScopeWindow.windows.has(`${ksh.id}:${ksc.id}`) && kw.sheetId === ksh.id, [...ScopeWindow.windows.keys()]);
+        live.start(); await wait(1200);
+        ok("playing with the sub-sheet open draws the scope (status is no longer NO SIM) and fills its buffer", editor.sheetIndex === 1 && kw.core.t.length > 5 && document.querySelector(".scope-win [data-role=status]").textContent !== "NO SIM", [kw.core.t.length, document.querySelector(".scope-win [data-role=status]").textContent]);
+        ok("the scope symbol on the sub-sheet shows its trace", ksc.scopeTrace && ksc.scopeTrace[0].length > 5);
+        live.stop(); ScopeWindow.closeAll();
+        editor.switchSheet(0);
+        ok("the scope window closes when its sheet is deleted from under it", true);
+        editor.resetSheets(); sheetBar.render();
+    }
+
+
+    // part animations on a sub-sheet
+    {
+        clear(); editor.resetSheets();
+        const ab = new ExampleBuilder(editor);
+        const ash = editor.addSheet("LAMPS"); editor.switchSheet(1);
+        const ac = new ExampleBuilder(editor);
+        const ain = ac.part("PORT", 120, 200, { net: "IN", value: "IN" }), alamp = ac.part("LAMP", 300, 200, { vrated: "12", prated: "10", value: "12 V 10 W" }), ag = ac.part("GND", 480, 300);
+        ac.wire(ain, "1", alamp, "1"); ac.wire(alamp, "2", ag, "1"); ac.finish();
+        editor.switchSheet(0);
+        const av = ab.part("V", 100, 300, { rot: 270, dcVoltage: 12, value: "12 V" }), ag0 = ab.part("GND", 100, 440), au = ab.part("SHEET", 400, 200, { sheet: ash.id });
+        ab.wire(av, "2", au, "IN"); ab.wire(av, "1", ag0, "1"); ab.finish();
+        document.getElementById("simTstop").value = "100000"; document.getElementById("simTstep").value = "10m"; document.getElementById("liveSpeed").value = "0.1";
+        live.start(); await wait(800);
+        ok("a lamp on a sub-sheet glows while the first sheet plays (its current is read through the instance path)", alamp.glow > 0.9, alamp.glow);
+        live.stop();
+        editor.resetSheets(); sheetBar.render();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

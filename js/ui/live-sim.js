@@ -7,6 +7,12 @@
 // Edits to the circuit restart the run; switch toggles and potentiometer settings are
 // applied to the running engine without a restart.
 
+// An instrument is identified by its component id on the first sheet, and by "sheetId:componentId" on any other sheet
+// (component ids are only unique within a sheet).
+const Instruments = {
+    key(editor, comp) { return editor.sheetIndex === 0 ? comp.id : `${editor.activeSheet.id}:${comp.id}`; }
+};
+
 class LiveSim {
     constructor(editor, runner, graph) {
         this.editor = editor;
@@ -84,7 +90,7 @@ class LiveSim {
         }
         this.meters = info.instruments.filter(i => i.type === "VM" || i.type === "AM");
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
-            sc.nets.forEach((net, k) => { if (sc.wired[k]) this.channels.push({ name: `${sc.comp.name}:${"ABCD"[k]}`, node: net, scope: sc.comp, index: k }); });
+            sc.nets.forEach((net, k) => { if (sc.wired[k]) this.channels.push({ name: `${sc.comp.name}:${"ABCD"[k]}${sc.path ? "@" + sc.path.replace(/__/g, "/") : ""}`, node: net, scope: sc.comp, index: k }); });
         }
         this.times = [];
         this.values = this.channels.map(() => []);
@@ -94,14 +100,14 @@ class LiveSim {
         this.scopes = new Map();
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
             sc.comp.scope = ScopeCore.merge(sc.comp.scope);
-            this.scopes.set(sc.comp.id, { comp: sc.comp, nets: sc.nets, wired: sc.wired, core: new ScopeCore(sc.comp.scope) });
+            this.scopes.set(sc.key !== undefined ? sc.key : sc.comp.id, { comp: sc.comp, nets: sc.nets, wired: sc.wired, core: new ScopeCore(sc.comp.scope) });
         }
         this.logans = new Map();
         for (const la of info.instruments.filter(i => i.type === "LOGAN")) {
             la.comp.logan = LogicCore.merge(la.comp.logan);
             const core = new LogicCore(la.comp.logan);
             core.wired = la.wired;
-            this.logans.set(la.comp.id, { comp: la.comp, nets: la.nets, wired: la.wired, core });
+            this.logans.set(la.key !== undefined ? la.key : la.comp.id, { comp: la.comp, nets: la.nets, wired: la.wired, core });
         }
         this.baseStep = s.tStep;
         this.feedScopes();
@@ -206,13 +212,23 @@ class LiveSim {
             if (!ch.probe) continue;
             ch.probe.live = ch.node !== undefined ? Units.formatSI(run.voltage(ch.node), "V") : Units.formatSI(run.current(ch.element), "A");
         }
-        for (const comp of this.editor.components) {
-            const part = PartLib.defs[comp.type];
-            if (part && part.live) part.live(comp, run);
+        if (this.editor.sheetIndex === 0) {
+            for (const comp of this.editor.components) {
+                const part = PartLib.defs[comp.type];
+                if (part && part.live) part.live(comp, run);
+            }
+        }
+        // parts on sub-sheets (their first use): the part sees the run as if its sheet were the whole circuit
+        if (this.info && this.info.sheetPaths) for (const [sheetId, path] of this.info.sheetPaths) {
+            const st = this.editor.sheetState(sheetId);
+            if (!st || !st.components.some(c => PartLib.defs[c.type] && PartLib.defs[c.type].live)) continue;
+            const prefix = `${path}__`;
+            const view = { t: run.t, voltage: (n) => run.voltage(n), current: (name) => run.current(prefix + name), c: { elements: run.c.elements.filter(e => e.name.startsWith(prefix)).map(e => new Proxy(e, { get: (t, k) => (k === "name" ? t.name.slice(prefix.length) : t[k]) })) } };
+            for (const comp of st.components) { const part = PartLib.defs[comp.type]; if (part && part.live) part.live(comp, view); }
         }
         if (window.opOverlay && window.opOverlay.on) window.opOverlay.fromRun(run);
         for (const m of this.meters) {
-            m.comp.live = m.type === "VM" ? fmt(run.voltage(m.nets[0]) - run.voltage(m.nets[1]), "V") : fmt(run.current(m.comp.name), "A");
+            m.comp.live = m.type === "VM" ? fmt(run.voltage(m.nets[0]) - run.voltage(m.nets[1]), "V") : fmt(run.current(m.elementName || m.comp.name), "A");
         }
     }
 
@@ -273,7 +289,9 @@ class LiveSim {
     clearDisplays() {
         for (const prb of this.editor.probes) delete prb.live;
         for (const sh of this.editor.sheets) if (sh.data) for (const prb of sh.data.probes) delete prb.live;
-        for (const c of this.editor.components) { for (const k of ["live", "scopeTrace", "scopeScale", "logTrace", "glow", "seg", "energized", "blown", "on"]) delete c[k]; }
+        const stale = ["live", "scopeTrace", "scopeScale", "logTrace", "glow", "seg", "energized", "blown", "on"];
+        for (const c of this.editor.components) for (const k of stale) delete c[k];
+        for (const sh of this.editor.sheets) if (sh.data) for (const c of sh.data.components) for (const k of stale) delete c[k];
         this.editor.draw();
     }
 
