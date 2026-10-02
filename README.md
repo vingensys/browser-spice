@@ -50,6 +50,10 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 
 **Oscilloscope**: double-click the scope instrument (or right-click > Open Oscilloscope) for a real scope window: 10 x 8 division screen, time/div, horizontal position, a **trigger** (source A-D, rising / falling, level or auto level, **Auto / Normal / Single** modes), four channels with volts/div, position and DC / AC / GND coupling, Run / Stop, **Auto set**, XY mode and Vpp / Vrms / Vavg / frequency readouts. The picture is triggered, so it stays put while the simulation runs; the engine's step shrinks automatically for fast timebases. Settings are saved with the design.
 
+**Operating point on the sheet** (View > Show Operating Point): node voltages sit on the wires and branch currents beside the parts, re-solved after every edit and following the running values during Play.
+
+**Spectrum**: the SPECTRUM graph tab FFTs the last transient (or live) run: choose the window (Hann, Hamming, Blackman, flat top, rectangular), dBV or volts, linear or log frequency, and the range; place two cursors on the time plot first to analyse just that span. The Measure panel gives the fundamental, DC level, THD and the first harmonics in dBc.
+
 **Net highlighting**: press **H** over a pin or wire (or right-click it > Highlight Net, or Design > Highlight Net) and every wire and pin of that net lights up while the rest fades; the status bar names the net and its pins. Nets joined by a port or label show under its name. **Esc** clears it, and it follows edits.
 
 **Electrical rule check** (Design > Electrical Rule Check): lists problems with a click-to-go list, **Mark on Sheet** puts a **!** on each, and **F4** steps through them. Rules: missing ground; a voltage source shorted or in a loop with other voltage sources (an error: Play and the analyses refuse with that explanation instead of a singular-matrix message); inductors or windings directly across a source; nets with no DC path to ground; unconnected pins; wires ending in mid air; single-pin nets; duplicate designators; parts with all pins on one net; outputs tied to ground or a supply and two outputs on one net (three-state buses are fine); an LED across a supply with no resistor; probes on ground; power ports that disagree on voltage.
@@ -119,6 +123,7 @@ SPARSE=1 npm test    # the same with the sparse solver forced on for every circu
   sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
   points, transients and AC sweeps node by node. Skips if ngspice is missing.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
+- `tests/fft.test.js` the FFT / THD maths against known signals.
 - `tests/scope.test.js` the oscilloscope core (trigger modes, coupling, auto set, buffering).
 - `tests/logic.test.js` every logic IC against its truth table / count sequence.
 - `tests/plot.test.js` the graph maths (interpolation, statistics, frequency, edges, AC figures, CSV).
@@ -136,6 +141,7 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/graph.js')).text());       await graphTests();    // cursors, measurements, CSV / PNG export, true time axis
 (0, eval)(await (await fetch('tests/erc.js')).text());         await ercTests();      // rule check rules, dialog, net highlighting
 (0, eval)(await (await fetch('tests/scope.js')).text());       await scopeTests();    // probes list / placement, oscilloscope window
+(0, eval)(await (await fetch('tests/analysis.js')).text());    await analysisTests(); // operating-point overlay, spectrum, sweeps, exports
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each

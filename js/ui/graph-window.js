@@ -10,7 +10,7 @@ class GraphWindow {
         this.kind = "tran";
 
         this.tabs = [
-            ["live", "LIVE"], ["tran", "ANALOGUE"], ["ac", "FREQUENCY"], ["sweep", "DC SWEEP"], ["dc", "OPERATING POINT"]
+            ["live", "LIVE"], ["tran", "ANALOGUE"], ["fft", "SPECTRUM"], ["ac", "FREQUENCY"], ["sweep", "DC SWEEP"], ["dc", "OPERATING POINT"]
         ];
         root.innerHTML = `
             <div id="graph-resize"></div>
@@ -20,6 +20,12 @@ class GraphWindow {
                 <select id="acScale" class="hidden" title="Frequency response display">
                     <option value="db">Gain dB + phase</option><option value="linear">Linear magnitude</option>
                 </select>
+                <span id="fftTools" class="hidden" style="display:none;gap:6px;align-items:center">
+                    <select id="fftWindow" title="Window function">${Object.entries(Spectrum.WINDOWS).map(([k, w]) => `<option value="${k}" ${k === "hann" ? "selected" : ""}>${w.label}</option>`).join("")}</select>
+                    <select id="fftScale" title="Amplitude scale"><option value="db">dBV</option><option value="lin">Volts</option></select>
+                    <select id="fftSpan" title="Frequency range"><option value="40">To 40× f₁</option><option value="10">To 10× f₁</option><option value="200">To 200× f₁</option><option value="0">Full</option></select>
+                    <select id="fftAxis" title="Frequency axis"><option value="lin">Linear</option><option value="log">Log</option></select>
+                </span>
                 <span id="plotTitle">No simulation run yet</span>
                 <button class="tb-btn txt" id="graph-measure" title="Cursors and measurements (click the graph for cursor A, Shift+click for B)">Measure</button>
                 <button class="tb-btn txt" id="graph-export" title="Export the plotted data (CSV) or the picture (PNG)">Export ▾</button>
@@ -48,6 +54,15 @@ class GraphWindow {
         });
 
         root.querySelector("#acScale").onchange = (e) => plotter.setACScale(e.target.value);
+        for (const id of ["fftWindow", "fftScale", "fftSpan", "fftAxis"]) root.querySelector("#" + id).onchange = () => { if (this.kind === "fft") this.showSpectrum(); };
+
+        // remember the data of each tab, so switching tabs shows each one's last result; note what the spectrum can use
+        plotter.cache = {};
+        for (const [method, kind] of [["plotTransient", "tran"], ["plotAC", "ac"], ["plotSweep", "sweep"]]) {
+            const original = plotter[method].bind(plotter);
+            plotter[method] = (...args) => { original(...args); plotter.cache[kind] = plotter.data; if (kind === "tran") this.timeKind = "tran"; };
+        }
+        this.timeKind = "tran";
         root.querySelector("#graph-sim").onclick = () => this.simulate();
         root.querySelector("#graph-measure").onclick = () => this.toggleMeasure();
         root.querySelector("#graph-export").onclick = (e) => this.exportMenu(e.currentTarget.getBoundingClientRect());
@@ -123,6 +138,24 @@ class GraphWindow {
         const scope = both ? "between the cursors" : "in the visible range";
 
         const series = [];
+        if (d.mode === "spectrum") {
+            d.series.forEach((sr, i) => {
+                const sp = d.spectra[i], rows = [];
+                const unit = d.valueUnit;
+                const fmt = (v) => `${v.toFixed(unit === "dBV" ? 1 : 4)} ${unit}`;
+                if (a !== null) rows.push(["At A", fmt(PlotMath.valueAt(xs, sr.values, a))]);
+                if (b !== null) rows.push(["At B", fmt(PlotMath.valueAt(xs, sr.values, b))]);
+                if (both) rows.push(["Δ (B − A)", `${(PlotMath.valueAt(xs, sr.values, b) - PlotMath.valueAt(xs, sr.values, a)).toFixed(unit === "dBV" ? 1 : 4)} ${unit === "dBV" ? "dB" : "V"}`]);
+                rows.push(["DC level", Units.formatSI(sp.mean, "V")]);
+                if (sp.fundamental) {
+                    rows.push(["Fundamental", `${Units.formatSI(sp.fundamental.f, "Hz")}, ${Units.formatSI(sp.fundamental.mag, "V")} (${(20 * Math.log10(sp.fundamental.mag)).toFixed(1)} dBV)`]);
+                    rows.push(["THD (to the 10th)", `${(sp.thd * 100).toFixed(3)} %  (${(20 * Math.log10(Math.max(sp.thd, 1e-9))).toFixed(1)} dB)`]);
+                    for (const h of sp.harmonics.slice(0, 4)) rows.push([`Harmonic ${h.h}`, `${Units.formatSI(h.f, "Hz")}: ${(20 * Math.log10(Math.max(h.mag / sp.fundamental.mag, 1e-9))).toFixed(1)} dBc`]);
+                } else rows.push(["Fundamental", "none found"]);
+                series.push({ name: sr.name, color: sr.color, rows });
+            });
+            return { header, series, scope: "the analysed span", hasCursors: a !== null || b !== null };
+        }
         if (ac && d.panels) {
             const gain = d.panels[0].series, phase = d.panels[1].series;
             gain.forEach((g, i) => {
@@ -259,10 +292,14 @@ class GraphWindow {
         this.tabsEl.querySelectorAll(".graph-tab").forEach(t => t.classList.toggle("active", t.dataset.id === kind));
         this.root.querySelector("#dcResults").classList.toggle("hidden", kind !== "dc");
         this.root.querySelector("#acScale").classList.toggle("hidden", kind !== "ac");
+        this.root.querySelector("#fftTools").style.display = kind === "fft" ? "inline-flex" : "none";
         this.root.querySelector("#graph-sim").style.visibility = kind === "live" ? "hidden" : "visible";
         this.editor.resize();
         this.plotter.resize();
-        if (kind === "live") this.plotter.data = this.plotter.data && this.plotter.data.live ? this.plotter.data : null;
+        if (kind === "fft") { this.showSpectrum(); return; }
+        const cached = this.plotter.cache && this.plotter.cache[kind];
+        if (kind === "live") this.plotter.data = this.plotter.cache.live || (this.plotter.data && this.plotter.data.live ? this.plotter.data : null);
+        else if (cached && kind !== "dc" && this.plotter.data !== cached) { this.plotter.clearCursors(); this.plotter.data = cached; }
         this.plotter.draw();
     }
 
@@ -271,7 +308,54 @@ class GraphWindow {
         this.editor.resize();
     }
 
+    // ---- spectrum (FFT) of the last transient or live run ---------------------------------------------------
+
+    showSpectrum() {
+        const p = this.plotter;
+        const src = p.cache[this.timeKind] || p.cache.tran || p.cache.live;
+        const title = this.root.querySelector("#plotTitle");
+        if (!src || !src.series || !src.series.length) {
+            p.clearCursors(); p.data = null; p.draw();
+            title.textContent = "Run a transient analysis (or Play) with probes, then open the spectrum";
+            return;
+        }
+        // the span: between the cursors if the time plot had two, else everything
+        let t0, t1;
+        if (p.data === src && p.cursors.a !== null && p.cursors.b !== null) { t0 = Math.min(p.cursors.a, p.cursors.b); t1 = Math.max(p.cursors.a, p.cursors.b); }
+        if (p.data !== src && this.lastSpan) ({ t0, t1 } = this.lastSpan);
+        this.lastSpan = t0 !== undefined ? { t0, t1 } : null;
+
+        const q = (id) => this.root.querySelector("#" + id).value;
+        const db = q("fftScale") === "db", log = q("fftAxis") === "log", span = Number(q("fftSpan"));
+        const spectra = src.series.map(s => Spectrum.analyse(src.xValues, s.values, { t0, t1, window: q("fftWindow") }));
+        const ok = spectra.map((sp, i) => (sp ? i : -1)).filter(i => i >= 0);
+        if (!ok.length) { p.clearCursors(); p.data = null; p.draw(); title.textContent = "Not enough data for a spectrum"; return; }
+        const first = spectra[ok[0]];
+        const f1 = first.fundamental ? first.fundamental.f : 0;
+        let K = first.freq.length;
+        if (span && f1) K = Math.min(K, Math.ceil((span * f1) / (first.freq[1] || 1)) + 2);
+        // the shortest analysis defines the shared frequency axis
+        K = Math.min(K, ...ok.map(i => spectra[i].freq.length));
+        const floor = (arr) => { const m = Math.max(...arr.slice(1, K)); return db ? m - 120 : 0; };
+        const series = ok.map(i => {
+            const sp = spectra[i], vals = Array.from(db ? sp.db : sp.mag).slice(0, K);
+            const lo = floor(vals);
+            return { name: src.series[i].name, color: src.series[i].color, values: vals.map(v => Math.max(v, lo)) };
+        });
+        p.clearCursors();
+        p.data = {
+            mode: "spectrum", logX: log, xLabel: "Frequency (Hz)", xUnit: "Hz", yLabel: db ? "Amplitude (dBV)" : "Amplitude (V)",
+            valueUnit: db ? "dBV" : "V", tickDigits: db ? 0 : undefined,
+            xValues: Array.from(first.freq).slice(0, K).map((f, k) => (log && k === 0 ? first.freq[1] / 2 : f)), series,
+            spectra: ok.map(i => spectra[i]), names: ok.map(i => src.series[i].name)
+        };
+        p.cache.fft = p.data;
+        p.draw();
+        title.textContent = `Spectrum, ${Spectrum.WINDOWS[q("fftWindow")].label} window, ${first.n} points over ${Units.formatSI(first.t1 - first.t0, "s")}`;
+    }
+
     simulate() {
+        if (this.kind === "fft") { this.showSpectrum(); return; }
         this.show(this.kind === "live" ? "tran" : this.kind);
         const run = { tran: "runTransient", ac: "runAC", sweep: "runSweep", dc: "runDC" }[this.kind];
         if (run) this.runner[run]();
@@ -286,6 +370,8 @@ class GraphWindow {
             this.plotter.data = null;
         } else {
             this.plotter.data = { mode: "transient", live: true, xLabel: "Time", yLabel: "Voltage (V) / Current (A)", xValues: live.times, series };
+            this.plotter.cache.live = this.plotter.data;
+            this.timeKind = "live";
         }
         this.plotter.draw();
         this.root.querySelector("#plotTitle").textContent = series.length

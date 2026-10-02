@@ -21,6 +21,7 @@
  "js/cad/netview.js",
  "js/visualization/plot-math.js",
  "js/visualization/waveform.js",
+ "js/visualization/fft.js",
  "js/visualization/scope-core.js",
  "js/circuit/netlist.js",
  "js/circuit/erc.js",
@@ -41,6 +42,7 @@
  "js/ui/overview.js",
  "js/ui/graph-window.js",
  "js/ui/live-sim.js",
+ "js/ui/op-overlay.js",
  "js/ui/scope.js",
  "js/examples.js",
  "js/app.js"

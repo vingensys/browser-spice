@@ -197,6 +197,7 @@ class LiveSim {
             const part = PartLib.defs[comp.type];
             if (part && part.live) part.live(comp, run);
         }
+        if (window.opOverlay && window.opOverlay.on) window.opOverlay.fromRun(run);
         for (const m of this.meters) {
             m.comp.live = m.type === "VM" ? fmt(run.voltage(m.nets[0]) - run.voltage(m.nets[1]), "V") : fmt(run.current(m.comp.name), "A");
         }

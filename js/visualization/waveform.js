@@ -371,7 +371,7 @@ class WaveformPlotter {
     // x axis mapping in "axis units" u (log10 for frequency, the value itself otherwise)
     view(data) {
         const xs = data.xValues, n = xs.length;
-        const log = data.mode === "ac" && n > 0 && xs[0] > 0;
+        const log = (data.mode === "ac" || data.logX) && n > 0 && xs[0] > 0;
         const u = log ? (x) => Math.log10(x) : (x) => x;
         const inv = log ? (v) => Math.pow(10, v) : (v) => v;
         let a = u(xs[0]), b = u(xs[n - 1]);

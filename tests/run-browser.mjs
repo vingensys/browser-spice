@@ -13,7 +13,7 @@ import puppeteer from "puppeteer-core";
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const SUITES = [
     ["ui", "uiTests"], ["parts", "partsTests"], ["interaction", "interactionTests"], ["examples", "exampleTests"],
-    ["roundtrip", "roundtripTests"], ["graph", "graphTests"], ["erc", "ercTests"], ["scope", "scopeTests"],
+    ["roundtrip", "roundtripTests"], ["graph", "graphTests"], ["erc", "ercTests"], ["scope", "scopeTests"], ["analysis", "analysisTests"],
     ["engines", "engineTests"], ["stress", null]
 ].filter(([name]) => existsSync(path.join(root, "tests", `${name}.js`)));
 

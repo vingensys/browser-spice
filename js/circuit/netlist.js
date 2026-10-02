@@ -464,7 +464,8 @@ class NetlistExtractor {
         return {
             circuit, elements: els, warnings, nodeIC: els.nodeIC || {}, instruments: els.instruments || [],
             getPointNodeName: nets.getPointNodeName,
-            getTerminalNodeName: nets.terminalNode
+            getTerminalNodeName: nets.terminalNode,
+            nets
         };
     }
 

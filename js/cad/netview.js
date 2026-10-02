@@ -102,6 +102,37 @@ class NetView {
 
     // ---- drawing ----------------------------------------------------------------------------------------
 
+    // node voltages on the wires and branch currents beside the parts (data from OpOverlay)
+    drawOperatingPoint() {
+        const d = this.opData, ctx = this.ctx;
+        if (!d) return;
+        ctx.save();
+        ctx.font = "bold 11px Consolas, monospace";
+        ctx.textBaseline = "middle";
+        const tag = (text, x, y, color) => {
+            const w = ctx.measureText(text).width + 8;
+            ctx.fillStyle = "rgba(255, 255, 255, 0.88)";
+            ctx.strokeStyle = color; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.rect(x - w / 2, y - 8, w, 16); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = color; ctx.textAlign = "center";
+            ctx.fillText(text, x, y + 0.5);
+        };
+        if (d.error) {
+            ctx.fillStyle = "#c62828"; ctx.textAlign = "left";
+            ctx.fillText(`Operating point: ${d.error}`, 24, this.sheetRect().y + 40);
+            ctx.restore();
+            return;
+        }
+        for (const n of d.nodes || []) tag(Units.formatSI(n.v, "V"), n.x, n.horizontal ? n.y - 13 : n.y, "#1565c0");
+        for (const p of d.parts || []) {
+            const c = this.components.find(k => k.id === p.comp.id);
+            if (!c) continue;
+            const b = this.getComponentBox(c);
+            tag(Units.formatSI(p.i, "A"), (b.x1 + b.x2) / 2, b.y2 + 22, "#b71c1c");
+        }
+        ctx.restore();
+    }
+
     drawOverlays() {
         const ctx = this.ctx;
         if (this.netHighlight) {
@@ -135,6 +166,7 @@ class NetView {
                 ctx.restore();
             }
         }
+        this.drawOperatingPoint();
         if (this.ercMarks && this.ercMarks.length) {
             ctx.save();
             for (const m of this.ercMarks) {
