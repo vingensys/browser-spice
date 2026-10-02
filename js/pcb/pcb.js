@@ -12,6 +12,14 @@ class Pcb {
 
     static DEFAULT_RULES = { clearance: 0.2, track: 0.3, via: 0.8, viaDrill: 0.4, minTrack: 0.15, edge: 0.3 };
 
+    // Typical manufacturing limits of a two-layer prototype service (mm). pcb.rules.fab names one; the rule check then also reports
+    // what a fab would reject or silently change. Check the real numbers of the service you use.
+    static FAB_PRESETS = {
+        generic: { label: "Generic 2-layer prototype", minTrack: 0.15, minClearance: 0.15, minDrill: 0.3, maxDrill: 6.3, minAnnular: 0.13, minMaskBridge: 0.1, minSilk: 0.15, minText: 0.8, minEdge: 0.3, holeToHole: 0.25, minBoard: [10, 10], maxBoard: [400, 400] },
+        relaxed: { label: "Relaxed (hand-assembly friendly)", minTrack: 0.25, minClearance: 0.25, minDrill: 0.4, maxDrill: 6.3, minAnnular: 0.2, minMaskBridge: 0.15, minSilk: 0.15, minText: 1.0, minEdge: 0.5, holeToHole: 0.4, minBoard: [10, 10], maxBoard: [300, 300] },
+        tight: { label: "Tight (fine-line service)", minTrack: 0.1, minClearance: 0.1, minDrill: 0.2, maxDrill: 6.3, minAnnular: 0.1, minMaskBridge: 0.08, minSilk: 0.12, minText: 0.7, minEdge: 0.25, holeToHole: 0.2, minBoard: [5, 5], maxBoard: [400, 400] }
+    };
+
     static blank(w = 80, h = 60) {
         return { outline: { w, h }, rules: { ...Pcb.DEFAULT_RULES }, parts: [], tracks: [], vias: [], zones: [], footprints: {}, nextId: 1 };
     }
@@ -552,6 +560,64 @@ class Pcb {
         return pcb;
     }
 
+
+    // What a manufacturer would reject or change, against pcb.rules.fab (a key of FAB_PRESETS). Issues have type "fab" (blocking) or
+    // "silk" (cosmetic: the fab clips silkscreen off pads).
+    static fabCheck(pcb) {
+        const F = Pcb.FAB_PRESETS[pcb.rules.fab];
+        if (!F) return [];
+        const R = pcb.rules, issues = [], pads = Pcb.pads(pcb), fmt = (v) => Number(v.toFixed(3));
+        const add = (msg, x, y, type = "fab") => issues.push({ type, msg: `[${F.label}] ${msg}`, x, y });
+        if (R.clearance < F.minClearance - 1e-9) add(`the clearance rule ${R.clearance} mm is below the fab minimum ${F.minClearance} mm`, 0, 0);
+        if (R.track < F.minTrack - 1e-9) add(`the default track width ${R.track} mm is below the fab minimum ${F.minTrack} mm`, 0, 0);
+        for (const t of pcb.tracks) if (t.w < F.minTrack - 1e-9) add(`track ${t.id} is ${t.w} mm wide (fab minimum ${F.minTrack})`, t.pts[0][0], t.pts[0][1]);
+        const holes = [];
+        for (const p of pads) if (p.drill) {
+            holes.push({ x: p.x, y: p.y, d: p.drill, label: `${p.part.ref}.${p.i + 1}` });
+            const ring = (Math.min(p.w, p.h) - p.drill) / 2;
+            if (p.drill < F.minDrill - 1e-9) add(`${p.part.ref}.${p.i + 1}: the ${p.drill} mm hole is below the fab minimum drill ${F.minDrill} mm`, p.x, p.y);
+            if (p.drill > F.maxDrill + 1e-9) add(`${p.part.ref}.${p.i + 1}: the ${p.drill} mm hole is above the fab maximum ${F.maxDrill} mm`, p.x, p.y);
+            if (ring < F.minAnnular - 1e-9) add(`${p.part.ref}.${p.i + 1}: the annular ring is ${fmt(ring)} mm (fab minimum ${F.minAnnular})`, p.x, p.y);
+        }
+        for (const v of pcb.vias) {
+            holes.push({ x: v.x, y: v.y, d: v.drill, label: `via ${v.id}` });
+            const ring = (v.d - v.drill) / 2;
+            if (v.drill < F.minDrill - 1e-9) add(`via ${v.id}: the ${v.drill} mm hole is below the fab minimum drill ${F.minDrill} mm`, v.x, v.y);
+            if (ring < F.minAnnular - 1e-9) add(`via ${v.id}: the annular ring is ${fmt(ring)} mm (fab minimum ${F.minAnnular})`, v.x, v.y);
+        }
+        for (let i = 0; i < holes.length; i++) for (let j = i + 1; j < holes.length; j++) {
+            const a = holes[i], b = holes[j], gap = Math.hypot(a.x - b.x, a.y - b.y) - (a.d + b.d) / 2;
+            if (gap < F.holeToHole - 1e-9) add(`${a.label} and ${b.label}: the holes are ${fmt(gap)} mm apart edge to edge (fab minimum ${F.holeToHole})`, a.x, a.y);
+        }
+        // solder-mask webs between neighbouring pad openings (openings are 0.05 mm bigger on each side)
+        for (let i = 0; i < pads.length; i++) for (let j = i + 1; j < pads.length; j++) {
+            const a = pads[i], b = pads[j];
+            if (a.part === b.part && a.i === b.i) continue;
+            if (!a.layers.some(l => b.layers.includes(l))) continue;
+            const dx = Math.max(0, Math.abs(a.x - b.x) - (a.w + b.w) / 2), dy = Math.max(0, Math.abs(a.y - b.y) - (a.h + b.h) / 2), gap = Math.hypot(dx, dy);
+            if (gap > 0 && gap - 0.1 < F.minMaskBridge - 1e-9 && gap < 0.5) add(`${a.part.ref}.${a.i + 1} and ${b.part.ref}.${b.i + 1}: the solder-mask web between their openings would be ${fmt(Math.max(0, gap - 0.1))} mm (fab minimum ${F.minMaskBridge}); the fab will open the mask across both pads`, a.x, a.y);
+        }
+        if (pcb.outline.w < F.minBoard[0] || pcb.outline.h < F.minBoard[1]) add(`the board ${pcb.outline.w} x ${pcb.outline.h} mm is below the fab minimum ${F.minBoard.join(" x ")} mm`, 0, 0);
+        if (pcb.outline.w > F.maxBoard[0] || pcb.outline.h > F.maxBoard[1]) add(`the board ${pcb.outline.w} x ${pcb.outline.h} mm is above the fab maximum ${F.maxBoard.join(" x ")} mm`, 0, 0);
+        if (R.edge < F.minEdge - 1e-9) add(`the board-edge margin ${R.edge} mm is below the fab minimum ${F.minEdge} mm`, 0, 0);
+        if (0.15 < F.minSilk - 1e-9) add(`the silkscreen stroke (0.15 mm) is below the fab minimum ${F.minSilk} mm`, 0, 0, "silk");
+        if (1.0 < F.minText - 1e-9 || 1.0 > 10) add("the reference text height (1 mm) is outside the fab limits", 0, 0, "silk");
+        // silkscreen over copper pads is clipped by the fab
+        let clipped = 0, first = null;
+        for (const side of ["F", "B"]) for (const line of Pcb.silk(pcb, side)) for (let k = 0; k + 1 < line.length && clipped < 1e6; k++) {
+            const a = line[k], b = line[k + 1];
+            for (const p of pads) {
+                if (!p.layers.includes(side)) continue;
+                const hw = p.w / 2 + 0.075, hh = p.h / 2 + 0.075;
+                const inside = (q) => Math.abs(q[0] - p.x) <= hw && Math.abs(q[1] - p.y) <= hh;
+                const mid = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+                if (inside(a) || inside(b) || inside(mid)) { clipped++; if (!first) first = [p.x, p.y, `${p.part.ref}.${p.i + 1}`]; break; }
+            }
+        }
+        if (clipped) add(`${clipped} silkscreen stroke(s) run over pads (first at ${first[2]}); the fab clips silkscreen off exposed copper, which can cut letters or outlines`, first[0], first[1], "silk");
+        return issues;
+    }
+
     // ---------------------------------------------------------------- design-rule check
     static drc(pcb, { zones = true } = {}) {
         const R = pcb.rules, issues = [];
@@ -620,6 +686,7 @@ class Pcb {
             for (let k = 0; k < i; k++) { const o = zs[k]; if (o.layer === z.layer && String(o.net) !== String(z.net) && z.pts.some(q => Pcb.inPoly(q[0], q[1], o.pts)) ) issues.push({ type: "zone", msg: `pours ${o.id} and ${z.id} (different nets) overlap on ${z.layer}.Cu; the earlier one wins`, x: z.pts[0][0], y: z.pts[0][1] }); }
         });
         if (zones) for (const f of Pcb.fillZones(pcb)) for (const p of f.islands) issues.push({ type: "zone", msg: `${p.part.ref}.${p.i + 1} is inside pour ${f.zone.id} but cut off from it (islanded by clearance to other nets)`, x: p.x, y: p.y });
+        issues.push(...Pcb.fabCheck(pcb));
         for (const l of Pcb.ratsnest(pcb, conn)) issues.push({ type: "unrouted", msg: `net ${l.net}: ${l.a.part.ref}.${l.a.i + 1} to ${l.b.part.ref}.${l.b.i + 1} is not routed`, x: l.a.x, y: l.a.y });
         return issues;
     }

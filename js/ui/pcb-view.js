@@ -47,6 +47,7 @@ class PcbView {
                 <label title="Board width, height (mm)">Board <input id="pcbW" type="number" min="10" max="400" step="1"> × <input id="pcbH" type="number" min="10" max="400" step="1"> mm</label>
                 <label title="Track width (mm)">Track <input id="pcbTrack" type="number" min="0.1" max="5" step="0.05"></label>
                 <label title="Copper clearance (mm)">Clearance <input id="pcbClr" type="number" min="0.05" max="2" step="0.05"></label>
+                <label title="Also check against the limits of a manufacturing service: minimum track, drill, annular ring, hole spacing, solder-mask webs, board size (Check rules lists what a fab would reject)">Fab <select id="pcbFab"><option value="">none</option>${Object.entries(Pcb.FAB_PRESETS).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join("")}</select></label>
                 <span class="sep"></span>
                 <button class="tb-btn txt" data-tool="zone" title="Draw a copper pour: click the corners, Enter or double-click to finish (Z)">Pour</button>
                 <label title="Net of the pour you draw">Net <select id="pcbZoneNet"></select></label>
@@ -124,7 +125,7 @@ class PcbView {
     fields() {
         const p = this.pcb, q = (id) => this.root.querySelector(id);
         q("#pcbW").value = p.outline.w; q("#pcbH").value = p.outline.h;
-        q("#pcbTrack").value = p.rules.track; q("#pcbClr").value = p.rules.clearance;
+        q("#pcbTrack").value = p.rules.track; q("#pcbClr").value = p.rules.clearance; q("#pcbFab").value = p.rules.fab || "";
         q("#pcbLayer").textContent = this.layer === "F" ? "F.Cu" : "B.Cu";
         this.root.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("active", b.dataset.tool === this.tool));
     }
@@ -280,6 +281,7 @@ class PcbView {
         const num = (id, fn) => this.root.querySelector(id).addEventListener("change", (e) => { const v = Number(e.target.value); if (isFinite(v) && v > 0) { this.snapshot(); fn(v); this.changed(); } });
         num("#pcbW", v => { this.pcb.outline.w = v; }); num("#pcbH", v => { this.pcb.outline.h = v; });
         num("#pcbTrack", v => { this.pcb.rules.track = v; }); num("#pcbClr", v => { this.pcb.rules.clearance = v; });
+        this.root.querySelector("#pcbFab").addEventListener("change", (e) => { this.snapshot(); this.pcb.rules.fab = e.target.value || undefined; this.changed(); if (e.target.value) this.runDrc(); });
         this.root.querySelector("#pcbPkg").addEventListener("change", (e) => {
             if (!this.sel || this.sel.kind !== "part") return;
             this.snapshot();

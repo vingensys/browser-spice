@@ -262,6 +262,21 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
             if (ok.operatingPoint.worst_deviation_percent_of_full_scale > 0.01 || "ngspice_levels_solve_the_builtin_equations" in ok.operatingPoint) throw new Error("no flag expected when the two agree: " + JSON.stringify(ok.operatingPoint));
         });
     }
+    await test("fab rules: pcb_edit rules fab turns on the manufacturer limits, pcb_check lists what a fab would reject, export refuses until fixed", async () => {
+        const id = (await call("pcb_create", { netlist: AMP, track_width: 0.1 })).board_id;
+        await call("pcb_route", { board_id: id });
+        const plain = await call("pcb_check", { board_id: id });
+        const r = await call("pcb_edit", { board_id: id, actions: [{ op: "rules", fab: "generic" }] });
+        if (r.results[0].fab !== "generic") throw new Error(JSON.stringify(r));
+        const k = await call("pcb_check", { board_id: id });
+        if (!k.counts.fab || !/Generic 2-layer prototype.*0\.1 mm wide/.test(JSON.stringify(k.issues.fab))) throw new Error(JSON.stringify([plain.counts, k.counts, k.issues.fab && k.issues.fab[0]]));
+        const refused = await call("pcb_export", { board_id: id });
+        if (!/rule violation/.test(refused.error || "")) throw new Error(JSON.stringify(refused).slice(0, 200));
+        const bad = await call("pcb_edit", { board_id: id, actions: [{ op: "rules", fab: "nonsense" }] });
+        if (!/unknown fab preset/.test(bad.error)) throw new Error(JSON.stringify(bad));
+        await call("pcb_edit", { board_id: id, actions: [{ op: "rules", fab: "none" }] });
+        if ((await call("pcb_check", { board_id: id })).counts.fab) throw new Error("fab off should list nothing");
+    });
     server.stdin.end();
     console.log(`\n${passed} passed, ${failed} failed`);
     process.exit(failed ? 1 : 0);

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Reads the Gerber / Excellon files our PCB tools write with an independent reader (gerbonara) and checks them against the
 # board they came from: every pad, via, track, drill hole, mask / paste opening, the outline, the silkscreen bounds and the
-# clearance of the copper pour. Needs python3 with venv and network access once (pip install gerbonara shapely).
+# clearance of the copper pour. Needs python3 with venv, node, and network access once (pip install gerbonara shapely; npm install @tracespace/core).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 work="${TMPDIR:-/tmp}/browser-spice-gerber"
@@ -11,3 +11,6 @@ python3 -m venv "$work/venv"
 node "$here/make-board.mjs" "$work/gb"
 "$work/venv/bin/python" "$here/crosscheck.py" "$work/gb"
 "$work/venv/bin/python" "$here/pourcheck.py" "$work/gb"
+# a second reader, in JavaScript
+mkdir -p "$work/ts" && (cd "$work/ts" && npm init -y >/dev/null 2>&1 && npm install --silent @tracespace/core >/dev/null 2>&1)
+cp "$here/tracespace-check.mjs" "$work/ts/" && node "$work/ts/tracespace-check.mjs" "$work/gb"

@@ -400,4 +400,39 @@ for (const seed of [5, 9]) {
     const pl = Pcb.blank(30, 20); Pcb.sync(pl, [{ name: "M1", kind: "M", nodes: ["1", "2", "3"] }, { name: "R1", kind: "R", nodes: ["1", "2"] }, { name: "C1", kind: "C", nodes: ["2", "3"] }]); Pcb.autoPlace(pl, { fit: true });
     check("auto-place fits the board around the silkscreen too", !Pcb.drc(pl, { zones: false }).some(i => i.type === "silk"), JSON.stringify(Pcb.drc(pl, { zones: false }).filter(i => i.type === "silk")));
 }
+// ---- manufacturing (fab) rules
+{
+    const base = () => { const b = Pcb.blank(40, 30); b.parts = [{ ref: "R1", kind: "R", nodes: ["1", "2"], x: 12, y: 15, rot: 0, placed: true }]; Pcb.setPackage(b.parts[0], undefined, b.footprints); return b; };
+    const fab = (b) => Pcb.drc(b, { zones: false }).filter(i => i.type === "fab");
+    const b = base();
+    check("with no fab preset nothing is reported", fab(b).length === 0);
+    b.rules.fab = "generic";
+    check("the default board passes the generic fab rules", fab(b).length === 0, JSON.stringify(fab(b)));
+    b.tracks.push({ id: 1, layer: "F", w: 0.1, pts: [[5, 5], [30, 5]] });
+    check("a 0.1 mm track is below the generic 0.15 mm minimum", fab(b).some(i => /track 1 is 0.1/.test(i.msg)));
+    b.rules.fab = "tight";
+    check("but fine for the tight preset", !fab(b).some(i => /track 1/.test(i.msg)));
+    const t = base(); t.rules.fab = "generic";
+    t.footprints.TINY = { name: "TINY", silk: [], pinMap: null, pads: [{ n: "1", x: -2, y: 0, w: 1.0, h: 1.0, drill: 0.85, shape: "round", smd: false }, { n: "2", x: 2, y: 0, w: 1.6, h: 1.6, drill: 0.2, shape: "round", smd: false }] };
+    Pcb.setPackage(t.parts[0], "user:TINY", t.footprints);
+    const ti = fab(t).map(i => i.msg);
+    check("a thin annular ring is reported (pad 1.0, hole 0.85 -> 0.075 mm)", ti.some(m => /R1\.1: the annular ring is 0\.075/.test(m)), ti);
+    check("a hole below the minimum drill is reported", ti.some(m => /R1\.2: the 0\.2 mm hole is below/.test(m)), ti);
+    const h = base(); h.rules.fab = "generic"; h.vias.push({ id: 1, x: 5, y: 5, d: 0.8, drill: 0.4 }, { id: 2, x: 5.55, y: 5, d: 0.8, drill: 0.4 });
+    check("holes closer than the minimum edge to edge are reported", fab(h).some(i => /via 1 and via 2: the holes are 0\.15/.test(i.msg)), fab(h).map(i => i.msg));
+    const v = base(); v.rules.fab = "generic"; v.vias.push({ id: 1, x: 5, y: 5, d: 0.5, drill: 0.4 });
+    check("a via whose ring is 0.05 mm is reported", fab(v).some(i => /via 1: the annular ring is 0\.05/.test(i.msg)));
+    const m = Pcb.blank(40, 30); m.rules.fab = "generic";
+    m.parts = [{ ref: "R1", kind: "R", nodes: ["1", "2"], x: 10, y: 10, rot: 0, placed: true }, { ref: "R2", kind: "R", nodes: ["3", "4"], x: 12.55, y: 10, rot: 0, placed: true }];
+    for (const p of m.parts) Pcb.setPackage(p, "0603", m.footprints);
+    // 0603 pads are 0.8 wide at +-0.8: R2 shifted by 0.55 puts pad 1 of R2 (9.75+... ) near pad 2 of R1: find the smallest gap and check the web message
+    const web = fab(m).filter(i => /solder-mask web/.test(i.msg));
+    check("pad openings with less than the minimum solder-mask web between them are reported", web.length >= 1, fab(m).map(i => i.msg));
+    check("the issues name the preset", fab(m).every(i => /^\[Generic 2-layer prototype\]/.test(i.msg)));
+    const sz = Pcb.blank(8, 8); sz.rules.fab = "generic";
+    check("a board below the minimum size is reported", fab(sz).some(i => /below the fab minimum 10 x 10/.test(i.msg)));
+    const si = base(); si.rules.fab = "generic";
+    si.parts[0].fp.silk = [[[-6, 0], [6, 0]]];
+    check("silkscreen running over a pad is a cosmetic note, not a blocking issue", Pcb.drc(si, { zones: false }).some(i => i.type === "silk" && /over pads/.test(i.msg)) && !fab(si).length);
+}
 console.log(`\n${passed} passed, ${failed} failed`); process.exit(failed ? 1 : 0);

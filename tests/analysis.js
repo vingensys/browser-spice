@@ -1192,6 +1192,10 @@ window.analysisTests = async function () {
         pcbView.act("undo"); pcbView.act("undo");
         pcbView.layer = "F";
         pcbView.runDrc();
+        pcbView.root.querySelector("#pcbFab").value = "generic"; pcbView.root.querySelector("#pcbFab").dispatchEvent(new Event("change"));
+        ok("choosing a Fab preset stores it with the board and checks against it", editor.pcb.rules.fab === "generic" && doc.serialize().pcb.rules.fab === "generic" && !pcbView.issues.some(i => i.type === "fab" && !/Generic/.test(i.msg)));
+        pcbView.root.querySelector("#pcbFab").value = ""; pcbView.root.querySelector("#pcbFab").dispatchEvent(new Event("change"));
+        ok("and none turns it off", !editor.pcb.rules.fab);
         pcbView.close();
         ok("Esc / close hides the overlay", pcbView.root.classList.contains("hidden"));
         editor.resetSheets();

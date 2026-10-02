@@ -658,3 +658,6 @@ body.nosidebar #leftpane { display: none; }
 #pcbview #fpText { font-family: monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
 #pcbview .pcb-fped-err { color: #d9534f; min-height: 1.2em; font-size: 12px; }
 #pcbview .pcb-fped canvas { border: 1px solid var(--ui-border); max-width: 100%; }
+#pcbview .pcb-issue.fab { border-color: #e67e22; }
+#pcbview .pcb-issue.silk { border-color: #95a5a6; }
+#pcbview .pcb-issue.zone { border-color: #8e44ad; }
