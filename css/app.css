@@ -629,3 +629,22 @@ body.nosidebar #leftpane { display: none; }
 #touchbar button { min-width: 42px; height: 42px; font-size: 20px; border: none; border-radius: 8px; background: #3a4452; color: #fff; cursor: pointer; }
 #touchbar button.active { background: #2b6cb0; }
 #touchbar button.disabled { opacity: 0.35; }
+
+/* PCB layout window */
+#pcbview { position: fixed; inset: 0; z-index: 900; display: flex; flex-direction: column; background: var(--ui-bg); color: var(--ui-text); font-family: var(--font); }
+#pcbview.hidden { display: none; }
+#pcbview .pcb-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--ui-border); }
+#pcbview .pcb-bar .sep { width: 1px; height: 20px; background: rgba(128,128,128,.4); }
+#pcbview .pcb-bar .grow { flex: 1; }
+#pcbview .pcb-bar label { font-size: 12px; display: inline-flex; align-items: center; gap: 4px; }
+#pcbview .pcb-bar input { width: 56px; }
+#pcbview .tb-btn.active { outline: 2px solid #4a90d9; }
+#pcbview .pcb-main { flex: 1; display: flex; min-height: 0; }
+#pcbview canvas { flex: 1; min-width: 0; touch-action: none; cursor: crosshair; }
+#pcbview .pcb-side { width: 280px; overflow: auto; border-left: 1px solid rgba(128,128,128,.4); padding: 6px; font-size: 12px; }
+#pcbview .pcb-issue { padding: 4px 6px; margin-bottom: 3px; border-left: 3px solid #d9534f; background: rgba(128,128,128,.12); cursor: pointer; }
+#pcbview .pcb-issue.unrouted { border-color: #f2e35c; }
+#pcbview .pcb-note { opacity: .7; }
+#pcbview .pcb-status { padding: 4px 8px; font-size: 12px; border-top: 1px solid rgba(128,128,128,.4); min-height: 1.4em; }
+#pcbview .pcb-status.warn { color: #f0ad4e; }
+@media (max-width: 760px) { #pcbview .pcb-side { display: none; } }

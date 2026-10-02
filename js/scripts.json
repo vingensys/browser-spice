@@ -37,6 +37,8 @@
  "js/ui/sim-runner.js",
  "js/ui/spice-import.js",
  "js/ui/kicad-import.js",
+ "js/pcb/pcb.js",
+ "js/ui/pcb-view.js",
  "js/ui/catalog.js",
  "js/cad/parts.js",
  "js/cad/subckt-library.js",

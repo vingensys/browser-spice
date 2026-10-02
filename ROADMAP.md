@@ -34,10 +34,11 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 
 ### 3. Capture
 - Buses, off-sheet connectors with direction, probes and instruments inside sub-sheets, cross-probing across sheets, auto-annotation.
-- Touch-friendly drawing; screen-reader description of the sheet.
+- Touch-friendly drawing is done; a screen-reader description of the sheet is not.
 
 ### 4. PCB layout (the "other half" of Proteus)
-- Footprints, board outline, layers, placement from the schematic, interactive router, Gerber / drill export.
+- **Done (MVP)**: View > PCB Layout: footprints from the netlist, board outline, auto-place, ratsnest, manual routing on two layers with vias, a grid autorouter, a design-rule check and Gerber / Excellon ZIP export.
+- Not done: real footprint library (SMD, pad stacks, user footprints), silkscreen, copper pours / planes, differential pairs, length tuning, push-and-shove routing, 3D view, back-annotation to the schematic.
 
 ### 5. Product
 - Cloud save, version history, comments, collaboration; embeddable simulator widgets; plugin API for parts and analyses.

@@ -1034,6 +1034,45 @@ window.analysisTests = async function () {
         clear();
     }
 
+    // ======================================================== PCB layout
+    {
+        clear(); editor.resetSheets();
+        loadExampleById(editor, "rc-ladder");
+        ok("a design starts without a board", !editor.pcb);
+        pcbView.open();
+        ok("opening the PCB view creates a board with a footprint per part", editor.pcb && editor.pcb.parts.length === NetlistExtractor.extract(editor).elements.length && editor.pcb.parts.length > 2, editor.pcb && editor.pcb.parts.length);
+        ok("the overlay is visible", !pcbView.root.classList.contains("hidden"));
+        pcbView.act("route");
+        const issues0 = Pcb.drc(editor.pcb);
+        ok("auto-route finishes the board and the rule check is clean", issues0.length === 0 && editor.pcb.tracks.length > 0, JSON.stringify(issues0.slice(0, 3)));
+        const saved = doc.serialize();
+        ok("the board is saved with the design", saved.pcb && saved.pcb.tracks.length === editor.pcb.tracks.length);
+        const nTracks = editor.pcb.tracks.length;
+        pcbView.act("unroute"); pcbView.act("undo");
+        ok("Undo brings the routing back", editor.pcb.tracks.length === nTracks);
+        // draw a track by hand with the Route tool: two clicks on pads of one net finish it
+        pcbView.act("unroute");
+        const rats = Pcb.ratsnest(editor.pcb);
+        pcbView.setTool("route");
+        const cvr = pcbView.cv, rr0 = cvr.getBoundingClientRect(), L = rats[0];
+        const pt = (w) => ({ clientX: rr0.left + pcbView.view.ox + w.x * pcbView.view.s, clientY: rr0.top + pcbView.view.oy + w.y * pcbView.view.s });
+        const fire = (type, w, extra = {}) => cvr.dispatchEvent(new PointerEvent(type, { pointerId: 1, button: 0, buttons: 1, bubbles: true, ...pt(w), ...extra }));
+        fire("pointerdown", L.a); fire("pointerup", L.a);
+        fire("pointerdown", L.b); fire("pointerup", L.b);
+        ok("clicking one pad then another with the Route tool lays a track and joins the net", editor.pcb.tracks.length === 1 && Pcb.ratsnest(editor.pcb).length === rats.length - 1, [editor.pcb.tracks.length, Pcb.ratsnest(editor.pcb).length, rats.length]);
+        pcbView.setTool("select");
+        // a deliberate clearance fault is found by Check rules
+        const fp = Pcb.pads(editor.pcb).filter(p => p.net === L.a.net)[0], other = Pcb.pads(editor.pcb).find(p => p.net !== fp.net);
+        editor.pcb.tracks.push({ id: 9999, layer: "F", w: 0.3, pts: [[fp.x, fp.y], [other.x, other.y]] });
+        pcbView.runDrc();
+        ok("Check rules lists a short from a track laid across two nets", pcbView.issues.some(i => i.type === "short"), pcbView.issues.length);
+        pcbView.close();
+        ok("Esc / close hides the overlay", pcbView.root.classList.contains("hidden"));
+        editor.resetSheets();
+        ok("a new design drops the board", editor.pcb === null);
+        clear();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

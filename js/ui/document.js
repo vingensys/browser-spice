@@ -40,6 +40,7 @@ class DocumentStore {
             measures: ed.measures,
             params: ed.params,
             sheets: ed.sheetsForSave((c) => this.strip(c)),
+            pcb: ed.pcb || undefined,
             subckts: SubcktLibrary.used(ed),
             nextId: ed.nextId,
             view: { zoom: ed.zoom, panX: ed.panX, panY: ed.panY },
@@ -50,7 +51,7 @@ class DocumentStore {
     // what counts as an edit: the design and the run settings, not the view
     signature() {
         const s = this.serialize();
-        return JSON.stringify([s.components, s.wires, s.probes, s.titleBlock, s.measures, s.params, s.sheets, s.settings]);
+        return JSON.stringify([s.components, s.wires, s.probes, s.titleBlock, s.measures, s.params, s.sheets, s.settings, s.pcb]);
     }
 
     isEmpty() { return !this.editor.allComponents().length && !this.editor.wires.length && !this.editor.probes.length && this.editor.sheets.length < 2; }
@@ -100,6 +101,7 @@ class DocumentStore {
         const v = state.view || { zoom: 1, panX: state.panX || 0, panY: state.panY || 0 };
         ed.zoom = v.zoom || 1; ed.panX = v.panX || 0; ed.panY = v.panY || 0;
         ed.loadSheets(state.sheets);
+        ed.pcb = state.pcb && typeof state.pcb === "object" && Array.isArray(state.pcb.parts) && state.pcb.outline ? state.pcb : null;
         ed.clearSelection();
         ed.refreshWires();
         ed.draw();

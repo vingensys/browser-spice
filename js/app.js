@@ -24,11 +24,12 @@
     const sheetBar = new SheetBar($("sheetbar"), editor, runner);
     const touchBar = new TouchBar($("sheetwrap"));
     const doc = new DocumentStore(editor, runner);
+    const pcbView = new PcbView(editor, doc, runner);
     doc.onChange(() => status.setDocument(doc));
     const opOverlay = new OpOverlay(editor, runner, live, doc);
 
     // the console and the tests reach these through the window
-    Object.assign(window, { touchBar, sheetBar, editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc, opOverlay });
+    Object.assign(window, { pcbView, touchBar, sheetBar, editor, plotter, runner, graph, live, pane, propertiesPanel: props, overview, status, doc, opOverlay });
 
     // an analysis run brings its tab to the front
     for (const [method, kind] of [["runDC", "dc"], ["runAC", "ac"], ["runNoise", "noise"], ["runTransient", "tran"], ["runSweep", "sweep"]]) {
@@ -174,6 +175,7 @@
         editor.onEdit(c);
     } });
     C("design.ercnext", "Next ERC Issue", { keys: "F4", global: true, enabled: () => !!(ErcDialog.last && ErcDialog.last.issues.length), run: () => ErcDialog.next(editor) });
+    C("view.pcb", "PCB Layout…", { icon: "", run: () => pcbView.open() });
     C("view.touchbar", "Touch Toolbar", { checked: () => touchBar.on, run: () => touchBar.toggle() });
     C("view.sidebar", "Sidebar", { checked: () => !document.body.classList.contains("nosidebar"), run: () => { document.body.classList.toggle("nosidebar"); editor.resize(); editor.draw(); } });
     C("view.op", "Show Operating Point", { icon: "", checked: () => opOverlay.on, run: () => opOverlay.toggle() });
@@ -265,7 +267,7 @@
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
-        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.sidebar", "view.touchbar", "-", "view.classic", "view.dark"] },
+        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },

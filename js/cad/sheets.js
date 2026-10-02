@@ -160,6 +160,7 @@ class SheetManager {
         this.sheets = [{ id: 1, name: "Main", data: null, history: [], future: [] }];
         this.sheetIndex = 0;
         this.sheetStack = [];
+        this.pcb = null;                       // the board belongs to the design, so a new design starts without one
     }
 
     // the probes the simulation reads: this sheet's, plus those placed on sub-sheets (one per use of the sheet, labelled
