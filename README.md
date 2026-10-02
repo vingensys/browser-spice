@@ -1,7 +1,13 @@
-# Browser SPICE
-
 Schematic capture and circuit simulation in the browser: draw, simulate, probe, and exchange
-netlists with standard SPICE tools. No build step. See [ROADMAP.md](ROADMAP.md) for where it is going.
+netlists with standard SPICE tools. No build step, no server needed. See [ROADMAP.md](ROADMAP.md) for where it is going and
+[AUDIT.md](AUDIT.md) for the honest list of what is still missing.
+
+**At a glance**
+- A Proteus-style editor (A* router, probes, instruments, 260 library parts, 37 logic ICs, subcircuits from SPICE files, multi-sheet hierarchy, design parameters).
+- A SPICE engine (MNA, Newton with limiting, adaptive trapezoidal transient, sparse LU) checked against **ngspice** on reference decks, on random circuits, and for noise, `.tf`, `.measure`: operating point, DC sweep, transient, AC, noise, transfer function, Fourier, temperature.
+- Study tools ngspice does not have in one place: parametric sweeps (several parameters, corners), Monte Carlo with yield, sensitivity ranking, named measurements.
+- Instruments: multi-channel oscilloscope (triggers, cursors, FFT, saved traces), logic analyser, spectrum, cursors and CSV / PNG export on every graph.
+- Works anywhere: analyses run on Web Workers (cancellable), installable and offline, share a design as a link, export report / BOM / PNG / SPICE, and an **MCP server** so an AI assistant can use the same engine.
 
 ```bash
 npm install          # optional: also vendors the ngspice WebAssembly engine
@@ -106,7 +112,7 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 
 R, C (and polarised electrolytics with ESR), L, transformers (coupled inductors, SPICE `K`), voltage and current sources, VCVS / VCCS,
 ideal switch, potentiometer, per-node initial-condition flags, diodes (rectifier, Schottky, fast, LED, zener, bridge rectifier),
-NPN / PNP BJTs, N / P MOSFETs (level 1 with body diode, gate capacitance, series RD / RS), N / P JFETs, op-amps (single pole, rail clamp),
+NPN / PNP BJTs (Gummel-Poon), N / P MOSFETs (level 1 with body pin and effect, junction / overlap / Meyer capacitances, series RD / RS), behavioural B sources, N / P JFETs, op-amps (single pole, rail clamp),
 logic gates (AND OR NOT NAND NOR XOR XNOR BUF, with propagation delay), D / T / JK flip-flops (rising edge, async set / reset), NE555,
 SCR and TRIAC (latching, gate trigger, holding current), relay (coil + contact with pull-in / drop-out), fuse (blows on I²t),
 voltage regulators (78xx, 79xx, LM317 / LM337, LDOs with dropout), lamp, buzzer, motor, crystal, battery, 7-segment display,
@@ -131,12 +137,13 @@ with the pivot order reused between iterations (about 2 ms per step at 1,100 unk
 
 ## Layout
 
-- `js/sim/` engine: `linalg` (dense + sparse LU), `devices`, `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops, logic ICs), `logic-ics` (the 74xx / 4000 state machines), `models`, `models-extra` / `models-parts` (library), `model-library`, `engine`, `spice-parser`, `ngspice-backend`
-- `js/cad/` editor internals: `symbols` (pins and bodies), `parts` (the added parts: symbol, properties, netlist, library entries), `router` (A* + rubber-band repair), `symbol-draw`
-- `js/visualization/` schematic editor, waveform plotter and the graph maths (`plot-math`)
-- `js/circuit/erc.js` the electrical rule check; `js/cad/netview.js` net highlight, rule marks and jump-to
-- `js/circuit/netlist.js` schematic -> nets -> element list -> simulation / `.cir`
-- `js/ui/` the ISIS-style shell: `theme`, `commands` (one registry for menus, toolbars and keys), `menubar`, `toolbars`, `statusbar`, `overview`, `device-list` + `catalog` (device pane, Pick Devices), `dialogs`, `graph-window`, `live-sim`, `properties`, `sim-runner`, `spice-import`, `icons`
+- `js/sim/` engine: `linalg` (dense + sparse LU), `devices` (R C L sources, diode, Gummel-Poon BJT, level-1 MOSFET), `devices-extra` (JFET, transformer, relay, fuse, SCR / TRIAC, regulator, flip-flops, logic ICs, behavioural B source), `expression` (B-source expressions), `logic-ics`, `models` / `models-extra` / `models-parts` (library), `model-library`, `engine` (OP, DC, transient, AC, noise, `.tf`), `spice-parser`, `worker` / `sim-worker` (analyses off the main thread), `ngspice-backend` / `ngspice-worker`
+- `js/cad/` editor internals: `symbols`, `parts` (added parts), `subckt-library` (subcircuits as parts), `sheets` (multi-sheet, ports, sheet symbols), `router`, `symbol-draw`, `probes`, `netview`
+- `js/visualization/` schematic editor, waveform plotter, `plot-math`, `fft`, `scope-core`, `logic-core`
+- `js/circuit/` `netlist` (schematic -> nets -> elements -> simulation / `.cir`), `hierarchy` (sheets flattened), `params` (design parameters), `erc` (rule check)
+- `js/analysis/` `study` (sweeps, corners, Monte Carlo, sensitivity), `measure` (`.measure`)
+- `js/ui/` the ISIS-style shell and dialogs (commands, menus, graph window, scope, logic analyser, study / measure / parameter / transfer-function dialogs, export, report, share, palette, sheet bar ...)
+- `mcp/` the MCP server (`server.mjs`, `tools.cjs`, `engine.cjs`); `sw.js` + `manifest.webmanifest` the offline app; `.github/workflows` CI and Pages
 - `js/examples.js`, `js/app.js` (composes the shell and defines the commands)
 
 ## Tests
@@ -148,16 +155,14 @@ npm run test:all     # both
 SPARSE=1 npm test    # the same with the sparse solver forced on for every circuit
 ```
 
-- `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import, the added parts (58 checks).
-- `tests/fuzz.test.js` generates seeded random circuits (resistor networks with diodes, BJTs, capacitors, an inductor, sine / pulse and behavioural sources), solves each with the engine and with ngspice, and compares the operating point, transient and AC. `FUZZ_N=500 FUZZ_SEED=7 node tests/fuzz.test.js` runs more; `FUZZ_PRINT=<seed>` prints one circuit's deck. It found three engine problems that are now fixed: numerical damping of smooth LC resonances, a singular matrix for inductor/source loops, and `log()` meaning base 10.
-- `tests/ngspice.test.js` runs `tests/decks/*.cir` (diodes, BJT / MOS amplifiers, rectifiers, CMOS, controlled
-  sources, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, MOSFET RD/RS, JFETs, coupled inductors) through the engine **and** native ngspice and compares operating
-  points, transients and AC sweeps node by node. Skips if ngspice is missing.
+- `tests/sim.test.js` engine against closed-form results, solver equivalence, vendor-model import, the added parts, B sources, noise, `.tf`, parameters, subcircuits.
+- `tests/ngspice.test.js` runs `tests/decks/*.cir` (diodes, BJT incl. Gummel-Poon, MOSFET incl. body effect and capacitances, JFET, rectifiers, CMOS, controlled sources, behavioural sources, subcircuits, PWL / EXP / SFFM / `.param`, `.ic`, `.temp`, coupled inductors) through the engine **and** native ngspice and compares operating points, transients and AC sweeps node by node. Skips if ngspice is missing.
+- `tests/fuzz.test.js` generates seeded random circuits (resistor networks with diodes, BJTs incl. Gummel-Poon, MOSFETs, capacitors, an inductor, sine / pulse and behavioural sources) and compares engine and ngspice on operating point, transient and AC. `FUZZ_N=500 FUZZ_SEED=7 node tests/fuzz.test.js` runs more; `FUZZ_PRINT=<seed>` prints one circuit's deck. It found several engine problems, now fixed (numerical damping of LC resonances, singular inductor / source loops, `log()` and `^` semantics, Newton failures treated as fatal).
+- `tests/noise.ngspice.test.js`, `tests/tf.ngspice.test.js`, `tests/measure.ngspice.test.js` noise (incl. flicker), `.tf` and 21 `.measure`s against ngspice.
+- `tests/mcp.test.js` the MCP server over its stdio protocol.
+- `tests/logic.analyser.test.js`, `tests/scope.test.js`, `tests/logic.test.js`, `tests/fft.test.js`, `tests/plot.test.js` the instrument cores, logic ICs against truth tables, FFT / THD, and the graph maths.
 - `tests/ngspice-wasm.test.js` the WASM adapter.
-- `tests/fft.test.js` the FFT / THD maths against known signals.
-- `tests/scope.test.js` the oscilloscope core (trigger modes, coupling, auto set, buffering).
-- `tests/logic.test.js` every logic IC against its truth table / count sequence.
-- `tests/plot.test.js` the graph maths (interpolation, statistics, frequency, edges, AC figures, CSV).
+- `npm run test:browser` also checks that the app loads offline.
 
 Browser suites (load in the running app and call from the console):
 
@@ -172,11 +177,11 @@ Browser suites (load in the running app and call from the console):
 (0, eval)(await (await fetch('tests/graph.js')).text());       await graphTests();    // cursors, measurements, CSV / PNG export, true time axis
 (0, eval)(await (await fetch('tests/erc.js')).text());         await ercTests();      // rule check rules, dialog, net highlighting
 (0, eval)(await (await fetch('tests/scope.js')).text());       await scopeTests();    // probes list / placement, oscilloscope window
-(0, eval)(await (await fetch('tests/analysis.js')).text());    await analysisTests(); // operating-point overlay, spectrum, sweeps, exports
+(0, eval)(await (await fetch('tests/analysis.js')).text());    await analysisTests(); // everything added since: studies, noise, measurements, sheets, subcircuits, exports ...
 ```
 
 ngspice remains the reference. Known approximations: the built-in 555 and its ngspice macro are each
-within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay (the export models the same lag); MOSFETs are level 1.
+within about 1 % of an ideal 555's period; gates switch with a fixed 10 ns delay (the export models the same lag); MOSFETs are level 1 (no level 2 / 3 / BSIM).
 
 See [AUDIT.md](AUDIT.md) for the list of known shortcomings.
 
