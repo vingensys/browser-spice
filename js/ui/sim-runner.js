@@ -31,9 +31,14 @@ class SimRunner {
             sweepSource: this.el("sweepSrc") ? this.el("sweepSrc").value : "",
             sweepStart: this.el("sweepStart") ? Units.parseSI(this.el("sweepStart").value) : 0,
             sweepStop: this.el("sweepStop") ? Units.parseSI(this.el("sweepStop").value) : 5,
-            sweepStep: this.el("sweepStep") ? (Units.parseSI(this.el("sweepStep").value) || 0.1) : 0.1
+            sweepStep: this.el("sweepStep") ? (Units.parseSI(this.el("sweepStep").value) || 0.1) : 0.1,
+            reltol: this.optNum("optReltol", 1e-3), abstol: this.optNum("optAbstol", 1e-12), vntol: this.optNum("optVntol", 1e-6), gmin: this.optNum("optGmin", 1e-12),
+            maxIter: Math.round(this.optNum("optIter", 100)), method: this.el("optMethod") ? this.el("optMethod").value : "trap"
         };
     }
+
+    // a solver option: a positive number from its field, else the default
+    optNum(id, fallback) { const el = this.el(id); const v = el ? Units.parseSI(el.value) : NaN; return v > 0 ? v : fallback; }
 
     toast(message, kind = "info") {
         if (typeof AppLog !== "undefined") AppLog.add(kind === "error" ? "err" : (kind === "warn" ? "warn" : "info"), message);
@@ -93,8 +98,8 @@ class SimRunner {
             } finally { busy.done(); }
         }
         const engine = new SimEngine(info.circuit, this.engineOptions());
-        if (kind === "op") return engine.operatingPoint({ uic: !!args.uic, nodeIC: args.nodeIC || null });
-        if (kind === "tran") return engine.transient({ tStop: args.tStop, tStep: args.tStep, uic: args.uic, method: "trap", nodeIC: args.nodeIC });
+        if (kind === "op") return engine.operatingPoint({ uic: !!args.uic, nodeIC: args.nodeIC || null, nodeset: args.nodeset || null });
+        if (kind === "tran") return engine.transient({ tStop: args.tStop, tStep: args.tStep, uic: args.uic, method: "trap", nodeIC: args.nodeIC, nodeset: args.nodeset });
         if (kind === "ac") return engine.ac({ fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 20 });
         if (kind === "tf") return engine.tf({ out: args.out, input: args.input });
         if (kind === "noise") return engine.noise({ out: args.out, input: args.input, fStart: args.fStart, fStop: args.fStop, pointsPerDecade: args.pointsPerDecade || 10 });
@@ -126,7 +131,7 @@ class SimRunner {
     async ngspice(info, analysis) {
         if (!NgspiceBackend.simulation) this.toast("Loading ngspice (first use only)…", "info");
         const t = this.settings().temp;
-        const deck = NetlistExtractor.toSpice(info.elements, { analysis: (t !== 27 ? `.temp ${t}\n` : "") + analysis });
+        const deck = NetlistExtractor.toSpice(info.elements, { analysis: (t !== 27 ? `.temp ${t}\n` : "") + analysis, options: this.settings() });
         const busy = this.busyShow("ngspice");
         let res;
         try { res = await NgspiceBackend.run(deck); } finally { busy.done(); }
@@ -135,7 +140,7 @@ class SimRunner {
         return res;
     }
 
-    engineOptions() { return { temp: this.settings().temp }; }
+    engineOptions() { const s = this.settings(); return { temp: s.temp, reltol: s.reltol, abstol: s.abstol, vntol: s.vntol, gmin: s.gmin, maxIter: s.maxIter, method: s.method }; }
 
     runDC() {
         return this.guard(async () => {
@@ -146,7 +151,7 @@ class SimRunner {
                 op = NgspiceBackend.toOperatingPoint(await this.ngspice(info, ".op"), info);
                 label = " (ngspice)";
             } else {
-                op = await this.solve(info, "op", {}, "Operating point");
+                op = await this.solve(info, "op", { nodeset: info.nodeset }, "Operating point");
             }
             const ms = performance.now() - t0;
 
@@ -228,7 +233,7 @@ class SimRunner {
                 res = NgspiceBackend.toTransient(raw, info);
                 label = " (ngspice)";
             } else {
-                res = await this.solve(info, "tran", { tStop: s.tStop, tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC }, "Transient");
+                res = await this.solve(info, "tran", { tStop: s.tStop, tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC, nodeset: info.nodeset }, "Transient");
             }
             const ms = performance.now() - t0;
 
@@ -285,7 +290,7 @@ class SimRunner {
         const analysis = `.op\n.tran ${fmt(s.tStep)} ${fmt(s.tStop)}${s.uic ? " UIC" : ""}\n.ac dec 20 ${fmt(s.fStart)} ${fmt(s.fStop)}`;
         const tb = this.editor.titleBlock;
         const title = tb && tb.title ? tb.title + (tb.rev ? ` (rev ${tb.rev})` : "") : undefined;
-        return { info, text: NetlistExtractor.toSpice(info.elements, { analysis, title }) };
+        return { info, text: NetlistExtractor.toSpice(info.elements, { analysis, title, options: s }) };
     }
 
     showNetlist() {

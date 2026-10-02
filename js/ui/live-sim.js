@@ -74,7 +74,7 @@ class LiveSim {
         const s = this.runner.settings();
         this.info = info;
         this.engine = new SimEngine(info.circuit, this.runner.engineOptions());
-        this.run = this.engine.beginTransient({ tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC });
+        this.run = this.engine.beginTransient({ tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC, nodeset: info.nodeset });
         this.span = s.tStop;
         this.speed = s.liveSpeed;          // simulated seconds per real second (0 = as fast as possible)
         this.target = 0;

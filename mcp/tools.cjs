@@ -19,7 +19,7 @@ function parseDeck(netlist) {
 // a deck must be rebuilt for every run (elements keep state)
 function engineFor(netlist) {
     const { deck, circuit, warnings } = parseDeck(netlist);
-    return { deck, warnings, engine: new SimEngine(circuit, { temp: deck.temp === undefined ? 27 : deck.temp }), circuit };
+    return { deck, warnings, engine: new SimEngine(circuit, Object.assign({ temp: deck.temp === undefined ? 27 : deck.temp }, deck.options || {})), circuit };
 }
 
 function pickAnalysis(deck, args) {
@@ -50,7 +50,7 @@ function simulate(args) {
     const measure = (specs, getSignal) => specs.map(sp => { try { return { name: sp.name, value: round(Measure.compute(sp, getSignal), 8), spec: Measure.toSpice(sp) }; } catch (e) { return { name: sp.name, error: e.message }; } });
 
     if (type === "op") {
-        const op = engine.operatingPoint();
+        const op = engine.operatingPoint({ nodeset: deck.nodeset });
         out.nodeVoltages = Object.fromEntries(Object.entries(op.nodeVoltages).map(([k, v]) => [k, round(v)]));
         out.branchCurrents = Object.fromEntries(Object.entries(op.currents).filter(([k]) => !k.includes(".")).map(([k, v]) => [k, round(v)]));
         out.method = op.method;

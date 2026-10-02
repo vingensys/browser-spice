@@ -134,6 +134,19 @@ class SchematicImporter {
             if (uic) uic.checked = !!tran.uic;
         }
         if (ac) { setField("simFstart", ac.fStart); setField("simFstop", ac.fStop); }
+        if (deck.options) {
+            const o = deck.options, f = (id, v) => { const el = document.getElementById(id); if (el && Number.isFinite(v)) el.value = String(v); };
+            f("optReltol", o.reltol); f("optVntol", o.vntol); f("optAbstol", o.abstol); f("optGmin", o.gmin); f("optIter", o.maxIter);
+            if (o.method && document.getElementById("optMethod")) document.getElementById("optMethod").value = o.method;
+        }
+        // .nodeset: starting guesses become flags on their nets, like .ic
+        for (const [net, v] of Object.entries(deck.nodeset || {})) {
+            const pins = pinsOf.get(net);
+            if (!pins || !pins.length) { warnings.push(`.nodeset v(${net}) refers to an unknown net and was skipped`); continue; }
+            const flag = editor.addComponent("NODEIC", pins[0].x + 60, pins[0].y - 120, 0);
+            flag.value = Units.formatSI(v, "V"); flag.mode = "nodeset";
+            pins.push({ comp: flag, pin: "1", x: flag.x, y: flag.y + 20 });
+        }
 
         editor.refreshWires();
         editor.fitView();

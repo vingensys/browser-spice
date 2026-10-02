@@ -13,11 +13,11 @@ function run(job, progress) {
     const engine = new SimEngine(circuit, job.options);
     const a = job.args || {};
     if (job.kind === "op") {
-        const op = engine.operatingPoint({ uic: !!a.uic, nodeIC: a.nodeIC || null });
+        const op = engine.operatingPoint({ uic: !!a.uic, nodeIC: a.nodeIC || null, nodeset: a.nodeset || null });
         return { nodeVoltages: op.nodeVoltages, currents: op.currents, iterations: op.iterations, method: op.method };
     }
     if (job.kind === "tran") {
-        const r = new TransientRun(engine, { tStop: a.tStop, tStep: a.tStep, uic: a.uic, method: "trap", nodeIC: a.nodeIC });
+        const r = new TransientRun(engine, { tStop: a.tStop, tStep: a.tStep, uic: a.uic, method: "trap", nodeIC: a.nodeIC, nodeset: a.nodeset });
         let last = 0;
         while (!r.done) {
             r.step();

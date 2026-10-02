@@ -1217,6 +1217,28 @@ test("parameters: errors say what is wrong", () => {
     if (!/unknown name "zzz"/.test(msg)) throw new Error(msg);
 });
 
+
+console.log("solver options and .nodeset");
+test(".options are parsed (reltol, abstol, vntol, gmin, itl1, method) and unknown ones warn", () => {
+    const d = SpiceParser.parse("t\n.options reltol=1e-4 abstol=1e-13 vntol=1u gmin=1e-13 itl1=200 method=gear foo=3\nV1 a 0 1\nR1 a 0 1k\n.end");
+    const o = d.options;
+    if (o.reltol !== 1e-4 || o.abstol !== 1e-13 || o.vntol !== 1e-6 || o.gmin !== 1e-13 || o.maxIter !== 200 || o.method !== "trap") throw new Error(JSON.stringify(o));
+    if (!d.warnings.some(w => /foo/.test(w))) throw new Error("unknown option should warn");
+});
+test("a tighter reltol changes the answer of a nonlinear circuit slightly, and the engine honours it", () => {
+    const mk = (opt) => { const { circuit } = SpiceParser.build(SpiceParser.parse("t\nV1 a 0 5\nR1 a b 1k\nD1 b 0 DM\n.model DM D(IS=1e-14)\n.end")); return new SimEngine(circuit, opt); };
+    const loose = mk({ reltol: 0.1, maxIter: 100 }).operatingPoint(), tight = mk({ reltol: 1e-9 }).operatingPoint();
+    if (!(tight.iterations >= loose.iterations)) throw new Error(`${tight.iterations} vs ${loose.iterations}`);
+    near(loose.nodeVoltages.b, tight.nodeVoltages.b, 0.05);
+});
+test(".nodeset picks the state of a bistable circuit without forcing it", () => {
+    const deck = (ns) => `latch\nB1 a 0 V=5*0.5*(1-tanh((v(b)-2.5)/0.2))\nB2 b 0 V=5*0.5*(1-tanh((v(a)-2.5)/0.2))\n${ns}.end`;
+    const run = (ns) => { const d = SpiceParser.parse(deck(ns)); const { circuit } = SpiceParser.build(d); return new SimEngine(circuit).operatingPoint({ nodeset: d.nodeset }).nodeVoltages; };
+    const hi = run(".nodeset v(a)=5\n"), lo = run(".nodeset v(a)=0 v(b)=5\n");
+    if (!(hi.a > 4.5 && hi.b < 0.5)) throw new Error("a high: " + JSON.stringify(hi));
+    if (!(lo.a < 0.5 && lo.b > 4.5)) throw new Error("a low: " + JSON.stringify(lo));
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

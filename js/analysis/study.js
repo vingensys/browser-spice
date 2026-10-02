@@ -101,7 +101,7 @@ class Study {
         const items = runner.plotter.buildProbeSeriesMap(probes, info);
         const s = runner.settings();
         if (kind === "tran") {
-            const res = await runner.solve(info, "tran", { tStop: s.tStop, tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC }, "Study run");
+            const res = await runner.solve(info, "tran", { tStop: s.tStop, tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC, nodeset: info.nodeset }, "Study run");
             return { kind, info, items, t: res.timePoints, series: items.map(it => (it.type === "V" ? res.nodeHistories[it.node] : res.currentHistories[it.targetName]) || res.timePoints.map(() => 0)) };
         }
         if (kind === "ac") {

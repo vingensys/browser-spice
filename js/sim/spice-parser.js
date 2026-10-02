@@ -164,7 +164,23 @@ class SpiceParser {
                 deck.ic = deck.ic || {};
                 for (const m of line.toLowerCase().matchAll(/v\(\s*([^)\s]+)\s*\)\s*=\s*(\S+)/g)) deck.ic[m[1]] = N(m[2]);
                 break;
-            case ".options": case ".option": case ".print": case ".plot":
+            case ".options": case ".option": {
+                deck.options = deck.options || {};
+                const map = { reltol: "reltol", abstol: "abstol", vntol: "vntol", gmin: "gmin", itl1: "maxIter", method: "method" };
+                for (const t of tok.slice(1)) {
+                    const i = t.indexOf("=");
+                    if (i <= 0) continue;
+                    const k = t.slice(0, i), v = t.slice(i + 1);
+                    if (!(k in map)) { warnings.push(`option ${k} is not supported and was ignored`); continue; }
+                    deck.options[map[k]] = k === "method" ? (v === "gear" ? "trap" : v === "trap" || v === "trapezoidal" ? "trap" : "be") : N(v);
+                }
+                break;
+            }
+            case ".nodeset":
+                deck.nodeset = deck.nodeset || {};
+                for (const m of line.toLowerCase().matchAll(/v\(\s*([^)\s]+)\s*\)\s*=\s*(\S+)/g)) deck.nodeset[m[1]] = N(m[2]);
+                break;
+            case ".print": case ".plot":
             case ".probe": case ".save": case ".control": case ".endc": case ".include": case ".lib":
                 warnings.push(`${tok[0]} is not supported and was ignored`);
                 break;

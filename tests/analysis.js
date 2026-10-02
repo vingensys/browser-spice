@@ -912,6 +912,28 @@ window.analysisTests = async function () {
         editor.resetSheets(); sheetBar.render();
     }
 
+
+    // ======================================================== solver options and .nodeset in the app
+    clear(); editor.resetSheets(); loadExampleById(editor, "rc-ladder");
+    document.getElementById("optReltol").value = "1e-4"; document.getElementById("optIter").value = "150";
+    ok("the solver options reach the engine options and the settings", runner.engineOptions().reltol === 1e-4 && runner.engineOptions().maxIter === 150 && runner.settings().method === "trap");
+    const odeck = runner.spiceText().text;
+    ok("and the SPICE export (only the ones that differ from the defaults)", /^\.options reltol=0\.0001 itl1=150$/m.test(odeck), odeck.split("\n").filter(l => /options/.test(l)));
+    const ssv = JSON.parse(JSON.stringify(doc.serialize())).settings;
+    ok("they are saved with the design", ssv.reltol === 1e-4 && ssv.maxIter === 150);
+    document.getElementById("optReltol").value = "1m"; document.getElementById("optIter").value = "100";
+    doc.applySettings(ssv);
+    ok("and restored on opening", document.getElementById("optReltol").value === "0.0001" && document.getElementById("optIter").value === "150");
+    document.getElementById("optReltol").value = "1m"; document.getElementById("optIter").value = "100";
+    const ic1 = editor.addComponent("NODEIC", 300, 100, 0); ic1.value = "5 V"; ic1.mode = "nodeset";
+    const wanted = editor.components.find(c => c.type === "R");
+    editor.wires.push({ id: editor.nextId++, start: { type: "terminal", component: ic1.id, terminal: "1" }, end: { type: "terminal", component: wanted.id, terminal: "1" }, route: null }); editor.refreshWires();
+    const nsInfo = NetlistExtractor.extract(editor);
+    ok("a flag set to 'starting guess' goes to nodeset, not to the initial conditions", Object.keys(nsInfo.nodeset).length === 1 && Object.keys(nsInfo.nodeIC).length === 0 && /^\.nodeset v\(\w+\)=5$/m.test(NetlistExtractor.toSpice(nsInfo.elements, {})), [nsInfo.nodeset, nsInfo.nodeIC]);
+    ic1.mode = "ic";
+    ok("and as an initial condition it goes the other way", Object.keys(NetlistExtractor.extract(editor).nodeIC).length === 1);
+    editor.components = editor.components.filter(c => c !== ic1);
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

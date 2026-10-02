@@ -253,6 +253,7 @@ class NetlistExtractor {
         };
 
         const nodeIC = {};
+        const nodeset = {};
         const instruments = [];
         for (const comp of editor.components) {
             if (comp.type === "GND") continue;
@@ -275,7 +276,7 @@ class NetlistExtractor {
             }
             if (comp.type === "NODEIC") {
                 const net = pin("1");
-                if (net !== "0") nodeIC[net] = Units.parseSI(comp.value);
+                if (net !== "0") (comp.mode === "nodeset" ? nodeset : nodeIC)[net] = Units.parseSI(comp.value);
                 if (!nets.wired.has(`${comp.id}:1`)) warnings.push(`${comp.name}: initial-condition flag is not connected to a net`);
                 continue;
             }
@@ -382,6 +383,7 @@ class NetlistExtractor {
             }
         }
         els.nodeIC = nodeIC;
+        els.nodeset = nodeset;
         els.instruments = instruments;
         return { els, warnings };
     }
@@ -528,7 +530,7 @@ class NetlistExtractor {
 
         const circuit = NetlistExtractor.instantiate(els);
         return {
-            circuit, elements: els, warnings, probes: [...editor.probes, ...(els.subProbes || [])], located: els.located, sheetPaths: els.sheetPaths || new Map(), nodeIC: els.nodeIC || {}, instruments: els.instruments || [],
+            circuit, elements: els, warnings, probes: [...editor.probes, ...(els.subProbes || [])], located: els.located, sheetPaths: els.sheetPaths || new Map(), nodeIC: els.nodeIC || {}, nodeset: els.nodeset || {}, instruments: els.instruments || [],
             getPointNodeName: nets.getPointNodeName,
             getTerminalNodeName: nets.terminalNode,
             nets
@@ -610,7 +612,7 @@ class NetlistExtractor {
     }
 
     static toSpice(els, opts = {}) {
-        const { title = "Browser SPICE export", analysis = ".op", nodeIC = els.nodeIC } = opts;
+        const { title = "Browser SPICE export", analysis = ".op", nodeIC = els.nodeIC, nodeset = els.nodeset, options = null } = opts;
         const f = (v) => (typeof v === "number" ? Number(v.toPrecision(6)).toString() : v);
         const lines = [`* ${title}`, `* generated ${new Date().toISOString()}`, ""];
         const models = new Map();
@@ -829,6 +831,12 @@ class NetlistExtractor {
         if (uses555) {
             // the behavioural latch needs tighter tolerances than the default 0.1 %
             lines.push("", ".options reltol=1e-4 vntol=1e-7", ...NetlistExtractor.NE555_SUBCKT);
+        }
+
+        if (nodeset && Object.keys(nodeset).length) lines.push("", `.nodeset ${Object.entries(nodeset).map(([n, v]) => `v(${n})=${f(v)}`).join(" ")}`);
+        if (options) {
+            const o = [["reltol", options.reltol, 1e-3], ["abstol", options.abstol, 1e-12], ["vntol", options.vntol, 1e-6], ["gmin", options.gmin, 1e-12], ["itl1", options.maxIter, 100]].filter(([, v, d]) => Number.isFinite(v) && v !== d);
+            if (o.length) lines.push("", `.options ${o.map(([k, v]) => `${k}=${f(v)}`).join(" ")}`);
         }
 
         // initial conditions only mean something for a "start from 0" (UIC) run

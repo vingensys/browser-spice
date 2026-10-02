@@ -72,6 +72,13 @@
             <label>From</label><input id="sweepStart" value="0">
             <label>To</label><input id="sweepStop" value="5">
             <label>Step</label><input id="sweepStep" value="0.1">
+            <h4 class="span">Solver options (.options)</h4>
+            <label>Relative tolerance</label><input id="optReltol" value="1m" title="reltol: relative accuracy of every solution (default 1m)">
+            <label>Voltage tolerance</label><input id="optVntol" value="1u" title="vntol: absolute voltage accuracy (default 1u)">
+            <label>Current tolerance</label><input id="optAbstol" value="1p" title="abstol: absolute current accuracy (default 1p)">
+            <label>Minimum conductance</label><input id="optGmin" value="1e-12" title="gmin: conductance added across junctions (default 1e-12)">
+            <label>Newton iteration limit</label><input id="optIter" value="100" title="itl1 (default 100)">
+            <label>Integration method</label><select id="optMethod"><option value="trap">Trapezoidal</option><option value="be">Backward Euler (damped)</option></select>
             <h4 class="span">Environment</h4>
             <label>Temperature (°C)</label><input id="simTemp" value="27">
             <label>Solver</label>

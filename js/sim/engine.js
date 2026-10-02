@@ -172,7 +172,7 @@ class SimEngine {
     // ------------------------------------------------------------ operating point
 
     // nodeIC: { nodeName: volts } applied only to the initial solve of a UIC transient
-    operatingPoint({ uic = false, nodeIC = null } = {}) {
+    operatingPoint({ uic = false, nodeIC = null, nodeset = null } = {}) {
         const c = this.c;
         this.lastSingular = null;
         const ctx = this.makeCtx("op");
@@ -184,8 +184,11 @@ class SimEngine {
             for (const el of c.elements) if (el instanceof Capacitor) el.icDefault = v0(el.n[0]) - v0(el.n[1]);
         }
         const zero = new Float64Array(c.size);
+        // .nodeset: starting guesses for the Newton iteration (they do not force anything, unlike .ic)
+        const start = new Float64Array(c.size);
+        if (nodeset) for (const [n, v] of Object.entries(nodeset)) { const i = c.lookup(n); if (i !== undefined && i >= 0 && Number.isFinite(v)) start[i] = v; }
 
-        let r = this.newton(ctx, zero);
+        let r = this.newton(ctx, start);
         let method = "newton";
 
         if (!r.ok) {
@@ -468,7 +471,7 @@ class SimEngine {
 
 // One transient analysis in progress. step() advances by one accepted time step.
 class TransientRun {
-    constructor(engine, { tStop = 0.01, tStep = 1e-5, method = "trap", uic = true, adaptive = true, lteTol = 0.02, nodeIC = null, record = true } = {}) {
+    constructor(engine, { tStop = 0.01, tStep = 1e-5, method = "trap", uic = true, adaptive = true, lteTol = 0.02, nodeIC = null, nodeset = null, record = true } = {}) {
         this.engine = engine;
         const c = engine.c;
         this.c = c;
@@ -479,7 +482,8 @@ class TransientRun {
         this.lteTol = lteTol;
         this.record = record;
 
-        const op = engine.operatingPoint({ uic, nodeIC });
+        if (engine.opt.method === "be") this.method = "be";
+        const op = engine.operatingPoint({ uic, nodeIC, nodeset });
         this.x = op.x;
 
         this.ctx = engine.makeCtx("tran");

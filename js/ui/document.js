@@ -116,6 +116,9 @@ class DocumentStore {
         if (el("simTemp") && isFinite(s.temp)) el("simTemp").value = s.temp;
         if (el("simUic") && typeof s.uic === "boolean") el("simUic").checked = s.uic;
         if (el("simEngine") && s.engine) el("simEngine").value = s.engine;
+        const opt = (id, v, d) => { if (el(id)) el(id).value = Number.isFinite(v) && v !== d ? String(v) : (el(id).defaultValue); };
+        opt("optReltol", s.reltol, 1e-3); opt("optVntol", s.vntol, 1e-6); opt("optAbstol", s.abstol, 1e-12); opt("optGmin", s.gmin, 1e-12); opt("optIter", s.maxIter, 100);
+        if (el("optMethod")) el("optMethod").value = s.method === "be" ? "be" : "trap";
         if (el("liveSpeed") && s.liveSpeed !== undefined && [...el("liveSpeed").options].some(o => Number(o.value) === Number(s.liveSpeed))) el("liveSpeed").value = String(s.liveSpeed);
     }
 

@@ -117,6 +117,8 @@ class Hierarchy {
             els.push(copy);
         }
         for (const [net, v] of Object.entries(cels.nodeIC || {})) els.nodeIC[node(net)] = v;
+        els.nodeset = els.nodeset || {};
+        for (const [net, v] of Object.entries(cels.nodeset || {})) els.nodeset[node(net)] = v;
         // probes placed on the sub-sheet measure this instance (one entry per use of the sheet)
         if (isTarget) ctx.located = els.located = { path, node, sheetId, nets: cnets };
         els.subProbes = els.subProbes || [];
