@@ -418,6 +418,43 @@ window.analysisTests = async function () {
     document.getElementById("simEngine").value = "builtin";
     graph.hide();
 
+
+    // ======================================================== design parameters
+    clear(); loadExampleById(editor, "rc-ladder");
+    byName("R1").value = "{rv}"; byName("R2").value = "{rv*2.2}"; byName("C1").value = "{cv} F";
+    editor.params = [{ name: "rv", value: "1k" }, { name: "cv", value: "10u" }];
+    const pinfo = NetlistExtractor.extract(editor);
+    const pr1 = pinfo.elements.find(e => e.name === "R1"), pr2 = pinfo.elements.find(e => e.name === "R2"), pc1 = pinfo.elements.find(e => e.name === "C1");
+    ok("{name} and {expression} in part values become numbers in the netlist", pr1.params.r === 1000 && near(pr2.params.r, 2200, 1e-9) && near(pc1.params.c, 10e-6, 1e-15), [pr1.params, pr2.params, pc1.params]);
+    ok("the schematic keeps the {names} afterwards", byName("R1").value === "{rv}" && byName("C1").value === "{cv} F");
+    const pdeck = NetlistExtractor.toSpice(pinfo.elements, {});
+    ok("the SPICE export has plain numbers", /^R1 \S+ \S+ 1000$/m.test(pdeck) && !/[{}]/.test(pdeck), pdeck.split("\n").filter(l => /^R/.test(l)));
+    const r2Before = byName("R2").value;
+    const lowParams = Study.parameters(editor, runner);
+    ok("a parameter is offered in the sweep list", lowParams.some(p => p.id === "param:rv" && p.get() === 1000), lowParams.map(p => p.id));
+    const psw = await Study.sweep(editor, runner, { param: "param:rv", analysis: "tran", show: "metric", metric: "final", probe: 1, list: [200, 1000, 5000] });
+    ok("sweeping a parameter moves every part that uses it (the charge reached in 20 ms falls as R grows)", psw.series[0].values[0] > psw.series[0].values[2] && editor.params[0].value === "1k" && byName("R2").value === r2Before, psw.series[0].values);
+    editor.params.push({ name: "bad", value: "nope+1" });
+    const bset = JSON.stringify(editor.params);
+    byName("R1").value = "{nope}";
+    let perr = ""; try { NetlistExtractor.extract(editor); } catch (e) { perr = e.message; }
+    ok("an unknown parameter is reported with the part and the name", /R1/.test(perr) && /unknown name "nope"/.test(perr), perr);
+    ok("and the values are restored even though extraction failed", byName("R1").value === "{nope}" && byName("R2").value === "{rv*2.2}");
+    byName("R1").value = "{rv}"; editor.params = [{ name: "rv", value: "1k" }, { name: "cv", value: "10u" }];
+    const psaved = JSON.parse(JSON.stringify(doc.serialize()));
+    ok("parameters are saved with the design", psaved.params.length === 2 && psaved.params[0].name === "rv");
+    editor.params = []; doc.apply(psaved, { undoable: false });
+    ok("and restored on opening, and by undo", editor.params.length === 2 && (() => { const sn = editor.snapshot(); editor.params = []; editor.restore(sn); return editor.params.length === 2; })());
+    Commands.run("design.params");
+    ok("Design > Parameters opens a table of them with their resolved values", document.querySelectorAll(".params-dlg tbody tr").length === 2 && /1\s?k/i.test(document.querySelector(".params-dlg tbody").textContent), document.querySelector(".params-dlg") && document.querySelector(".params-dlg").textContent);
+    [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "Add").click();
+    const nameBox = document.querySelectorAll('.params-dlg input[data-k="name"]')[2]; nameBox.value = "rz"; nameBox.dispatchEvent(new Event("change"));
+    const valBox = document.querySelectorAll('.params-dlg input[data-k="value"]')[2]; valBox.value = "rv*3"; valBox.dispatchEvent(new Event("change"));
+    ok("a new row evaluates against the others", /3\s?k/i.test(document.querySelectorAll(".params-dlg tbody tr")[2].textContent), document.querySelectorAll(".params-dlg tbody tr")[2].textContent);
+    [...document.querySelectorAll(".dialog .btn")].find(b => b.textContent === "OK").click();
+    ok("OK stores them", editor.params.length === 3 && editor.params[2].name === "rz" && editor.params[2].value === "rv*3", editor.params);
+    editor.params = []; byName("R1").value = "1k"; byName("R2").value = "2.2k"; byName("C1").value = "10u";
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

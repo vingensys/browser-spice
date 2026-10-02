@@ -1200,6 +1200,23 @@ test("subcircuit parts: an expanded instance simulates like the written-out circ
     if (!Object.keys(op).some(k => k.toLowerCase().startsWith("u1."))) throw new Error("inner nodes are prefixed with the instance name");
 });
 
+
+console.log("design parameters");
+test("parameters: values, expressions and dependencies resolve in any order", () => {
+    const P = new Function("Expr", fs.readFileSync(path.join(root, "js/circuit/params.js"), "utf8") + "\nreturn DesignParams;")(Expr);
+    const r = P.resolve([{ name: "rf", value: "gain*1k" }, { name: "gain", value: "10" }, { name: "half", value: "{rf/2}" }, { name: "Vin", value: "1.5m" }]);
+    if (Object.keys(r.errors).length) throw new Error(JSON.stringify(r.errors));
+    near(r.values.rf, 10000, 1e-9); near(r.values.half, 5000, 1e-9); near(r.values.vin, 1.5e-3, 1e-15, "names are case-insensitive");
+    if (P.substitute("{rf}", r.values) !== "10000" || P.substitute("{half*2} + {gain}", r.values) !== "10000 + 10") throw new Error(P.substitute("{half*2} + {gain}", r.values));
+});
+test("parameters: errors say what is wrong", () => {
+    const P = new Function("Expr", fs.readFileSync(path.join(root, "js/circuit/params.js"), "utf8") + "\nreturn DesignParams;")(Expr);
+    const r = P.resolve([{ name: "a", value: "b+1" }, { name: "b", value: "a+1" }, { name: "c", value: "nope*2" }, { name: "1x", value: "3" }, { name: "pi", value: "3" }, { name: "d", value: "" }, { name: "d", value: "2" }]);
+    if (!/circular|unknown/.test(r.errors.a) || !/unknown name "nope"/.test(r.errors.c) || !/letters/.test(r.errors["1x"]) || !/reserved/.test(r.errors.pi) || !/defined twice|no value/.test(r.errors.d)) throw new Error(JSON.stringify(r.errors));
+    let msg = ""; try { P.substitute("{zzz}", {}); } catch (e) { msg = e.message; }
+    if (!/unknown name "zzz"/.test(msg)) throw new Error(msg);
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed) {
     console.log("failed: " + failures.join("; "));

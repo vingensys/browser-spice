@@ -41,6 +41,12 @@ class Study {
                 }
             }
         }
+        // design parameters ({name} in part values): sweeping one moves every part that uses it
+        const resolved = typeof DesignParams !== "undefined" ? DesignParams.resolve(editor.params).values : {};
+        for (const q of editor.params || []) {
+            if (!q.name || !(String(q.name).toLowerCase() in resolved)) continue;
+            add(`param:${q.name}`, `parameter ${q.name}`, "", () => DesignParams.resolve(editor.params).values[String(q.name).toLowerCase()], (v) => { q.value = String(v); });
+        }
         const tempEl = () => document.getElementById("simTemp");
         add("temp", "Temperature", "°C", () => (tempEl() && tempEl().value !== "" ? Number(tempEl().value) : 27), (v) => { if (tempEl()) tempEl().value = String(v); });
         return out;
@@ -53,14 +59,16 @@ class Study {
         finally { for (const s of snapshot) Study.restoreState(editor, s.p.id, s.prev); editor.refreshWires(); }
     }
 
-    static compOf(editor, id) { const n = Number(String(id).split(".")[0]); return Number.isNaN(n) ? null : editor.components.find(c => c.id === n); }
+    static compOf(editor, id) { if (String(id).startsWith("param:")) return null; const n = Number(String(id).split(".")[0]); return Number.isNaN(n) ? null : editor.components.find(c => c.id === n); }
     static stateOf(editor, id) {
+        if (String(id).startsWith("param:")) { const q = editor.params.find(x => x.name === id.slice(6)); return { value: q ? q.value : undefined }; }
         if (id === "temp") { const t = document.getElementById("simTemp"); return { temp: t ? t.value : undefined }; }
         const c = Study.compOf(editor, id), field = String(id).split(".")[1];
         return c ? { value: c[field], had: field in c } : null;
     }
     static restoreState(editor, id, prev) {
         if (!prev) return;
+        if (String(id).startsWith("param:")) { const q = editor.params.find(x => x.name === id.slice(6)); if (q && prev.value !== undefined) q.value = prev.value; return; }
         if (id === "temp") { const t = document.getElementById("simTemp"); if (t && prev.temp !== undefined) t.value = prev.temp; return; }
         const c = Study.compOf(editor, id), field = String(id).split(".")[1];
         if (!c) return;

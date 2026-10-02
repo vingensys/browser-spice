@@ -35,7 +35,7 @@ class LiveSim {
             if (part && part.tweak) delete rest.value;                     // its label shows the knob
             return rest;
         });
-        return JSON.stringify([comps, this.editor.wires.map(w => [w.start, w.end])]);
+        return JSON.stringify([comps, this.editor.wires.map(w => [w.start, w.end]), this.editor.params]);
     }
 
     start() {

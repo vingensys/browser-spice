@@ -454,6 +454,10 @@ class NetlistExtractor {
 
     // One call for the UI: nets + elements + a ready SimCircuit
     static extract(editor) {
+        return typeof DesignParams !== "undefined" ? DesignParams.with(editor, () => NetlistExtractor.extractNow(editor)) : NetlistExtractor.extractNow(editor);
+    }
+
+    static extractNow(editor) {
         const nets = NetlistExtractor.nets(editor);
         const { els, warnings } = NetlistExtractor.elements(editor, nets);
 

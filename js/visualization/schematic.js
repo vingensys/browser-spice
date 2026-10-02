@@ -20,6 +20,7 @@ class SchematicEditor {
         this.probes = [];
         this.titleBlock = SchematicEditor.defaultTitleBlock();
         this.measures = [];
+        this.params = [];
 
         this.selection = [];
         this.selectedWire = null;
@@ -226,6 +227,7 @@ class SchematicEditor {
             probes: this.probes,
             titleBlock: this.titleBlock,
             measures: this.measures,
+            params: this.params,
             nextId: this.nextId
         });
     }
@@ -248,6 +250,7 @@ class SchematicEditor {
         this.probes = state.probes;
         this.titleBlock = Object.assign(SchematicEditor.defaultTitleBlock(), state.titleBlock || {});
         this.measures = Array.isArray(state.measures) ? state.measures : [];
+        this.params = Array.isArray(state.params) ? state.params : [];
         this.nextId = state.nextId;
 
         this.clearSelection();

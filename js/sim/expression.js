@@ -51,7 +51,7 @@ class Expr {
     }
 
     // compile to { vars, eval }
-    static compile(text) {
+    static compile(text, consts = {}) {
         const toks = Expr.tokenize(String(text)), vars = [], keys = new Map();
         let i = 0;
         const peek = () => toks[i], next = () => toks[i++];
@@ -120,6 +120,7 @@ class Expr {
                 if (name === "pi") return () => Math.PI;
                 if (name === "true") return () => 1;
                 if (name === "false") return () => 0;
+                if (Object.prototype.hasOwnProperty.call(consts, name)) { const v = consts[name]; return () => v; }       // a design parameter
                 throw new Error(`unknown name "${name}" in expression "${text}"`);
             }
             next();                                                   // (
