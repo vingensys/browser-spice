@@ -1692,11 +1692,13 @@ class SchematicEditor {
 
         ctx.restore();
 
-        ctx.fillStyle = this.tok("hud");
-        ctx.font = "11px system-ui";
-        ctx.textAlign = "right";
-        ctx.textBaseline = "alphabetic";
-        ctx.fillText(`${Math.round(this.zoom * 100)}%`, this.width - 10, this.height - 8);
+        if (!this.exporting) {
+            ctx.fillStyle = this.tok("hud");
+            ctx.font = "11px system-ui";
+            ctx.textAlign = "right";
+            ctx.textBaseline = "alphabetic";
+            ctx.fillText(`${Math.round(this.zoom * 100)}%`, this.width - 10, this.height - 8);
+        }
         if (typeof this.onDraw === "function") this.onDraw();
     }
 

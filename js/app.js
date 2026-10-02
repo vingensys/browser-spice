@@ -105,6 +105,8 @@
             buttons: [{ label: "Download .cir", primary: true, onClick: () => { download("circuit.cir", ta.value, "text/plain"); return false; } }, { label: "Close" }]
         });
     }) });
+    C("file.bom", "Bill of Materials…", { run: () => Exporter.openBom(editor) });
+    C("file.image", "Export Schematic Image (PNG)…", { run: () => Exporter.savePng(editor) });
     C("file.print", "Print…", { run: () => window.print() });
 
     C("edit.undo", "Undo", { icon: "undo", keys: "Ctrl+Z", enabled: () => editor.historyStack.length > 0, run: () => editor.undo() });
@@ -216,7 +218,7 @@
     }));
 
     new Menubar($("menubar"), [
-        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
+        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.text", "tool.vprobe", "tool.iprobe", "-",

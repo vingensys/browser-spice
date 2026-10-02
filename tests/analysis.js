@@ -161,6 +161,30 @@ window.analysisTests = async function () {
     ok("Design > Monte Carlo… opens its dialog", (Commands.run("design.montecarlo"), !!document.querySelector(".dialog #mcRuns")));
     Dialog.close("t");
 
+
+    // ======================================================== bill of materials and picture export
+    clear(); loadExampleById(editor, "ce-amp");
+    const rows = Exporter.bom(editor);
+    const nParts = editor.components.filter(c => !["GND", "TEXT", "NODEIC"].includes(c.type)).length;
+    ok("the BOM counts every real part exactly once", rows.reduce((n, r) => n + r.qty, 0) === nParts && rows.every(r => r.qty === r.refs.length), rows);
+    ok("the BOM leaves out ground symbols and notes", !rows.some(r => r.type === "GND" || r.type === "TEXT"));
+    byName("R1").value = "10k"; byName("R2").value = "10k"; byName("R2").tol = "5"; byName("R3").value = "10k"; byName("R3").tol = "5";
+    const rows2 = Exporter.bom(editor), same = rows2.find(r => r.refs.includes("R2"));
+    ok("parts with the same value and tolerance share one line (R2 and R3)", same && same.refs.includes("R3") && same.qty === 2 && same.tol === "5%" && !rows2.find(r => r.refs.includes("R1")).refs.includes("R2"), rows2.map(r => r.refs.join("+")));
+    const bomLines = Exporter.bomCsv(editor).split("\r\n");
+    ok("the CSV has a header and one row per line", bomLines[0] === "Item,Reference,Quantity,Value,Part,Tolerance" && bomLines.filter(Boolean).length === rows2.length + 1, bomLines.slice(0, 3));
+    ok("references with several parts are quoted-safe and space separated", bomLines.some(l => /^\d+,R2 R3,2,/.test(l)), bomLines);
+    Commands.run("file.bom");
+    ok("File > Bill of Materials opens its table", !!document.querySelector(".dialog .bom table") && document.querySelectorAll(".dialog .bom tbody tr").length === rows2.length);
+    Dialog.close("t");
+    const view = [editor.zoom, editor.panX, editor.panY, editor.width];
+    const cv = Exporter.renderImage(editor, 1);
+    ok("the picture covers the design with a margin and is not blank", cv && cv.width > 300 && cv.height > 200 && (() => { const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data; const bg = [d[0], d[1], d[2]]; for (let i = 0; i < d.length; i += 4 * 7) if (d[i] !== bg[0] || d[i + 1] !== bg[1] || d[i + 2] !== bg[2]) return true; return false; })(), cv && [cv.width, cv.height]);
+    ok("exporting leaves the editor's view and drawing target alone", editor.zoom === view[0] && editor.panX === view[1] && editor.panY === view[2] && editor.width === view[3] && editor.ctx === editor.canvas.getContext("2d") && !editor.exporting);
+    ok("a bigger scale gives a bigger picture", Exporter.renderImage(editor, 2).width >= 2 * cv.width - 2);
+    clear();
+    ok("an empty sheet has nothing to export", Exporter.renderImage(editor) === null && Exporter.bomCsv(editor).split("\r\n").filter(Boolean).length === 1);
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

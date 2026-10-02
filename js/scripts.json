@@ -46,6 +46,7 @@
  "js/ui/op-overlay.js",
  "js/analysis/study.js",
  "js/ui/study-dialog.js",
+ "js/ui/export.js",
  "js/ui/scope.js",
  "js/ui/logic-analyser.js",
  "js/examples.js",
