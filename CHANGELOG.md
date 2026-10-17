@@ -2,6 +2,9 @@
 
 ## 1.0 (current)
 
+Capture and export
+- Off-sheet connectors (same name = same net across all sheets, with a direction and a rule check), Design > Auto-Annotate, and PDF export of the schematic (vector, selectable text, A4 / Letter).
+
 Parts
 - A MOSFET (or BJT / diode) card above level 1 (MOS level 2, 3, BSIM...) makes a graph analysis run in ngspice automatically, with a note; the live run says it only approximates the model.
 - Voltage regulators now current-limit at their rated current (a short gives ilim, an overload follows the load line), also in the SPICE export.

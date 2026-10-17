@@ -249,6 +249,34 @@ PartLib.add("PORT", {
     catalog: [{ name: "HIERARCHICAL PORT", category: "Terminals", desc: "Port of this sheet: becomes a pin on the sheet symbol that uses it", props: { net: "IN", value: "IN" } }]
 });
 
+// an off-sheet connector: every connector with the same name is one net, on this sheet and on every other sheet of the design,
+// whatever the hierarchy between them (like a power rail, but for any signal). The shape shows the direction: in, out, both, or neither.
+SchematicEditor.REF_PREFIX.OFFSHEET = "OS";
+PartLib.add("OFFSHEET", {
+    prefix: "OS", value: "SIG", props: { net: "SIG", dir: "bidir" },
+    symbol: { pins: [["1", 0, 20, 0, 1]], box: [-34, -30, 34, 20] },
+    label: (c) => c.net || "SIG",
+    draw(r, c) {
+        const col = "#8be9fd", ctx = r.ctx, name = String(c.net || "SIG"), dir = c.dir || "bidir";
+        r.partLine([[0, 20], [0, 0]], col, 2.5);
+        ctx.strokeStyle = r.col(col); ctx.lineWidth = r.lw(2); ctx.fillStyle = r.col("#171b23");
+        ctx.beginPath();
+        // a flag: the point shows which way the signal goes (in: points at the pin; out: points away; both: both ends; none: square)
+        const L = -30, R = 30, T = -20, B = 0, mid = (T + B) / 2;
+        if (dir === "in") { ctx.moveTo(L, T); ctx.lineTo(R - 8, T); ctx.lineTo(R, mid); ctx.lineTo(R - 8, B); ctx.lineTo(L, B); }
+        else if (dir === "out") { ctx.moveTo(L + 8, T); ctx.lineTo(R, T); ctx.lineTo(R, B); ctx.lineTo(L + 8, B); ctx.lineTo(L, mid); }
+        else if (dir === "bidir") { ctx.moveTo(L + 8, T); ctx.lineTo(R - 8, T); ctx.lineTo(R, mid); ctx.lineTo(R - 8, B); ctx.lineTo(L + 8, B); ctx.lineTo(L, mid); }
+        else { ctx.moveTo(L, T); ctx.lineTo(R, T); ctx.lineTo(R, B); ctx.lineTo(L, B); }
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        r.partText(name.length > 8 ? name.slice(0, 7) + "…" : name, 0, -10, { size: 10, bold: true, color: col });
+    },
+    rows: (p, c) => p.text("Signal name", "net", c.net, "SIG") +
+        p.select("Direction", "dir", [["bidir", "Bidirectional"], ["in", "Input (the signal comes from another sheet)"], ["out", "Output (this sheet drives it)"], ["passive", "Passive / no direction"]], c.dir || "bidir") +
+        `<div class="prop-note">Connectors with the same name are the same net everywhere in the design, on any sheet, with no ports or wires between sheets. The rule check warns about a name used once, a name with no output or bidirectional end, and several outputs.</div>`,
+    netlist: () => [],
+    catalog: [{ name: "OFF-SHEET CONNECTOR", category: "Terminals", desc: "Same-name connectors join their nets across every sheet of the design; shows a direction (in / out / both)", props: { net: "SIG", dir: "bidir", value: "SIG" } }]
+});
+
 // a sheet symbol: a box with one pin per port of the sheet it uses
 function sheetSymbolGeometry(ports) {
     const half = Math.ceil(ports.length / 2), spec = { left: ports.slice(0, half), right: ports.slice(half) };

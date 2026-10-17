@@ -29,6 +29,7 @@ class ErcChecker {
         led: "An LED needs a current-limiting resistor",
         probe: "A probe on ground always reads zero",
         power: "Ports with the same name must agree",
+        offsheet: "An off-sheet connector needs a partner and a driver",
         sheet: "Every sheet must be used, and every sheet symbol must point at a sheet",
         bus: "Bus entries must sit on a named bus, inside its range, and bus wires only join bus pins"
     };
@@ -117,7 +118,7 @@ class ErcChecker {
             if (isSource && el.nodes[0] === el.nodes[1]) {
                 add("err", "vshort", `${el.comp.name}: both terminals are on net ${label(el.nodes[0])}, a short circuit across the source.`, [compRef(el.comp)]);
                 seenShort.add(el.comp);
-            } else if (distinct.size === 1 && !seenShort.has(el.comp) && !["POWER", "NETLABEL", "PORT"].includes(el.comp.type)) {
+            } else if (distinct.size === 1 && !seenShort.has(el.comp) && !["POWER", "NETLABEL", "PORT", "OFFSHEET"].includes(el.comp.type)) {
                 add("warn", "shorted", `${el.comp.name}: all its pins are on net ${label(nodes[0])}, so it does nothing.`, [compRef(el.comp)]);
                 seenShort.add(el.comp);
             }
@@ -250,6 +251,24 @@ class ErcChecker {
         for (const [name, list] of ports) {
             const volts = new Set(list.map(c => Units.parseSI(c.volts === undefined ? 5 : c.volts)));
             if (volts.size > 1) add("warn", "power", `Power ports named ${name} disagree on the voltage (${[...volts].join(" V, ")} V); only the first one counts.`, list.map(compRef));
+        }
+
+        // ---- off-sheet connectors: used once, nothing drives the net, or several things do (across the whole design) ---------
+        {
+            const members = new Map();
+            const all = (typeof Hierarchy !== "undefined" ? Hierarchy.flatComponents(editor) : editor.components.map(c => ({ comp: c, path: "", ref: c.name })));
+            for (const { comp: c, ref } of all) if (c.type === "OFFSHEET") {
+                const name = String(c.net || "SIG").trim().toUpperCase();
+                if (!members.has(name)) members.set(name, []);
+                members.get(name).push({ c, ref, dir: c.dir || "bidir" });
+            }
+            for (const [name, list] of members) {
+                const here = list.filter(m => real.includes(m.c)).map(m => compRef(m.c));
+                if (!here.length) continue;
+                if (list.length < 2) add("warn", "offsheet", `The off-sheet connector ${name} is used only once in the design, so it connects to nothing.`, here);
+                else if (!list.some(m => m.dir === "out" || m.dir === "bidir" || m.dir === "passive")) add("warn", "offsheet", `Every off-sheet connector named ${name} is an input: nothing drives it.`, here);
+                else if (list.filter(m => m.dir === "out").length > 1) add("warn", "offsheet", `${list.filter(m => m.dir === "out").length} off-sheet connectors named ${name} are outputs (${list.filter(m => m.dir === "out").map(m => m.ref).join(", ")}): two outputs on one net.`, here);
+            }
         }
 
         // errors first, then by rule

@@ -26,6 +26,26 @@ window.ercTests = async function () {
         ok(`example "${ex.id}" passes the rule check`, extra.length === 0 && !r.issues.some(i => i.level === "err"), r.issues.map(i => i.text));
     }
 
+    // ---- off-sheet connectors ----
+    clear();
+    {
+        const mk = (name, dir) => { const c = editor.addComponent("OFFSHEET", 400, 300, 0); c.net = name; c.dir = dir; return c; };
+        const a = mk("SYNC", "out");
+        let r = ErcChecker.run(editor);
+        ok("an off-sheet connector used once is flagged", has(r, "offsheet", /used only once/), r.issues.map(i => i.text));
+        const b = editor.addComponent("OFFSHEET", 600, 300, 0); b.net = "sync"; b.dir = "in";
+        r = ErcChecker.run(editor);
+        ok("an output with an input partner (names compared without case) is fine", !has(r, "offsheet"), r.issues.map(i => i.text));
+        a.dir = "in";
+        r = ErcChecker.run(editor);
+        ok("only inputs: nothing drives the net", has(r, "offsheet", /nothing drives it/), r.issues.map(i => i.text));
+        a.dir = "out"; b.dir = "out";
+        r = ErcChecker.run(editor);
+        ok("two outputs are flagged", has(r, "offsheet", /two outputs/), r.issues.map(i => i.text));
+        b.dir = "bidir";
+        ok("bidirectional ends and one output are fine", !has(ErcChecker.run(editor), "offsheet"));
+    }
+
     // ---- ground ----
     clear();
     let a = part("R", { value: "1k" }), b = part("R", { value: "1k" });

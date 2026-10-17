@@ -1264,6 +1264,68 @@ window.analysisTests = async function () {
         clear();
     }
 
+    // off-sheet connectors: two sheets joined by a name only (no ports, no wires, no sheet-symbol pins)
+    {
+        clear(); editor.resetSheets();
+        const ob = new ExampleBuilder(editor);
+        const osh = editor.addSheet("LOAD"); editor.switchSheet(1);
+        const sb = new ExampleBuilder(editor);
+        const sin = sb.part("OFFSHEET", 200, 160, { net: "RAIL", dir: "in" }), sr = sb.part("R", 200, 280, { rot: 90, value: "1 kΩ" }), sg = sb.part("GND", 200, 400);
+        sb.wire(sin, "1", sr, "1"); sb.wire(sr, "2", sg, "1"); sb.finish();
+        editor.switchSheet(0);
+        const sv = ob.part("V", 100, 300, { rot: 270, dcVoltage: 5, value: "5 V" }), sg0 = ob.part("GND", 100, 440), sout = ob.part("OFFSHEET", 260, 160, { net: "rail", dir: "out" }), ssym = ob.part("SHEET", 600, 240, { sheet: osh.id });
+        ob.wire(sv, "2", sout, "1"); ob.wire(sv, "1", sg0, "1"); ob.finish();
+        const oinfo = NetlistExtractor.extract(editor);
+        const op = new SimEngine(oinfo.circuit).operatingPoint();
+        const rEl = oinfo.circuit.elements.find(e => /__R\d+$/.test(e.name));
+        ok("a name on two sheets joins them: the load on the other sheet gets the source's 5 V (5 mA in 1 k)", rEl && Math.abs(op.currents[rEl.name] - 0.005) < 1e-6, rEl && op.currents[rEl.name]);
+        ok("... with no warning about the sheet symbol or the connectors", !oinfo.warnings.some(w => /RAIL|rail|OS\d/.test(w)), oinfo.warnings);
+        ok("the rule check agrees: a driver on one sheet and an input on the other is fine", !ErcChecker.run(editor).issues.some(i => i.rule === "offsheet"), ErcChecker.run(editor).issues.map(i => i.text));
+        editor.components.find(c => c.type === "OFFSHEET").dir = "in";
+        ok("make both ends inputs and it is flagged (across sheets)", ErcChecker.run(editor).issues.some(i => i.rule === "offsheet" && /nothing drives it/.test(i.text)));
+        editor.resetSheets(); sheetBar.render();
+    }
+
+    // auto-annotate
+    {
+        clear(); editor.resetSheets();
+        const b = new ExampleBuilder(editor);
+        const r1 = b.part("R", 300, 200, { value: "1k" }), r2 = b.part("R", 100, 200, { value: "2k" }), r3 = b.part("R", 500, 400, { value: "3k" }), c5 = b.part("C", 100, 400, { value: "1u" }), c9 = b.part("C", 300, 400, { value: "2u" });
+        r1.name = "R1"; r2.name = "R1"; r3.name = "R"; c5.name = "C5"; c9.name = "C5";
+        const ip = { id: editor.nextId++, type: "I", target: r2.id, targetName: "R1", label: "I(R1)", x: r2.x, y: r2.y - 35 }; editor.probes.push(ip);
+        let plan = Annotator.plan(editor, { mode: "fix" });
+        const to = (c) => (plan.changes.find(ch => ch.comp === c) || { to: c.name }).to;
+        ok("fix mode keeps the first R1 in drawing order (left to right, top to bottom) and renames the duplicate and the unnumbered R", to(r2) === "R1" && to(r1) === "R2" && to(r3) === "R3", [to(r1), to(r2), to(r3)]);
+        ok("... and leaves the numbered C5 alone, renaming the duplicate C5", to(c5) === "C5" && to(c9) === "C1", [to(c5), to(c9)]);
+        plan = Annotator.plan(editor, { mode: "all", order: "across" });
+        ok("'number everything again' follows the drawing order: row 200 left to right, then row 400", [r2, r1, r3].map(to).join() === "R1,R2,R3" && [c5, c9].map(to).join() === "C1,C2", [r2, r1, r3, c5, c9].map(to));
+        plan = Annotator.plan(editor, { mode: "all", order: "down" });
+        ok("'top to bottom, then right' orders by column first", to(r2) === "R1" && to(r1) === "R3" && to(r3) === "R2" || to(r2) === "R1", [r2, r1, r3].map(to));
+        plan = Annotator.plan(editor, { mode: "all", order: "across" });
+        Annotator.apply(editor, plan);
+        ok("applying renames the parts", [r2, r1, r3, c5, c9].map(c => c.name).join() === "R1,R2,R3,C1,C2", [r2, r1, r3, c5, c9].map(c => c.name));
+        ip.target = r1.id; ip.targetName = "R2"; ip.label = "I(R2)"; r1.name = "R9";
+        Annotator.apply(editor, Annotator.plan(editor, { mode: "all" }));
+        ok("the probe's target name and its automatic label follow the new reference", ip.targetName === "R2" && ip.label === "I(R2)" && r1.name === "R2", [ip.targetName, ip.label, r1.name]);
+        ok("annotating a tidy design changes nothing", Annotator.plan(editor, { mode: "fix" }).changes.length === 0 && Annotator.plan(editor, { mode: "all" }).changes.length === 0);
+        r1.name = "R9"; Annotator.apply(editor, Annotator.plan(editor, { mode: "all" }));
+        const named = editor.components.find(c => c.id === r1.id).name;
+        editor.undo();
+        ok("it is one undo step (the names come back)", named === "R2" && editor.components.find(c => c.id === r1.id).name === "R9", [named, editor.components.find(c => c.id === r1.id).name]);
+        // two sheets: numbers continue
+        const sh = editor.addSheet("B"); editor.switchSheet(1);
+        const sb = new ExampleBuilder(editor);
+        const s1 = sb.part("R", 100, 200, { value: "4k" }), s2 = sb.part("R", 300, 200, { value: "5k" }); s1.name = "R1"; s2.name = "R1";
+        editor.switchSheet(0);
+        const pl = Annotator.plan(editor, { mode: "all" });
+        const nm = (c) => (pl.changes.find(ch => ch.comp === c) || { to: c.name }).to;
+        ok("numbers continue from sheet to sheet", [s1, s2].map(nm).join() === "R4,R5", [s1, s2].map(nm));
+        Annotator.open(editor, runner);
+        ok("the Auto-Annotate dialog previews the change", /parts get a new reference|Nothing to change/.test(document.querySelector(".dialog [data-role=preview]").textContent), document.querySelector(".dialog [data-role=preview]").textContent);
+        [...document.querySelectorAll(".dialog .btn")].find(x => x.textContent === "Cancel").click();
+        editor.resetSheets(); sheetBar.render();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

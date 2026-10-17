@@ -33,7 +33,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 - KiCad (`.kicad_sch` / netlist) and other CAD import / export, SVG / PDF schematic export, `.include` from a folder, XLSX BOM with footprints and MPNs.
 
 ### 3. Capture
-- Buses, off-sheet connectors with direction, probes and instruments inside sub-sheets, cross-probing across sheets, auto-annotation.
+- Buses, off-sheet connectors with direction, probes and instruments inside sub-sheets, cross-probing across sheets, auto-annotation: all done.
 - Touch-friendly drawing is done; a screen-reader description of the sheet is not.
 
 ### 4. PCB layout (the "other half" of Proteus)

@@ -220,7 +220,7 @@ class LiveSim {
             return n === null ? null : `${pin.component.name}.${pin.terminal.name}   net ${nm(n)}\n${V(n)}`;
         }
         const comp = ed.findComponent(x, y);
-        if (comp && !["GND", "TEXT", "SCOPE", "LOGAN", "VM", "CLAMP", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET", "BUSTAP"].includes(comp.type)) {
+        if (comp && !["GND", "TEXT", "SCOPE", "LOGAN", "VM", "CLAMP", "NODEIC", "POWER", "NETLABEL", "PORT", "OFFSHEET", "SHEET", "BUSTAP"].includes(comp.type)) {
             const term = ed.getTerminals(comp), cur = run.current(comp.name);
             const lines = [comp.name];
             if (Number.isFinite(cur) && cur !== 0) lines.push(`I = ${Units.formatSI(cur, "A")}`);

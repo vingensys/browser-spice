@@ -606,7 +606,7 @@ class SchematicEditor {
 
     // the part to measure the current of: the part clicked, or the nearer end of the wire clicked
     findCurrentProbeTarget(x, y) {
-        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "CLAMP", "NODEIC", "POWER", "NETLABEL", "PORT"].includes(c.type);
+        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "CLAMP", "NODEIC", "POWER", "NETLABEL", "PORT", "OFFSHEET"].includes(c.type);
         const direct = this.findComponent(x, y);
         if (ok(direct)) return direct;
         const hit = this.findWireNearest(x, y, 12);
@@ -726,7 +726,7 @@ class SchematicEditor {
         if (type === "CLAMP" && component.target === undefined) {              // clamp onto the nearest real part
             let best = null, bd = 120;
             for (const k of this.components) {
-                if (["GND", "VM", "AM", "SCOPE", "CLAMP", "LOGAN", "NODEIC", "POWER", "NETLABEL", "PORT", "TEXT", "SHEET", "BUSTAP"].includes(k.type) || this.isOverlay(k)) continue;
+                if (["GND", "VM", "AM", "SCOPE", "CLAMP", "LOGAN", "NODEIC", "POWER", "NETLABEL", "PORT", "OFFSHEET", "TEXT", "SHEET", "BUSTAP"].includes(k.type) || this.isOverlay(k)) continue;
                 const d = Math.hypot(k.x - component.x, k.y - component.y);
                 if (d < bd) { bd = d; best = k; }
             }

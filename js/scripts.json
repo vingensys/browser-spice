@@ -53,6 +53,7 @@
  "js/ui/format.js",
  "js/ui/document.js",
  "js/ui/pause-dialog.js",
+ "js/ui/annotate.js",
  "js/ui/memory-window.js",
  "js/ui/mcu-window.js",
  "js/ui/device-list.js",

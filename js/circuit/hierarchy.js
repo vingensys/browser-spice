@@ -12,12 +12,12 @@ class Hierarchy {
         const power = new Map();           // POWER name -> node name used everywhere
         const sourced = new Set();         // POWER names that already have their supply source
         for (const c of editor.components) {
-            if (c.type !== "POWER") continue;
-            const name = String(c.net || "VCC").trim().toUpperCase();
+            if (c.type !== "POWER" && c.type !== "OFFSHEET") continue;
+            const name = String(c.net || (c.type === "POWER" ? "VCC" : "SIG")).trim().toUpperCase();
             if (name === "GND" || name === "0") continue;
             const id = nets.terminalNode(c, "1");
             if (id !== null && id !== undefined && !power.has(name)) power.set(name, id);
-            sourced.add(name);
+            if (c.type === "POWER") sourced.add(name);
         }
         const ctx = { editor, els, warnings, power, sourced, instances: 0 };
         for (const c of editor.components) if (c.type === "SHEET") Hierarchy.instance(ctx, editor, nets, c, c.name, 1, (id) => id, editor.params || []);
@@ -80,8 +80,8 @@ class Hierarchy {
         // power ports: shared by name
         const powerNode = new Map();
         for (const pc of child.components) {
-            if (pc.type !== "POWER") continue;
-            const name = String(pc.net || "VCC").trim().toUpperCase();
+            if (pc.type !== "POWER" && pc.type !== "OFFSHEET") continue;          // (off-sheet connectors are shared by name the same way)
+            const name = String(pc.net || (pc.type === "POWER" ? "VCC" : "SIG")).trim().toUpperCase();
             if (name === "GND" || name === "0") continue;
             const cid = cnets.terminalNode(pc, "1");
             if (cid === null || cid === undefined) continue;

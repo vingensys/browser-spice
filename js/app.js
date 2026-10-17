@@ -203,6 +203,7 @@
     C("design.sweep", "Parametric Sweep…", { run: () => StudyDialog.openSweep() });
     C("design.sensitivity", "Sensitivity…", { run: () => StudyDialog.openSensitivity() });
     C("design.montecarlo", "Monte Carlo…", { run: () => StudyDialog.openMonteCarlo() });
+    C("design.annotate", "Auto-Annotate…", { run: () => Annotator.open(editor, runner) });
     C("design.erc", "Electrical Rules Check", { icon: "erc", run: runErc });
 
     C("graph.tran", "Analogue Analysis (Transient)", { run: () => graph.show("tran") });
@@ -278,7 +279,7 @@
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
-        { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "design.sensitivity", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
+        { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "design.sensitivity", "-", "design.erc", "design.ercnext", "design.annotate", "-", "net.highlight", "net.clear"] },
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.probescope", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop", "-", "sim.conditions", "sim.memory", "sim.mcu"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },

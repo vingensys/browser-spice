@@ -2,7 +2,7 @@
 
 const Exporter = {
     // ---- bill of materials ------------------------------------------------------------------------------------------
-    NOT_PARTS: ["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET", "BUSTAP"],
+    NOT_PARTS: ["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "OFFSHEET", "SHEET", "BUSTAP"],
 
     typeName(comp) {
         if (!Exporter.names) {

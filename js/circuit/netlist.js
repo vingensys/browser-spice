@@ -174,11 +174,11 @@ class NetlistExtractor {
             }
         }
         for (const comp of editor.components) {
-            if (comp.type !== "NETLABEL" && comp.type !== "POWER" && comp.type !== "PORT" && comp.type !== "BUSTAP") continue;
+            if (comp.type !== "NETLABEL" && comp.type !== "POWER" && comp.type !== "PORT" && comp.type !== "BUSTAP" && comp.type !== "OFFSHEET") continue;
             if (comp.type === "PORT" && BusUtil.parse(comp.net)) continue;       // a vector port names a bus, it is not a net
             const key = terminalNodeKeys.get(`${comp.id}:1`);
             if (!key) continue;
-            const name = comp.type === "BUSTAP" ? tapName(comp) : String(comp.net || (comp.type === "POWER" ? "VCC" : comp.type === "PORT" ? "PORT" : "NET")).trim().toUpperCase();
+            const name = comp.type === "BUSTAP" ? tapName(comp) : String(comp.net || (comp.type === "POWER" ? "VCC" : comp.type === "PORT" ? "PORT" : comp.type === "OFFSHEET" ? "SIG" : "NET")).trim().toUpperCase();
             if (labelled.has(name)) ds.union(labelled.get(name), key); else labelled.set(name, key);
         }
 
