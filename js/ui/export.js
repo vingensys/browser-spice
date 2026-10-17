@@ -146,6 +146,44 @@ const Exporter = {
         return true;
     },
 
+    // ---- PDF -----------------------------------------------------------------------------------------------------------
+
+    // The open sheet as a vector PDF on one page (A4 or Letter, landscape or portrait by the drawing's shape), a recorded drawing like the SVG:
+    // lines and text stay sharp at any zoom and the text is selectable. Returns { bytes: Uint8Array, text: string } or null for an empty sheet.
+    renderPdf(editor, { paper = "a4", margin = 40, title = "" } = {}) {
+        if (!editor.components.length && !editor.wires.length) return null;
+        let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+        const grow = (a, b, c, d) => { x1 = Math.min(x1, a); y1 = Math.min(y1, b); x2 = Math.max(x2, c); y2 = Math.max(y2, d); };
+        for (const c of editor.components) { const b = editor.getComponentBox(c); grow(b.x1, b.y1, b.x2, b.y2); }
+        for (const w of editor.wires) for (const p of w.route || []) grow(p.x, p.y, p.x, p.y);
+        for (const p of editor.probes) grow(p.x - 40, p.y - 30, p.x + 60, p.y + 10);
+        x1 -= margin; y1 -= margin; x2 += margin; y2 += margin;
+        const W = Math.ceil(x2 - x1), H = Math.ceil(y2 - y1);
+        const sizes = { a4: [595.28, 841.89], letter: [612, 792], a3: [841.89, 1190.55] }, [pw0, ph0] = sizes[paper] || sizes.a4;
+        const landscape = W >= H, pageW = landscape ? ph0 : pw0, pageH = landscape ? pw0 : ph0, pm = 28;
+        const fit = Math.min((pageW - 2 * pm) / W, (pageH - 2 * pm) / H, 1.5);
+        const pdf = new PdfContext(W, H, editor.ctx, { pageW, pageH, scale: fit, ox: (pageW - W * fit) / 2, oy: (pageH - H * fit) / 2 });
+        const keep = { ctx: editor.ctx, width: editor.width, height: editor.height, panX: editor.panX, panY: editor.panY, zoom: editor.zoom, selection: editor.selection, selectedWire: editor.selectedWire, selectedProbe: editor.selectedProbe, showGrid: editor.showGrid, box: editor.box, hoverSnap: editor.hoverSnap, mouseInside: editor.mouseInside, ercMarks: editor.ercMarks, netHighlight: editor.netHighlight, exporting: editor.exporting };
+        try {
+            editor.ctx = pdf;
+            editor.width = W; editor.height = H; editor.zoom = 1; editor.panX = -x1; editor.panY = -y1;
+            Object.assign(editor, { selection: [], selectedWire: null, selectedProbe: null, showGrid: false, box: null, hoverSnap: null, mouseInside: false, ercMarks: [], netHighlight: null, exporting: true });
+            editor.draw();
+        } finally {
+            Object.assign(editor, keep);
+            editor.draw();
+        }
+        const text = pdf.toString(title || (editor.titleBlock && editor.titleBlock.title) || "Schematic");
+        return { text, bytes: Uint8Array.from(text, ch => ch.charCodeAt(0) & 255) };
+    },
+
+    savePdf(editor, paper = "a4") {
+        const pdf = Exporter.renderPdf(editor, { paper });
+        if (!pdf) { if (window.runner) window.runner.toast("There is nothing on the sheet to export.", "info"); return false; }
+        window.downloadFile("schematic.pdf", new Blob([pdf.bytes], { type: "application/pdf" }));
+        return true;
+    },
+
     // ---- KiCad netlist ------------------------------------------------------------------------------------------------
 
     // a KiCad "export" netlist (.net) of the open sheet: every part with its pin numbers / names and the nets they join
@@ -236,5 +274,149 @@ class SvgContext {
 
     toString() {
         return `<svg xmlns="http://www.w3.org/2000/svg" width="${this.width}" height="${this.height}" viewBox="0 0 ${this.width} ${this.height}">\n${this.out.join("\n")}\n</svg>\n`;
+    }
+}
+
+
+// A recording stand-in for a canvas 2D context that writes a PDF content stream (single page, base-14 Helvetica fonts, no compression).
+// The same slice of the canvas API as SvgContext; coordinates go through the canvas transform, then a uniform scale and a flip into PDF space.
+class PdfContext {
+    constructor(width, height, measureCtx, { pageW, pageH, scale = 1, ox = 0, oy = 0 } = {}) {
+        this.width = width; this.height = height; this.measureCtx = measureCtx;
+        Object.assign(this, { pageW, pageH, k: scale, ox, oy });
+        this.ops = []; this.path = []; this.stack = []; this.gstates = new Map(); this.usedFonts = new Set(["F1"]);
+        this.m = [1, 0, 0, 1, 0, 0];
+        this.fillStyle = "#000"; this.strokeStyle = "#000"; this.lineWidth = 1; this.font = "10px sans-serif";
+        this.textAlign = "start"; this.textBaseline = "alphabetic"; this.globalAlpha = 1; this.lineCap = "butt"; this.lineJoin = "miter"; this.dash = [];
+        this.colorCache = new Map();
+    }
+
+    n(v) { return (Math.round(v * 100) / 100).toString(); }
+    pt(x, y) { const [a, b, c, d, e, f] = this.m; return [this.ox + this.k * (a * x + c * y + e), this.pageH - (this.oy + this.k * (b * x + d * y + f))]; }
+    scaleOf() { return Math.sqrt(Math.abs(this.m[0] * this.m[3] - this.m[1] * this.m[2])) * this.k; }
+
+    // any CSS colour -> [r, g, b, a] in 0..1 (the browser normalises it to #rrggbb or rgba(...))
+    rgba(css) {
+        if (this.colorCache.has(css)) return this.colorCache.get(css);
+        let out = [0, 0, 0, 1];
+        try {
+            const keep = this.measureCtx.fillStyle;
+            this.measureCtx.fillStyle = "#000"; this.measureCtx.fillStyle = css;
+            const v = String(this.measureCtx.fillStyle);
+            this.measureCtx.fillStyle = keep;
+            let m;
+            if ((m = /^#([0-9a-f]{6})$/i.exec(v))) out = [parseInt(m[1].slice(0, 2), 16) / 255, parseInt(m[1].slice(2, 4), 16) / 255, parseInt(m[1].slice(4, 6), 16) / 255, 1];
+            else if ((m = /^rgba?\(([^)]+)\)$/.exec(v))) { const p = m[1].split(",").map(Number); out = [p[0] / 255, p[1] / 255, p[2] / 255, p.length > 3 ? p[3] : 1]; }
+        } catch (e) { /* keep black */ }
+        this.colorCache.set(css, out);
+        return out;
+    }
+
+    save() { this.stack.push({ m: this.m.slice(), fillStyle: this.fillStyle, strokeStyle: this.strokeStyle, lineWidth: this.lineWidth, font: this.font, textAlign: this.textAlign, textBaseline: this.textBaseline, globalAlpha: this.globalAlpha, dash: this.dash.slice(), lineCap: this.lineCap, lineJoin: this.lineJoin }); }
+    restore() { const s = this.stack.pop(); if (s) Object.assign(this, s); }
+    setTransform(a, b, c, d, e, f) { this.m = [a, b, c, d, e, f]; }
+    translate(x, y) { const [a, b, c, d, e, f] = this.m; this.m = [a, b, c, d, a * x + c * y + e, b * x + d * y + f]; }
+    scale(x, y) { const [a, b, c, d, e, f] = this.m; this.m = [a * x, b * x, c * y, d * y, e, f]; }
+    rotate(t) { const [a, b, c, d, e, f] = this.m, cs = Math.cos(t), sn = Math.sin(t); this.m = [a * cs + c * sn, b * cs + d * sn, -a * sn + c * cs, -b * sn + d * cs, e, f]; }
+    setLineDash(d) { this.dash = d || []; }
+
+    beginPath() { this.path = []; }
+    moveTo(x, y) { const [px, py] = this.pt(x, y); this.path.push(`${this.n(px)} ${this.n(py)} m`); }
+    lineTo(x, y) { const [px, py] = this.pt(x, y); this.path.push(`${this.n(px)} ${this.n(py)} ${this.path.length ? "l" : "m"}`); }
+    closePath() { this.path.push("h"); }
+    rect(x, y, w, h) { this.moveTo(x, y); this.lineTo(x + w, y); this.lineTo(x + w, y + h); this.lineTo(x, y + h); this.closePath(); }
+    arc(cx, cy, r, a0, a1, ccw = false) {
+        const full = Math.abs(a1 - a0) >= Math.PI * 2 - 1e-6;
+        const pts = Math.max(8, Math.ceil(Math.abs(a1 - a0) / (Math.PI / 12)));
+        for (let i = 0; i <= pts; i++) {
+            const a = full ? a0 + ((ccw ? -1 : 1) * i * Math.PI * 2) / pts : a0 + ((a1 - a0) * i) / pts;
+            const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a);
+            if (i === 0 && !this.path.length) this.moveTo(x, y); else this.lineTo(x, y);
+        }
+        if (full) this.closePath();
+    }
+
+    // transparency needs an ExtGState: one per alpha value
+    alpha(a) {
+        const key = this.n(a);
+        if (!this.gstates.has(key)) this.gstates.set(key, `GS${this.gstates.size + 1}`);
+        return `/${this.gstates.get(key)} gs`;
+    }
+
+    paint(fill) {
+        if (!this.path.length) return;
+        const css = fill ? this.fillStyle : this.strokeStyle, [r, g, b, a0] = this.rgba(css), a = a0 * this.globalAlpha;
+        const ops = ["q", this.alpha(a)];
+        if (fill) ops.push(`${this.n(r)} ${this.n(g)} ${this.n(b)} rg`);
+        else {
+            ops.push(`${this.n(r)} ${this.n(g)} ${this.n(b)} RG`, `${this.n(Math.max(this.lineWidth * this.scaleOf(), 0.05))} w`, `${{ butt: 0, round: 1, square: 2 }[this.lineCap] || 0} J`, `${{ miter: 0, round: 1, bevel: 2 }[this.lineJoin] || 0} j`);
+            ops.push(this.dash.length ? `[${this.dash.map(d => this.n(Math.max(d * this.scaleOf(), 0.1))).join(" ")}] 0 d` : "[] 0 d");
+        }
+        ops.push(...this.path, fill ? "f*" : "S", "Q");
+        this.ops.push(ops.join("\n"));
+    }
+    stroke() { this.paint(false); }
+    fill() { this.paint(true); }
+    fillRect(x, y, w, h) { const keep = this.path; this.beginPath(); this.rect(x, y, w, h); this.fill(); this.path = keep; }
+    strokeRect(x, y, w, h) { const keep = this.path; this.beginPath(); this.rect(x, y, w, h); this.stroke(); this.path = keep; }
+    clearRect() { }
+    clip() { }
+
+    measureText(t) { this.measureCtx.font = this.font; return this.measureCtx.measureText(t); }
+
+    // text in the PDF's own Helvetica (WinAnsi); the ohm sign comes from Symbol, anything else outside Latin-1 becomes "?"
+    fillText(text, x, y) {
+        text = String(text);
+        if (!text) return;
+        const size = (/(\d+(?:\.\d+)?)px/.exec(this.font) || [0, 10])[1] * this.scaleOf();
+        const bold = /bold/.test(this.font), italic = /italic/.test(this.font);
+        const font = bold ? (italic ? "F4" : "F2") : (italic ? "F3" : "F1");
+        const w = this.measureText(text).width * this.scaleOf();
+        const shiftX = { left: 0, start: 0, right: -w, end: -w, center: -w / 2 }[this.textAlign] || 0;
+        const base = { top: 0.8, hanging: 0.75, middle: 0.35, alphabetic: 0, ideographic: -0.1, bottom: -0.2 }[this.textBaseline] || 0;
+        const [px, py] = this.pt(x, y);
+        const ang = -Math.atan2(this.m[1], this.m[0]), cs = Math.cos(ang), sn = Math.sin(ang);
+        // along the baseline by shiftX, then down (in PDF: -y of the text's own frame) by base * size
+        const tx = px + cs * shiftX + sn * base * size;
+        const ty = py + sn * shiftX - cs * base * size;
+        const [r, g, b, a0] = this.rgba(this.fillStyle), a = a0 * this.globalAlpha;
+        const runs = [];
+        for (const ch of text) {
+            const sym = ch === "Ω" || ch === "\u2126";
+            const code = ch.charCodeAt(0);
+            const out = sym ? "W" : (code < 256 ? ch : ch === "−" ? "-" : "?");
+            const f = sym ? "F5" : font;
+            if (runs.length && runs[runs.length - 1].f === f) runs[runs.length - 1].s += out; else runs.push({ f, s: out });
+        }
+        const esc = (s) => s.replace(/[\\()]/g, "\\$&");
+        let ops = `q\n${this.alpha(a)}\n${this.n(r)} ${this.n(g)} ${this.n(b)} rg\nBT\n${this.n(cs)} ${this.n(sn)} ${this.n(-sn)} ${this.n(cs)} ${this.n(tx)} ${this.n(ty)} Tm`;
+        for (const run of runs) { this.usedFonts.add(run.f); ops += `\n/${run.f} ${this.n(size)} Tf\n(${esc(run.s)}) Tj`; }
+        this.ops.push(ops + "\nET\nQ");
+    }
+
+    // the whole file as a Latin-1 string (every character is one byte, so offsets are string offsets)
+    toString(title = "Schematic") {
+        const content = this.ops.join("\n") + "\n";
+        const objs = [];
+        const add = (body) => { objs.push(body); return objs.length; };
+        const fonts = { F1: "Helvetica", F2: "Helvetica-Bold", F3: "Helvetica-Oblique", F4: "Helvetica-BoldOblique", F5: "Symbol" };
+        // 1 catalog, 2 pages, 3 page, 4 contents, 5.. fonts, then graphics states
+        const fontIds = {}, gsIds = {};
+        add("<< /Type /Catalog /Pages 2 0 R >>");
+        add("<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+        add("PAGE");
+        add(`<< /Length ${content.length} >>\nstream\n${content}endstream`);
+        for (const [k, name] of Object.entries(fonts)) fontIds[k] = add(`<< /Type /Font /Subtype /Type1 /BaseFont /${name}${k === "F5" ? "" : " /Encoding /WinAnsiEncoding"} >>`);
+        for (const [alpha, name] of this.gstates) gsIds[name] = add(`<< /Type /ExtGState /ca ${alpha} /CA ${alpha} >>`);
+        const res = `<< /Font << ${Object.entries(fontIds).map(([k, id]) => `/${k} ${id} 0 R`).join(" ")} >> /ExtGState << ${Object.entries(gsIds).map(([k, id]) => `/${k} ${id} 0 R`).join(" ")} >> >>`;
+        objs[2] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${this.n(this.pageW)} ${this.n(this.pageH)}] /Contents 4 0 R /Resources ${res} >>`;
+        const info = add(`<< /Title (${String(title).replace(/[^\x20-\x7e]/g, "?").replace(/[\\()]/g, "\\$&")}) /Producer (Browser SPICE) /CreationDate (D:${new Date().toISOString().replace(/[-:T]/g, "").slice(0, 14)}Z) >>`);
+        let out = "%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n";
+        const offsets = [];
+        objs.forEach((body, i) => { offsets.push(out.length); out += `${i + 1} 0 obj\n${body}\nendobj\n`; });
+        const xref = out.length;
+        out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map(o => `${String(o).padStart(10, "0")} 00000 n \n`).join("")}`;
+        out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R /Info ${info} 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+        return out;
     }
 }

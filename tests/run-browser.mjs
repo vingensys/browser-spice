@@ -3,7 +3,9 @@
 // Starts scripts/serve.mjs on a free port, loads the page, evaluates each suite and prints a summary.
 // Exit code 1 when any check fails or a suite cannot run.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { existsSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -63,6 +65,21 @@ try {
         total += result.total; failed += result.failed;
         console.log(`${result.failed ? "FAIL" : "ok  "} ${name.padEnd(12)} ${result.total - result.failed}/${result.total}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
         for (const f of result.failures || []) console.log(`       - ${f.name !== undefined ? f.name : f.id}${f.extra !== undefined ? ` ${JSON.stringify(f.extra).slice(0, 300)}` : ""}${f.error ? ` ${f.error}` : ""}${f.name === undefined && f.tran !== undefined ? ` op ${f.op}% tran ${f.tran}%` : ""}`);
+    }
+    // the PDF the examples suite made, read by poppler's own tools (when they are installed): a real PDF reader has to accept it
+    {
+        const pdf = await page.evaluate("window.__pdfSample || ''").catch(() => "");
+        const have = (cmd) => spawnSync(cmd, ["-v"], { encoding: "utf8" }).error === undefined;
+        if (pdf && have("pdfinfo") && have("pdftotext")) {
+            total += 1;
+            const file = path.join(tmpdir(), `browser-spice-${process.pid}.pdf`);
+            writeFileSync(file, Buffer.from(pdf, "latin1"));
+            const info = spawnSync("pdfinfo", [file], { encoding: "utf8" }), text = spawnSync("pdftotext", ["-layout", file, "-"], { encoding: "utf8" });
+            const ok = info.status === 0 && /Pages:\s+1/.test(info.stdout) && text.status === 0 && /PIC16F84A/.test(text.stdout) && /330/.test(text.stdout);
+            rmSync(file, { force: true });
+            console.log(`${ok ? "ok  " : "FAIL"} pdf          ${ok ? 1 : 0}/1  (pdfinfo and pdftotext read it${ok ? "" : ": " + (info.stderr + text.stderr).slice(0, 160)})`);
+            if (!ok) failed += 1;
+        }
     }
     // offline: a visited copy of the app keeps working without a network (service worker)
     {

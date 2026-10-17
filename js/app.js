@@ -117,6 +117,7 @@
     C("file.image", "Export Schematic Image (PNG)…", { run: () => Exporter.savePng(editor) });
     C("file.share", "Share as Link…", { run: () => Share.open(editor, runner) });
     C("file.svg", "Export Schematic Image (SVG)…", { run: () => Exporter.saveSvg(editor) });
+    C("file.pdf", "Export Schematic (PDF)…", { run: () => Exporter.savePdf(editor) });
     C("file.kicad", "Export KiCad Netlist…", { run: () => { const text = Exporter.kicadNetlist(editor); download("design.net", text, "text/plain"); } });
     C("file.report", "Export Report (HTML)…", { run: async () => { const html = await Report.build(editor, runner, plotter, doc); download("report.html", html, "text/html"); } });
     C("palette.open", "Command Palette…", { keys: "Ctrl+K", global: true, run: () => Palette.open() });
@@ -270,7 +271,7 @@
     }));
 
     new Menubar($("menubar"), [
-        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
+        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.pdf", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",

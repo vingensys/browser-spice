@@ -65,6 +65,31 @@ window.exampleTests = function () {
         for (let i = 1; i < e.length; i++) near(e[i] - e[i - 1], 16.384e-3, 0.1e-3, "interval");
     });
 
+    check("PDF export: a valid single-page PDF with the schematic as vectors and its text", () => {
+        loadExampleById(editor, "pic-chaser");
+        const pdf = Exporter.renderPdf(editor, { title: "Chaser" });
+        if (!pdf || !/^%PDF-1\.4/.test(pdf.text) || !/%%EOF\s*$/.test(pdf.text)) throw new Error("not a PDF");
+        // the cross-reference table must point at the objects
+        const xs = /xref\n0 (\d+)\n([\s\S]*?)trailer/.exec(pdf.text), n = Number(xs[1]), offs = [...xs[2].matchAll(/(\d{10}) 00000 n /g)].map(m => Number(m[1]));
+        if (offs.length !== n - 1) throw new Error("xref entries " + offs.length + " vs " + (n - 1));
+        offs.forEach((o, i) => { if (!pdf.text.startsWith(`${i + 1} 0 obj`, o)) throw new Error(`object ${i + 1} is not at offset ${o}`); });
+        if (!/startxref\n\d+\n%%EOF/.test(pdf.text)) throw new Error("startxref");
+        if ((pdf.text.match(/\nS\nQ/g) || []).length < 50) throw new Error("few strokes");
+        for (const word of ["PIC16F84A", "330", "RB0"]) if (!pdf.text.includes(word)) throw new Error(`text "${word}" is missing`);
+        window.__pdfSample = pdf.text;
+        if (pdf.bytes.length !== pdf.text.length) throw new Error("not one byte per character");
+    });
+
+    check("PDF export: empty sheet gives nothing; paper and orientation follow the drawing", () => {
+        loadExampleById(editor, "pic-chaser");
+        const a4 = Exporter.renderPdf(editor, { paper: "a4" }), letter = Exporter.renderPdf(editor, { paper: "letter" });
+        const box = (p) => /MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/.exec(p.text).slice(1).map(Number);
+        const [aw, ah] = box(a4), [lw, lh] = box(letter);
+        if (!(aw > ah && Math.abs(aw - 841.89) < 0.1 && Math.abs(lw - 792) < 0.1 && Math.abs(lh - 612) < 0.1)) throw new Error([aw, ah, lw, lh].join());
+        editor.components = []; editor.wires = []; editor.probes = [];
+        if (Exporter.renderPdf(editor) !== null) throw new Error("empty sheet");
+    });
+
     check("rc-ladder: series capacitors settle to a charge-sharing divider", () => {
         const { info, sim } = load("rc-ladder");
         const r = sim.transient({ tStop: 0.2, tStep: 2e-4, uic: true });
