@@ -554,6 +554,7 @@ class TransientRun {
         this.breaks = [...new Set(c.elements.flatMap(e => e.breakpoints(tStop)))]
             .filter(t => t > 0 && t <= tStop).sort((a, b) => a - b);
         this.evEls = c.elements.filter(e => e.hasEvents);
+        this.delayEls = this.evEls.filter(e => e.tpd > 0);     // outputs that change some time after the clock edge
         this.bi = 0;
         this.tEps = tStop * 1e-12;
         this.hMin = tStep * 1e-8;
@@ -604,10 +605,13 @@ class TransientRun {
         let h = Math.min(this.hNext, this.tStop - this.t);
         while (this.bi < this.breaks.length && this.breaks[this.bi] <= this.t + tEps) this.bi++;
         let hitsBreak = false;
-        if (this.bi < this.breaks.length && this.t + h >= this.breaks[this.bi] - tEps) {
-            h = this.breaks[this.bi] - this.t;
+        let tb = this.bi < this.breaks.length ? this.breaks[this.bi] : Infinity;
+        let delayDue = false;
+        for (const e of this.delayEls) { const te = e.nextEvent(); if (te > this.t + tEps && te < tb) { tb = te; delayDue = true; } }   // a delayed output is due
+        if (tb < Infinity && this.t + h >= tb - tEps) {
+            h = tb - this.t;
             hitsBreak = true;
-        }
+        } else delayDue = false;
 
         let r = null, shrink = 0, lteTries = 0, ratio = 0, firstRatio = 0;
         for (;;) {
@@ -678,6 +682,7 @@ class TransientRun {
         if (this.afterBreak) this.xPrev = null;
         // grow back toward the nominal step, faster when the waveform is smooth
         this.hNext = Math.min(tStep, h * (ratio < 0.3 ? 2 : 1.4));
+        if (delayDue) this.hNext = Math.min(tStep, Math.max(tStep * 1e-3, hMin * 10));   // the delayed output switches now: start the next step small so the edge is sharp
         return h;
     }
 }

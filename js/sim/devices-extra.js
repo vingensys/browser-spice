@@ -399,9 +399,13 @@ class CCCS extends NonlinearElement {
 // anything would change, so the engine lands exactly on the clock edge before the new outputs appear.
 // Inputs left open read as the chip's pull direction (see LogicIC.pullsUp). nodes follow LogicIC.pins(spec).
 class DigitalIC extends Element {
-    constructor(name, nodes, spec, { vcc = 5, ro = 50 } = {}) {
+    // tpd: propagation delay (s). The chip's state changes at the clock edge as before, but its outputs follow tpd later;
+    // a change that is undone before then never reaches the pins (inertial delay, so glitches shorter than tpd vanish).
+    constructor(name, nodes, spec, { vcc = 5, ro = 50, tpd = 0 } = {}) {
         super(name, nodes);
         this.spec = spec;
+        this.tpd = tpd > 0 ? tpd : 0;
+        this.pending = null;                // { t, out }: the outputs that appear at time t
         this.pins = LogicIC.pins(spec);
         this.vcc = vcc;
         this.ro = ro;
@@ -459,10 +463,15 @@ class DigitalIC extends Element {
 
     evaluate(ctx) { return this.spec.step(this.st, this.levels(ctx), this.prev); }
 
+    // the outputs the chip is heading for: the pending ones while a delay is running, else the ones on the pins
+    get target() { return this.pending ? this.pending.out : this.out; }
+
     wouldFlip(ctx) {
         const r = this.evaluate(ctx);
-        return JSON.stringify(r.out) !== JSON.stringify(this.out) || JSON.stringify(r.st) !== JSON.stringify(this.st);
+        return JSON.stringify(r.out) !== JSON.stringify(this.target) || JSON.stringify(r.st) !== JSON.stringify(this.st);
     }
+
+    nextEvent() { return this.pending ? this.pending.t : Infinity; }
 
     initState(ctx) {
         this.st = this.spec.init();
@@ -470,11 +479,16 @@ class DigitalIC extends Element {
         this.prev = v;                                   // no edges at power-up
         const r = this.spec.step(this.st, v, v);
         this.st = r.st; this.out = r.out;
+        this.pending = null;
     }
 
     accept(ctx) {
+        if (this.pending && ctx.time >= this.pending.t - 1e-15) { this.out = this.pending.out; this.pending = null; }
         const r = this.evaluate(ctx);
-        this.st = r.st; this.out = r.out;
+        this.st = r.st;
+        if (!this.tpd) this.out = r.out;
+        else if (JSON.stringify(r.out) === JSON.stringify(this.out)) this.pending = null;          // changed back in time: no glitch
+        else if (!this.pending || JSON.stringify(r.out) !== JSON.stringify(this.pending.out)) this.pending = { t: ctx.time + this.tpd, out: r.out };
         this.prev = this.levels(ctx);
     }
 }
@@ -486,11 +500,15 @@ class DigitalIC extends Element {
 // nodes: [D (or J), K, CLK, Q, QN, SET, RST]; kind "D", "T" or "JK". Floating inputs read low.
 // The state changes on a rising clock edge; the engine bisects to the exact crossing.
 class FlipFlop extends Element {
-    constructor(name, nodes, kind = "D", { vcc = 5, ro = 50 } = {}) {
+    // tpd: clock-to-output (and set / reset-to-output) delay in seconds; the stored state still changes at the edge
+    constructor(name, nodes, kind = "D", { vcc = 5, ro = 50, tpd = 0 } = {}) {
         super(name, nodes);
         this.kind = kind;
         this.vcc = vcc;
         this.ro = ro;
+        this.tpd = tpd > 0 ? tpd : 0;
+        this.qv = 0;                        // what the Q pin shows (this.q is the stored state)
+        this.pending = null;                // { t, q }
         this.q = 0;
         this.clkHigh = false;
         this.nonlinear = false;
@@ -503,7 +521,7 @@ class FlipFlop extends Element {
         const [dN, kN, clk, q, qn, set, rst] = this.n;
         const s = ctx.sys;
         const G = 1 / this.ro;
-        for (const [node, target] of [[q, this.q], [qn, 1 - this.q]]) {
+        for (const [node, target] of [[q, this.qv], [qn, 1 - this.qv]]) {
             s.add(node, node, G);
             s.rhs(node, G * target * this.vcc);
         }
@@ -535,11 +553,19 @@ class FlipFlop extends Element {
         this.q = 0;
         this.clkHigh = this.high(ctx, this.n[2]);
         this.q = this.high(ctx, this.n[5]) ? 1 : 0;
+        this.qv = this.q;
+        this.pending = null;
     }
 
+    nextEvent() { return this.pending ? this.pending.t : Infinity; }
+
     accept(ctx) {
+        if (this.pending && ctx.time >= this.pending.t - 1e-15) { this.qv = this.pending.q; this.pending = null; }
         this.q = this.nextState(ctx);
         this.clkHigh = this.high(ctx, this.n[2]);
+        if (!this.tpd) this.qv = this.q;
+        else if (this.q === this.qv) this.pending = null;
+        else if (!this.pending || this.pending.q !== this.q) this.pending = { t: ctx.time + this.tpd, q: this.q };
     }
 }
 

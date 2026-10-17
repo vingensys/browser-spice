@@ -26,7 +26,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 
 ### 1. Simulation depth
 - MOSFET levels 2 / 3 and BSIM. (`.sens` is done for resistors and source levels, checked against ngspice; sensitivity to device model parameters is not.) (`.include` / `.lib`, `.nodeset` and `.options` parsing are done.)
-- Digital: memories, microcontroller model, mixed-signal timing, propagation-delay options; export of logic ICs / SCR to SPICE.
+- Digital: memories, microcontroller model, mixed-signal timing (propagation delay on flip-flops and logic ICs is done; per-pin and rise / fall delays are not); export of logic ICs / SCR to SPICE.
 - Faster: compile the circuit to typed arrays, WebAssembly sparse LU for very large circuits.
 
 ### 2. Interchange

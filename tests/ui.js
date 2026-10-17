@@ -664,6 +664,19 @@ window.uiTests = async function () {
     ok("a file from a newer app is refused", /newer Browser SPICE/.test(msg), msg);
     ok("the refused file left the design alone", editor.components.length === 1, editor.components.length);
 
+    // ---- propagation delay property reaches the engine ----
+    reset();
+    {
+        const ff = editor.addComponent("DFF", 200, 200, 0) || null;
+        const dg = editor.addComponent("7474", 400, 200, 0) || null;
+        editor.addComponent("GND", 600, 300, 0);
+        if (ff) ff.tpd = "25n";
+        if (dg) dg.tpd = "40n";
+        const els = NetlistExtractor.extract(editor).circuit.elements;
+        const f = els.find(e => e instanceof FlipFlop), d = els.find(e => e instanceof DigitalIC);
+        ok("a flip-flop's tpd property becomes its delay", f && Math.abs(f.tpd - 25e-9) < 1e-12, f && f.tpd);
+        ok("a logic IC's tpd property becomes its delay", d && Math.abs(d.tpd - 40e-9) < 1e-12, d && d.tpd);
+    }
     // ---- .include / .lib on import: the library comes from the other selected files ----
     reset();
     {

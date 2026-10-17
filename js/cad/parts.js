@@ -484,11 +484,12 @@ for (const [type, kind, label] of [["DFF", "D", "D"], ["TFF", "T", "T"], ["JKFF"
             r.drawLabel(c);
         },
         rows: (p, c) => p.text("Supply / logic high (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5") +
+            p.text("Propagation delay (s)", "tpd", c.tpd === undefined ? "" : c.tpd, "0 = ideal (not in SPICE export)") +
             `<div class="prop-note">Rising-edge triggered. S (set) and R (reset) are active high and read low when unconnected.</div>`,
         netlist(c, k) {
             const pins = jk ? ["J", "K", "CLK"] : [label, null, "CLK"];
             const nodes = [k.pin(pins[0]), pins[1] ? k.pin(pins[1]) : "0", k.pin("CLK"), k.pin("Q"), k.pin("QN"), k.pin("S"), k.pin("R")];
-            return [{ ...k.base, kind: "FF", ff: kind, nodes, params: { vcc: k.num(c.vcc, 5) } }];
+            return [{ ...k.base, kind: "FF", ff: kind, nodes, params: { vcc: k.num(c.vcc, 5), tpd: k.num(c.tpd, 0) } }];
         },
         catalog: [{ name: `${kind}-FF`, category: "Digital ICs", desc: { D: "D flip-flop (rising edge, async set / reset)", T: "T (toggle) flip-flop (rising edge, async set / reset)", JK: "JK flip-flop (rising edge, async set / reset)" }[kind], props: { vcc: "5", value: `${kind}-FF` } }]
     });
@@ -848,6 +849,7 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
             r.drawLabel(c);
         },
         rows: (p, c) => p.text("Supply / logic high (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5") +
+            p.text("Propagation delay (s)", "tpd", c.tpd === undefined ? "" : c.tpd, "0 = ideal (not in SPICE export)") +
             (hasVectors ? p.check("Vector pins as buses (" + LogicIC.vectors(spec).map(v => v.name).join(", ") + ")", "busPins", !!c.busPins) : "") +
             `<div class="prop-note">${PropertiesPanel.esc(spec.desc)}. No power pins are needed. Inputs left open read high when active-low (barred), and enables read active, so an unwired chip works; unused outputs may stay open.${hasVectors ? " With vector pins as buses, attach a bus wire to the thick pin: the first pin of the run meets the first member of the bus, and so on. Switching this on or off removes the wires on the pins that change." : ""}</div>`,
         netlist(c, k) {
@@ -856,7 +858,7 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
                 const v = vecs.find(x => x.pins.includes(n));
                 return v ? k.bus(v.name, v.pins.indexOf(n)) : k.pin(n);
             });
-            return [{ ...k.base, kind: "DIGITAL", ic: key, nodes, params: { vcc: k.num(c.vcc, 5) } }];
+            return [{ ...k.base, kind: "DIGITAL", ic: key, nodes, params: { vcc: k.num(c.vcc, 5), tpd: k.num(c.tpd, 0) } }];
         },
         catalog: [{ name: key, category: spec.category, desc: `${spec.desc}`, props: { vcc: "5", value: key } }]
     });

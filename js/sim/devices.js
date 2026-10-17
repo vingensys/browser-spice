@@ -214,6 +214,8 @@ class Element {
     accept(ctx) { }
     current(x) { return 0; }
     breakpoints(tStop) { return []; }
+    // the time of the next change the element has scheduled for itself (a delayed output), for the transient to land on
+    nextEvent() { return Infinity; }
     // current-noise sources at the present operating point: [{ p, n, psd, label }], psd in A^2/Hz (null: noiseless)
     noiseSources(kT) { return []; }
 }
