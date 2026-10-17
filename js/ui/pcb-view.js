@@ -30,6 +30,7 @@ class PcbView {
             <div class="pcb-bar">
                 <b>PCB</b>
                 <button class="tb-btn txt" data-a="sync" title="Bring parts and nets in from the schematic (keeps placement and routing of parts that stay)">Update from schematic</button>
+                <button class="tb-btn txt" data-a="backannotate" title="Send the board's part numbering and footprints back to the schematic">Back-annotate…</button>
                 <button class="tb-btn txt" data-a="place" title="Arrange every part in rows, grouping the ones that share nets">Auto-place</button>
                 <button class="tb-btn txt" data-a="route" title="Route every unrouted connection (two layers, vias)">Auto-route</button>
                 <button class="tb-btn txt" data-a="unroute" title="Remove all tracks and vias">Clear routing</button>
@@ -65,6 +66,20 @@ class PcbView {
                 <div class="pcb-side"><div id="pcbIssues" class="pcb-issues"></div></div>
             </div>
             <div class="pcb-status" id="pcbStatus"></div>
+            <div id="pcbBack" class="pcb-fped hidden">
+                <div class="pcb-fped-box" style="width:460px">
+                    <div class="pcb-fped-head"><b>Back-annotate to the schematic</b><span class="grow"></span><button class="tb-btn" data-ba="close" title="Close">✕</button></div>
+                    <div style="padding:10px;display:flex;flex-direction:column;gap:6px">
+                        <label><input type="checkbox" id="baRenumber" checked> Number the parts by their place on the board</label>
+                        <div style="margin-left:22px"><label><input type="radio" name="baOrder" value="across" checked> left to right, then down</label>
+                            <label style="margin-left:12px"><input type="radio" name="baOrder" value="down"> top to bottom, then right</label></div>
+                        <label><input type="checkbox" id="baFootprints" checked> Write each part's footprint to the schematic</label>
+                        <div class="pcb-note" id="baPreview" style="min-height:3em"></div>
+                        <div class="pcb-note">The schematic's references are renamed to match (current probes follow their part). Parts inside sub-sheets are left alone. To take it back, undo in both places (Undo here for the board, Edit > Undo for the schematic).</div>
+                    </div>
+                    <div class="pcb-fped-foot"><button class="tb-btn txt" data-ba="apply">Apply</button><button class="tb-btn txt" data-ba="close">Cancel</button></div>
+                </div>
+            </div>
             <div id="pcbFpEd" class="pcb-fped hidden">
                 <div class="pcb-fped-box">
                     <div class="pcb-fped-head"><b>User footprints</b><span class="grow"></span><button class="tb-btn" data-fp="close" title="Close">✕</button></div>
@@ -217,9 +232,44 @@ class PcbView {
             case "undo": this.undo(); break;
             case "pourboard": this.addZone([[0.5, 0.5], [p.outline.w - 0.5, 0.5], [p.outline.w - 0.5, p.outline.h - 0.5], [0.5, p.outline.h - 0.5]]); break;
             case "footprints": this.openFootprints(); break;
+            case "backannotate": this.openBackAnnotate(); break;
             case "drc": this.runDrc(); break;
             case "export": this.exportGerber(); break;
         }
+    }
+
+    // ---------------------------------------------------------------- back-annotation
+    baPlan() {
+        const q = (id) => this.root.querySelector("#" + id);
+        return BackAnnotate.plan(this.editor, this.pcb, { renumber: q("baRenumber").checked, footprints: q("baFootprints").checked, order: this.root.querySelector('input[name="baOrder"]:checked').value });
+    }
+
+    baRender() {
+        const plan = this.baPlan(), el = this.root.querySelector("#baPreview");
+        const bits = [];
+        if (plan.renames.length) bits.push(`${plan.renames.length} of ${plan.parts} parts are renumbered: ${plan.renames.slice(0, 10).map(r => `${r.from} → ${r.to}`).join(", ")}${plan.renames.length > 10 ? ", …" : ""}`);
+        if (plan.footprints.length) bits.push(`${plan.footprints.length} footprint field${plan.footprints.length === 1 ? "" : "s"} written`);
+        if (plan.skipped.length) bits.push(`${plan.skipped.length} part${plan.skipped.length === 1 ? "" : "s"} skipped (${plan.skipped.slice(0, 3).map(s => s.part.ref).join(", ")}${plan.skipped.length > 3 ? ", …" : ""})`);
+        el.textContent = bits.length ? bits.join(". ") + "." : "Nothing to change.";
+    }
+
+    openBackAnnotate() {
+        const ed = this.root.querySelector("#pcbBack");
+        ed.classList.remove("hidden");
+        if (!this.baBound) {
+            this.baBound = true;
+            ed.querySelectorAll("[data-ba]").forEach(b => b.onclick = () => {
+                if (b.dataset.ba === "close") { ed.classList.add("hidden"); this.cv.focus(); return; }
+                const plan = this.baPlan();
+                this.snapshot();
+                const r = BackAnnotate.apply(this.editor, plan);
+                ed.classList.add("hidden"); this.cv.focus();
+                this.say(r.renamed || r.footprints ? `Back-annotated: ${r.renamed} part${r.renamed === 1 ? "" : "s"} renumbered, ${r.footprints} footprint${r.footprints === 1 ? "" : "s"} written to the schematic.` : "Nothing to change.");
+                this.changed();
+            });
+            ed.addEventListener("change", () => this.baRender());
+        }
+        this.baRender();
     }
 
     addZone(pts) {

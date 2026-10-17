@@ -1323,6 +1323,26 @@ window.analysisTests = async function () {
             pcbView.root.querySelector('[data-fp="close"]').click();
             rp2.pkg = "user:MY_R"; Pcb.setPackage(rp2, "user:MY_R", editor.pcb.footprints); delete editor.pcb.footprints.R_0603;
         }
+        {
+            const rs = editor.pcb.parts.filter(q => /^R\d+$/.test(q.ref)).sort((x, y) => x.ref.localeCompare(y.ref, undefined, { numeric: true }));
+            const before = rs.map(q => q.ref);
+            rs.forEach((q, i) => { q.x = 50 - i * 8; q.y = 10; q.placed = true; });          // the last one is now leftmost
+            pcbView.act("backannotate");
+            const dlg = pcbView.root.querySelector("#pcbBack");
+            ok("Back-annotate opens a dialog that previews the renames", !dlg.classList.contains("hidden") && /renumbered/.test(pcbView.root.querySelector("#baPreview").textContent), pcbView.root.querySelector("#baPreview").textContent);
+            const planBA = BackAnnotate.plan(editor, editor.pcb, { renumber: true, footprints: false });
+            ok("the plan numbers the resistors left to right", rs.length >= 2 && planBA.renames.length >= 2 && rs.every((q, i) => { const r = planBA.renames.find(x => x.part === q); return r ? r.to === "R" + (rs.length - i) : q.ref === "R" + (rs.length - i); }), planBA.renames.map(r => r.from + ">" + r.to));
+            pcbView.root.querySelector('[data-ba="apply"]').click();
+            const names = editor.components.filter(c => /^R\d+$/.test(c.name)).map(c => c.name);
+            ok("the schematic's references follow the board", rs.every((q, i) => q.ref === "R" + (rs.length - i)) && new Set(names).size === names.length && rs.every(q => editor.components.some(c => c.name === q.ref)), [rs.map(q => q.ref), names]);
+            ok("footprints are written to the parts' Footprint field", editor.components.filter(c => /^R\d+$/.test(c.name)).every(c => c.footprint && c.footprint === editor.pcb.parts.find(q => q.ref === c.name).fp.name));
+            ok("the dialog closes", dlg.classList.contains("hidden"));
+            const again = BackAnnotate.plan(editor, editor.pcb, { renumber: true, footprints: true });
+            ok("a second run has nothing left to do", again.renames.length === 0 && again.footprints.length === 0, [again.renames.length, again.footprints.length]);
+            editor.undo();
+            ok("one undo of the schematic puts the old references back", editor.components.filter(c => /^R\d+$/.test(c.name)).every(c => before.includes(c.name)));
+            editor.redo();
+        }
         pcbView.root.querySelector("#pcbZoneNet").value = "0";
         pcbView.layer = "B"; pcbView.act("pourboard");
         ok("Pour board adds a pour on the active layer and net", editor.pcb.zones.length === 1 && editor.pcb.zones[0].layer === "B" && editor.pcb.zones[0].net === "0", editor.pcb.zones);
