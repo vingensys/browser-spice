@@ -61,6 +61,17 @@ class LiveSim {
         this.loop();
     }
 
+    // history kept for the LIVE graph: the "shows last" setting, never longer than the run
+    static windowFor(s) { return s.liveWindow > 0 ? Math.min(s.liveWindow, s.tStop) : s.tStop; }
+
+    // change the window while running (the LIVE tab's Show-last box)
+    setWindow() {
+        if (!this.buf) return;
+        this.span = LiveSim.windowFor(this.runner.settings());
+        this.buf.setWindow(this.span);
+        this.buf.settle();
+    }
+
     build() {
         const ed = this.editor;
         // a sub-sheet that is open is simulated in place (as one use of it inside the whole design); a sheet no symbol uses
@@ -76,7 +87,7 @@ class LiveSim {
         this.info = info;
         this.engine = new SimEngine(info.circuit, this.runner.engineOptions());
         this.run = this.engine.beginTransient({ tStep: s.tStep, uic: s.uic, nodeIC: info.nodeIC, nodeset: info.nodeset });
-        this.span = s.tStop;
+        this.span = LiveSim.windowFor(s);
         this.speed = s.liveSpeed;          // simulated seconds per real second (0 = as fast as possible)
         this.target = 0;
         this.lastFrame = performance.now();

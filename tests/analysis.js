@@ -364,6 +364,29 @@ window.analysisTests = async function () {
         plotter.cache = keepCache; plotter.data = keepData; plotter.draw();
     }
 
+    {
+        const f = document.getElementById("simLiveWin"), stop = document.getElementById("simTstop"), keepStop = stop.value;
+        stop.value = "20m"; f.value = "";
+        ok("by default the LIVE window is the whole Stop time", Math.abs(LiveSim.windowFor(runner.settings()) - 0.02) < 1e-12);
+        f.value = "5m";
+        ok("\"Live graph shows last\" narrows it", Math.abs(LiveSim.windowFor(runner.settings()) - 0.005) < 1e-12);
+        f.value = "1";
+        ok("and can never exceed the run", Math.abs(LiveSim.windowFor(runner.settings()) - 0.02) < 1e-12);
+        f.value = "5m";
+        const saved = JSON.parse(JSON.stringify(doc.serialize()));
+        ok("the window is saved with the design", saved.settings.liveWindow === 0.005, saved.settings.liveWindow);
+        f.value = ""; doc.applySettings(saved.settings);
+        ok("and restored", f.value === "5m", f.value);
+        graph.show("live");
+        const box = document.getElementById("liveWin");
+        ok("the LIVE tab has a Show-last box showing it", box.parentElement.style.display !== "none" && box.value === "5m", box.value);
+        box.value = "2m"; box.dispatchEvent(new Event("change"));
+        ok("editing it sets the setting", f.value === "2m");
+        box.value = "junk"; box.dispatchEvent(new Event("change"));
+        ok("junk is refused and the old value comes back", f.value === "2m" && box.value === "2m", [f.value, box.value]);
+        f.value = ""; stop.value = keepStop; graph.show("tran");
+    }
+
     const tfInfo = NetlistExtractor.extract(editor);
     Commands.run("graph.tf");
     ok("Graph > Transfer Function opens its dialog", !!document.querySelector(".dialog .tf #tfOut"));

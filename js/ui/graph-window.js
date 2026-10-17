@@ -23,6 +23,9 @@ class GraphWindow {
                 <select id="noiseView" class="hidden" title="Noise density shown">
                     <option value="out">Output noise</option><option value="in">Input-referred</option>
                 </select>
+                <span id="liveTools" class="hidden" style="display:none;gap:4px;align-items:center" title="How much history the LIVE tab shows (blank: the whole Stop time)">
+                    <label for="liveWin" style="font-size:11px">Show last</label><input id="liveWin" size="8" placeholder="Stop time">
+                </span>
                 <span id="fftTools" class="hidden" style="display:none;gap:6px;align-items:center">
                     <select id="fftWindow" title="Window function">${Object.entries(Spectrum.WINDOWS).map(([k, w]) => `<option value="${k}" ${k === "hann" ? "selected" : ""}>${w.label}</option>`).join("")}</select>
                     <select id="fftScale" title="Amplitude scale"><option value="db">dBV</option><option value="lin">Volts</option></select>
@@ -59,6 +62,13 @@ class GraphWindow {
 
         root.querySelector("#acScale").onchange = (e) => plotter.setACScale(e.target.value);
         root.querySelector("#noiseView").onchange = (e) => { if (plotter.noiseSource) { const [outs, name] = plotter.noiseSource; plotter.plotNoise(outs, name, e.target.value); plotter.cache.noise = plotter.data; } };
+        root.querySelector("#liveWin").onchange = (e) => {
+            const f = document.getElementById("simLiveWin"), txt = e.target.value.trim();
+            if (txt !== "" && !(Units.parseSI(txt) > 0)) { this.runner.toast(`"${txt}" is not a time; use a number like 5m or 200u.`, "warn"); e.target.value = f.value; return; }
+            f.value = txt;
+            if (window.live) window.live.setWindow();
+            if (this.kind === "live") this.show("live");
+        };
         for (const id of ["fftWindow", "fftScale", "fftSpan", "fftAxis"]) root.querySelector("#" + id).onchange = () => { if (this.kind === "fft") this.showSpectrum(); };
 
         // remember the data of each tab, so switching tabs shows each one's last result; note what the spectrum can use
@@ -342,6 +352,8 @@ class GraphWindow {
         this.root.querySelector("#dcResults").classList.toggle("hidden", kind !== "dc");
         this.root.querySelector("#acScale").classList.toggle("hidden", kind !== "ac");
         this.root.querySelector("#noiseView").classList.toggle("hidden", kind !== "noise");
+        this.root.querySelector("#liveTools").style.display = kind === "live" ? "inline-flex" : "none";
+        if (kind === "live") { const f = document.getElementById("simLiveWin"), b = this.root.querySelector("#liveWin"); if (f && b && document.activeElement !== b) b.value = f.value; }
         this.root.querySelector("#fftTools").style.display = kind === "fft" ? "inline-flex" : "none";
         this.root.querySelector("#graph-sim").style.visibility = kind === "live" ? "hidden" : "visible";
         this.editor.resize();

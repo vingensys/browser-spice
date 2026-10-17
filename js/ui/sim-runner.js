@@ -22,6 +22,7 @@ class SimRunner {
         return {
             tStop: num("simTstop", 0.02),
             tStep: num("simTstep", 2e-5),
+            liveWindow: this.el("simLiveWin") && this.el("simLiveWin").value.trim() !== "" && Units.parseSI(this.el("simLiveWin").value) > 0 ? Units.parseSI(this.el("simLiveWin").value) : 0,
             uic: this.el("simUic") ? this.el("simUic").checked : true,
             fStart: num("simFstart", 10),
             fStop: num("simFstop", 1e6),

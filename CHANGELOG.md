@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- LIVE tab: "Show last" (also under Simulation Settings > Live graph shows last) sets how much history is shown, separately from the Stop time, so a fast signal can be viewed in detail over a long run. Saved with the design.
 - The LIVE graph keeps the lowest and highest value of every time bucket (peak detect) instead of skipping samples, so a fast signal in a long window no longer aliases to a wrong shape or a flat line.
 - Opening, creating or importing a design now clears the graph window (old traces, cursors, spectrum, operating point).
 - View > Placement Snap (parts snap to every dot, every 2 or every 5; remembered).

@@ -122,6 +122,7 @@ class DocumentStore {
         text("simTstop", s.tStop); text("simTstep", s.tStep); text("simFstart", s.fStart); text("simFstop", s.fStop);
         text("sweepStart", s.sweepStart); text("sweepStop", s.sweepStop); text("sweepStep", s.sweepStep);
         if (el("simTemp") && isFinite(s.temp)) el("simTemp").value = s.temp;
+        if (el("simLiveWin")) { el("simLiveWin").value = s.liveWindow > 0 ? Units.formatSI(s.liveWindow, "").replace(/\s/g, "").replace("µ", "u") : ""; }
         if (el("simUic") && typeof s.uic === "boolean") el("simUic").checked = s.uic;
         if (el("simEngine") && s.engine) el("simEngine").value = s.engine;
         const opt = (id, v, d) => { if (el(id)) el(id).value = Number.isFinite(v) && v !== d ? String(v) : (el(id).defaultValue); };
