@@ -27,6 +27,7 @@
  "js/visualization/plot-math.js",
  "js/visualization/waveform.js",
  "js/visualization/fft.js",
+ "js/visualization/live-buffer.js",
  "js/visualization/scope-core.js",
  "js/visualization/logic-core.js",
  "js/circuit/params.js",

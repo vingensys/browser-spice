@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- The LIVE graph keeps the lowest and highest value of every time bucket (peak detect) instead of skipping samples, so a fast signal in a long window no longer aliases to a wrong shape or a flat line.
 - Opening, creating or importing a design now clears the graph window (old traces, cursors, spectrum, operating point).
 - View > Placement Snap (parts snap to every dot, every 2 or every 5; remembered).
 - Help > Customize Shortcuts…: rebind the global shortcuts (conflicts refused, kept in this browser, Reset all). The schematic's own editing keys stay fixed.

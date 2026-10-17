@@ -94,9 +94,10 @@ class LiveSim {
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
             sc.nets.forEach((net, k) => { if (sc.wired[k]) this.channels.push({ name: `${sc.comp.name}:${"ABCD"[k]}${sc.path ? "@" + sc.path.replace(/__/g, "/") : ""}`, node: net, scope: sc.comp, index: k }); });
         }
-        this.times = [];
-        this.values = this.channels.map(() => []);
-        this.nextSample = 0;
+        this.buf = new LiveBuffer(this.channels.length, this.span);
+        this.times = this.buf.times;
+        this.values = this.buf.values;
+        this.sampleRow = new Array(this.channels.length);
 
         // oscilloscopes keep their own full-resolution buffers (and their settings live on the part)
         this.scopes = new Map();
@@ -344,24 +345,16 @@ class LiveSim {
         }
 
         const t0 = performance.now();
-        const minGap = this.span / 3000; // keep the plot buffers bounded
         while (!run.done && performance.now() - t0 < ms && (this.speed <= 0 || run.t < this.target)) {
             run.step();
             if (this.scopes.size || this.logans.size) this.feedScopes();
             if (this.condSrc && this.condSrc.length) { const why = this.checkConditions(); if (why) this.pauseReason = why; }
             if (this.mcus && this.mcus.length) for (const m of this.mcus) if (m.breakHit) { m.breakHit = false; m.passBp = m.core.pc; this.pauseReason = `${m.name} stopped at the breakpoint at 0x${m.core.pc.toString(16).toUpperCase().padStart(3, "0")}`; }
-            if (run.t >= this.nextSample) {
-                this.times.push(run.t);
-                this.channels.forEach((ch, i) => this.values[i].push(ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element)));
-                this.nextSample = run.t + minGap;
-            }
+            for (let i = 0; i < this.channels.length; i++) { const ch = this.channels[i]; this.sampleRow[i] = ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element); }
+            this.buf.push(run.t, this.sampleRow);
             if (this.pauseReason) break;
         }
-        // keep only the visible time window
-        const cut = run.t - this.span;
-        let k = 0;
-        while (k < this.times.length - 2 && this.times[k] < cut) k++;
-        if (k > 0) { this.times.splice(0, k); this.values.forEach(v => v.splice(0, k)); }
+        this.buf.settle();       // peak-detected history, the open bucket included, only the visible window kept
     }
 
     // push live numbers into the schematic objects
