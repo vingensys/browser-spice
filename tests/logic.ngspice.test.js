@@ -3,7 +3,7 @@
 const fs = require("fs"), path = require("path");
 const root = path.join(__dirname, "..");
 if (!fs.existsSync(path.join(root, "node_modules", "eecircuit-engine"))) { console.log("eecircuit-engine not installed: skipping"); process.exit(0); }
-const files = ["js/utils/complex.js", "js/utils/units.js", "js/sim/logic-ics.js", "js/sim/models.js", "js/circuit/netlist.js", "js/sim/ngspice-backend.js"];
+const files = ["js/utils/complex.js", "js/utils/units.js", "js/sim/logic-ics.js", "js/sim/models.js", "js/circuit/logic-export.js", "js/circuit/netlist.js", "js/sim/ngspice-backend.js"];
 const src = files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n");
 const { NgspiceBackend, NetlistExtractor, LOGIC_ICS, LogicIC } = new Function(src + "\nreturn { NgspiceBackend, NetlistExtractor, LOGIC_ICS, LogicIC };")();
 let passed = 0, failed = 0;
@@ -39,7 +39,7 @@ const check = (name, cond, extra = "") => { if (cond) { passed++; console.log(` 
         }
         check(`${key}: ngspice outputs follow the truth table (worst ${worst.toFixed(3)} V over ${cases})`, cases > 0 && worst < 0.05);
     }
-    for (const key of ["74161", "7490", "74164", "74244", "74151"]) check(`${key} is reported as not exported`, !NetlistExtractor.digitalSubckt("x", key, {}, v => v));
+    for (const key of ["74151", "7483", "7485"]) check(`${key} (more than 8 inputs) is reported as not exported`, !NetlistExtractor.digitalSubckt("x", key, {}, v => v));
     // D flip-flop: D=1, clock rising edge sets Q; clear wins
     for (const [key, dpin, kpin, clk, clkHigh] of [["7474", "1D", null, "1CLK", true], ["74112", "1J", "1K", "1CLK_N", false]]) {
         const lo = clkHigh ? 0 : 5, hi = clkHigh ? 5 : 0;

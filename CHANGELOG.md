@@ -2,6 +2,9 @@
 
 ## 1.0 (current)
 
+Logic export
+- Counters (7493, 7490, 74160-74163, 74193, 74393, 4017, 4040), shift registers (74164, 74165, 74194, 74595), registers and latches (74175, 74273, 74373, 74374) and the 74244 buffer now export to SPICE, checked against the built-in chips in ngspice. The counter and shift-register examples are compared with ngspice in the test suite (they were skipped before).
+
 Oscilloscope and probes
 - The scope has eight input channels (A-D pins, E-H assigned probes) and a math trace (A-B, A+B, AxB, A/B, integral, derivative); channels carry volts or amps and the scope labels and scales them accordingly.
 - Current Clamp instrument: clamps on a part, wire its output to a scope channel; also any probe can be assigned to a channel.

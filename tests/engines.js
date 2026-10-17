@@ -37,9 +37,12 @@ window.engineTests = async function () {
                     if (!rMine.nodeHistories[n]) continue; // ngspice-internal subcircuit nodes
                     const ys = rNg.nodeHistories[n];
                     const range = Math.max(Math.max(...ys) - Math.min(...ys), 0.05 * Math.max(...ys.map(Math.abs)), 1e-3);
+                    // compared on a uniform time grid: ngspice puts many points around every fast edge, and weighting by its own
+                    // points would count a sub-millisecond difference in where an edge lands over and over
                     let acc = 0;
-                    rNg.timePoints.forEach((t, i) => { const d = interp(rMine.timePoints, rMine.nodeHistories[n], t) - ys[i]; acc += d * d; });
-                    worstTran = Math.max(worstTran, Math.sqrt(acc / rNg.timePoints.length) / range);
+                    const GRID = 2000;
+                    for (let k = 0; k < GRID; k++) { const t = (k / (GRID - 1)) * tran.tStop; const d = interp(rMine.timePoints, rMine.nodeHistories[n], t) - interp(rNg.timePoints, ys, t); acc += d * d; }
+                    worstTran = Math.max(worstTran, Math.sqrt(acc / GRID) / range);
                 }
             }
             const pass = worstOp <= tol.op && worstTran <= tol.tran;
@@ -58,8 +61,10 @@ window.engineTests = async function () {
         "psu": { tol: { op: 0.05, tran: 0.02 }, opts: { skipOp: true, exportOptions: { method: "gear" } } }, // floating rectifier nodes: any level within the current tolerance is a solution, so the OP is skipped; ngspice runs Gear because its default trapezoidal rule rings on those nodes at this step (see AUDIT)
         "jfet-amp": { opts: { uic: false } },                            // bias circuit: start from the operating point
         "scr-lamp": { tol: { op: 0.05, tran: 0.06 }, opts: { skipOp: true } }, // behavioural latch vs the exact switching instant
-        "ripple-counter": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },   // master-slave macromodel vs the exact-edge flip-flop
-        "logic-analyser": { tol: { op: 1, tran: 0.1 }, opts: { skipOp: true } },
+        "ripple-counter": { tol: { op: 1, tran: 0.01 }, opts: { skipOp: true } },   // master-slave macromodel vs the exact-edge flip-flop
+        "counter-7seg": { tol: { op: 0.15, tran: 0.2 } },         // all of it is the display's DP pin: a segment LED with nothing on its other side, so its level is arbitrary (1.4 V vs 2.0 V); every logic node agrees edge for edge
+        "shift-register": { tol: { op: 0.05, tran: 0.01 } },        // the exported 74164 macromodel switches on the same clock edges as the built-in chip
+        "logic-analyser": { tol: { op: 1, tran: 0.01 }, opts: { skipOp: true } },
         "buck-closed-loop": { tol: { op: 0.01, tran: 0.15 } },        // sample-by-sample rms of the 200 kHz switch node is dominated by edge timing (about 10 %); the means agree to 0.4 %
         "boost": { tol: { op: 0.01, tran: 0.2 } }                        // switching ripple is phase sensitive
     };

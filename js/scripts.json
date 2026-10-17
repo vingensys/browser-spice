@@ -28,6 +28,7 @@
  "js/visualization/scope-core.js",
  "js/visualization/logic-core.js",
  "js/circuit/params.js",
+ "js/circuit/logic-export.js",
  "js/circuit/netlist.js",
  "js/circuit/hierarchy.js",
  "js/circuit/erc.js",

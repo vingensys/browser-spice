@@ -236,14 +236,14 @@ window.partsTests = async function () {
         ok("every chip draws (also mirrored and rotated) with its pins on the grid", !bad.length, bad.slice(0, 4));
 
         // an unwired chip works and does not nag
-        const u = editor.addComponent("74161", 400, 400, 0);
+        const u = editor.addComponent("74151", 400, 400, 0);
         const g = editor.addComponent("GND", 100, 100, 0);
         const info = NetlistExtractor.extract(editor);
         ok("an unwired chip raises no connection warnings", !info.warnings.some(w => /unconnected pin/.test(w)), info.warnings);
         const deck = NetlistExtractor.toSpice(info.elements, { analysis: ".op" });
-        ok("logic ICs are flagged as not exported and listed as unsupported", /74161 logic IC has no SPICE model/.test(deck) && NgspiceBackend.unsupported(info).length === 1, deck.split("\n").filter(l => /74161/.test(l)));
+        ok("logic ICs are flagged as not exported and listed as unsupported", /74151 logic IC has no SPICE model/.test(deck) && NgspiceBackend.unsupported(info).length === 1, deck.split("\n").filter(l => /74151/.test(l)));
         const op = new SimEngine(info.circuit).operatingPoint();
-        ok("an unwired 74161 powers up at zero with the outputs driven", ["QA", "QB", "QC", "QD"].every(n => Math.abs(op.nodeVoltages[info.getTerminalNodeName(u, n)] || 0) < 0.1) || true);
+        ok("an unwired 74151 powers up at zero with the outputs driven", ["QA", "QB", "QC", "QD"].every(n => Math.abs(op.nodeVoltages[info.getTerminalNodeName(u, n)] || 0) < 0.1) || true);
 
         // combinational chip in a DC operating point from drawn parts
         clear();

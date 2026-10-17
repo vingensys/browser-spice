@@ -664,7 +664,10 @@ class NetlistExtractor {
             });
             return { lines: [...head, ...body, `.ends ${id}`], needs: [jk ? "JK" : "D"] };
         }
-        if (spec.init() !== null) return null;
+        if (spec.init() !== null || key === "74244") {          // clocked chips and three-state buffers: see LogicExport
+            const seq = LogicExport.sequential(key, { spec, pn, vcc, ro, f });
+            return seq ? { lines: [...head, ...seq, `.ends ${id}`], needs: [] } : null;
+        }
         const body = [];
         const inputsOf = (o) => {
             // the inputs this output depends on, found by flipping each one over every other input pattern
@@ -712,6 +715,7 @@ class NetlistExtractor {
         const subckts = new Set();
         const extra = [];
         let uses555 = false;
+        let seqLogic = false;       // clocked logic ICs: their master-slave macromodels want tighter tolerances than ngspice's defaults
         const userSubckts = new Map();
         const thyristors = new Map();
         const bodyModels = [];
@@ -885,12 +889,13 @@ class NetlistExtractor {
                 case "DIGITAL": {
                     const id = `LOGIC_${e.ic}_${String(p.vcc === undefined ? 5 : p.vcc).replace(/[^0-9]/g, "_")}`;
                     const sub = NetlistExtractor.digitalSubckt(id, e.ic, p, f);
-                    if (!sub) { lines.push(`* ${e.name}: the ${e.ic} logic IC has no SPICE model in this export (counters, shift registers, latches, three-state or very wide functions: built-in simulator only)`); break; }
+                    if (!sub) { lines.push(`* ${e.name}: the ${e.ic} logic IC has no SPICE model in this export (functions of more than 8 inputs: built-in simulator only)`); break; }
                     for (const k of sub.needs) {
                         const ffid = `FF_${k}_${String(p.vcc === undefined ? 5 : p.vcc).replace(/[^0-9]/g, "_")}`;
                         thyristors.set(ffid, NetlistExtractor.flipFlopSubckt(ffid, k, p, f));
                     }
                     thyristors.set(id, sub.lines);
+                    if (LOGIC_ICS[e.ic] && LOGIC_ICS[e.ic].init() !== null) seqLogic = true;
                     lines.push(`X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")} ${n.join(" ")} ${id}`);
                     break;
                 }
@@ -941,10 +946,9 @@ class NetlistExtractor {
             }
         }
 
-        if (uses555) {
-            // the behavioural latch needs tighter tolerances than the default 0.1 %
-            lines.push("", ".options reltol=1e-4 vntol=1e-7", ...NetlistExtractor.NE555_SUBCKT);
-        }
+        // the behavioural latches (555, clocked logic ICs) need tighter tolerances than the default 0.1 %
+        if (uses555 || seqLogic) lines.push("", ".options reltol=1e-4 vntol=1e-7");
+        if (uses555) lines.push(...NetlistExtractor.NE555_SUBCKT);
 
         if (nodeset && Object.keys(nodeset).length) lines.push("", `.nodeset ${Object.entries(nodeset).map(([n, v]) => `v(${n})=${f(v)}`).join(" ")}`);
         if (options) {
