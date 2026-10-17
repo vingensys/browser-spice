@@ -81,6 +81,22 @@ try {
             if (!ok) failed += 1;
         }
     }
+    // the workbook the analysis suite made, read by openpyxl (when Python and openpyxl are installed)
+    {
+        const b64 = await page.evaluate("window.__xlsxSample || ''").catch(() => "");
+        const py = spawnSync("python3", ["-c", "import openpyxl"], { encoding: "utf8" });
+        if (b64 && py.status === 0) {
+            total += 1;
+            const file = path.join(tmpdir(), `browser-spice-${process.pid}.xlsx`);
+            writeFileSync(file, Buffer.from(b64, "base64"));
+            const script = "import sys, openpyxl\nwb = openpyxl.load_workbook(sys.argv[1])\nws = wb.active\nrows = list(ws.iter_rows(values_only=True))\nprint(ws.title, ws.freeze_panes, rows[0][:3], len(rows))\nassert rows[0][:3] == ('Item', 'Reference', 'Quantity')\nassert any(r[7] == 'RC0603FR-0710KL' for r in rows[1:])\nassert ws['A1'].font.b and isinstance(rows[1][2], int)\n";
+            const r = spawnSync("python3", ["-c", script, file], { encoding: "utf8" });
+            rmSync(file, { force: true });
+            const ok = r.status === 0;
+            console.log(`${ok ? "ok  " : "FAIL"} xlsx         ${ok ? 1 : 0}/1  (openpyxl reads the workbook${ok ? ": " + r.stdout.trim().slice(0, 70) : ": " + (r.stderr || "").slice(-200)})`);
+            if (!ok) failed += 1;
+        }
+    }
     // offline: a visited copy of the app keeps working without a network (service worker)
     {
         total += 1;

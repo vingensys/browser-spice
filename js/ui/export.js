@@ -25,15 +25,25 @@ const Exporter = {
         return (comp.model && !v.includes(comp.model) ? [comp.model, v] : [v]).filter(Boolean).join(" ");
     },
 
-    // [{ refs: ["R1","R2"], qty, value, part, tol }] grouped by part type + value, sorted by reference
+    // the footprint a part is bought as: the one typed in its properties, else the package it has on the PCB (if a board exists)
+    footprintOf(editor, comp, ref) {
+        const own = String(comp.footprint || "").trim();
+        if (own) return own;
+        const pcb = editor.pcb;
+        const part = pcb && Array.isArray(pcb.parts) ? pcb.parts.find(p => p.ref === ref || p.ref === comp.name) : null;
+        return part && part.fp && part.fp.name ? part.fp.name : "";
+    },
+
+    // [{ refs: ["R1","R2"], qty, value, part, tol, footprint, mpn, mfr }] grouped by part type + value (+ footprint, MPN, maker), sorted by reference
     bom(editor) {
         const groups = new Map();
         for (const { comp: c, ref } of Hierarchy.flatComponents(editor)) {
             if (Exporter.NOT_PARTS.includes(c.type)) continue;
             const part = Exporter.typeName(c), value = Exporter.describe(c);
             const tol = ["R", "C", "L", "POT", "RHEO"].includes(c.type) && c.tol ? `${c.tol}%` : "";
-            const key = [c.type, part, value, tol].join("|");
-            if (!groups.has(key)) groups.set(key, { refs: [], value, part, tol, type: c.type });
+            const mpn = String(c.mpn || "").trim(), mfr = String(c.mfr || "").trim(), footprint = Exporter.footprintOf(editor, c, ref);
+            const key = [c.type, part, value, tol, footprint, mpn, mfr].join("|");
+            if (!groups.has(key)) groups.set(key, { refs: [], value, part, tol, type: c.type, footprint, mpn, mfr });
             groups.get(key).refs.push(ref);
         }
         const nat = (a, b) => a.localeCompare(b, undefined, { numeric: true });
@@ -46,8 +56,16 @@ const Exporter = {
     bomCsv(editor) {
         const q = (v) => PlotMath.csvCell(v);
         const rows = Exporter.bom(editor);
-        return ["Item,Reference,Quantity,Value,Part,Tolerance",
-            ...rows.map((r, i) => [i + 1, r.refs.join(" "), r.qty, r.value, r.part, r.tol].map(q).join(","))].join("\r\n") + "\r\n";
+        return ["Item,Reference,Quantity,Value,Part,Tolerance,Footprint,MPN,Manufacturer",
+            ...rows.map((r, i) => [i + 1, r.refs.join(" "), r.qty, r.value, r.part, r.tol, r.footprint, r.mpn, r.mfr].map(q).join(","))].join("\r\n") + "\r\n";
+    },
+
+    // the bill of materials as an Excel workbook (.xlsx): one sheet, a bold frozen header row, column widths, quantities as numbers
+    bomXlsx(editor, title = "BOM") {
+        const rows = Exporter.bom(editor);
+        const head = ["Item", "Reference", "Quantity", "Value", "Part", "Tolerance", "Footprint", "MPN", "Manufacturer"];
+        const table = [head, ...rows.map((r, i) => [i + 1, r.refs.join(" "), r.qty, r.value, r.part, r.tol, r.footprint, r.mpn, r.mfr])];
+        return Xlsx.build(table, { sheet: title, boldHeader: true, widths: [6, 28, 10, 18, 22, 10, 18, 22, 18] });
     },
 
     openBom(editor) {
@@ -56,15 +74,16 @@ const Exporter = {
         wrap.className = "bom";
         const total = rows.reduce((n, r) => n + r.qty, 0);
         wrap.innerHTML = rows.length
-            ? `<table class="results-table"><thead><tr><th>#</th><th>Reference</th><th>Qty</th><th>Value</th><th>Part</th><th>Tol.</th></tr></thead><tbody>${
-                rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.refs.join(", "))}</td><td>${r.qty}</td><td>${esc(r.value)}</td><td>${esc(r.part)}</td><td>${esc(r.tol)}</td></tr>`).join("")}</tbody></table>
+            ? `<table class="results-table"><thead><tr><th>#</th><th>Reference</th><th>Qty</th><th>Value</th><th>Part</th><th>Tol.</th><th>Footprint</th><th>MPN</th><th>Maker</th></tr></thead><tbody>${
+                rows.map((r, i) => `<tr><td>${i + 1}</td><td>${esc(r.refs.join(", "))}</td><td>${r.qty}</td><td>${esc(r.value)}</td><td>${esc(r.part)}</td><td>${esc(r.tol)}</td><td>${esc(r.footprint)}</td><td>${esc(r.mpn)}</td><td>${esc(r.mfr)}</td></tr>`).join("")}</tbody></table>
                <div class="prop-note">${rows.length} line${rows.length === 1 ? "" : "s"}, ${total} part${total === 1 ? "" : "s"} (ground symbols, notes and probes are not parts).</div>`
             : `<div class="no-selection">There are no parts on the sheet yet.</div>`;
         Dialog.open({
             title: "Bill of Materials", content: wrap, width: "720px",
             buttons: [
                 { label: "Copy", onClick: () => { try { navigator.clipboard.writeText(Exporter.bomCsv(editor)); } catch (e) { /* no clipboard */ } return false; } },
-                { label: "Download CSV", primary: true, onClick: () => { window.downloadFile("bom.csv", Exporter.bomCsv(editor), "text/csv"); return false; } },
+                { label: "Download CSV", onClick: () => { window.downloadFile("bom.csv", Exporter.bomCsv(editor), "text/csv"); return false; } },
+                { label: "Download XLSX", primary: true, onClick: () => { window.downloadFile("bom.xlsx", new Blob([Exporter.bomXlsx(editor)], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" })); return false; } },
                 { label: "Close" }
             ]
         });
@@ -420,3 +439,33 @@ class PdfContext {
         return out;
     }
 }
+
+
+// A minimal .xlsx writer: one worksheet of text and numbers (inline strings), a bold frozen header row and column widths, in a store-only ZIP.
+const Xlsx = {
+    esc: (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, ""),
+    col(i) { let s = ""; for (i++; i > 0; i = Math.floor((i - 1) / 26)) s = String.fromCharCode(65 + ((i - 1) % 26)) + s; return s; },
+
+    // rows: arrays of strings / numbers -> Uint8Array
+    build(rows, { sheet = "Sheet1", boldHeader = true, widths = [] } = {}) {
+        const e = Xlsx.esc;
+        const cell = (v, r, c) => {
+            const ref = `${Xlsx.col(c)}${r + 1}`, style = boldHeader && r === 0 ? ' s="1"' : "";
+            if (typeof v === "number" && Number.isFinite(v)) return `<c r="${ref}"${style}><v>${v}</v></c>`;
+            return v === "" || v === undefined || v === null ? `<c r="${ref}"${style}/>` : `<c r="${ref}"${style} t="inlineStr"><is><t xml:space="preserve">${e(v)}</t></is></c>`;
+        };
+        const sheetXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
+            `<sheetViews><sheetView workbookViewId="0">${boldHeader ? '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' : ""}</sheetView></sheetViews>` +
+            (widths.length ? `<cols>${widths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("")}</cols>` : "") +
+            `<sheetData>${rows.map((row, r) => `<row r="${r + 1}">${row.map((v, c) => cell(v, r, c)).join("")}</row>`).join("")}</sheetData></worksheet>`;
+        const files = [
+            ["[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`],
+            ["_rels/.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`],
+            ["xl/workbook.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${e(String(sheet).replace(/[\\/?*\[\]:]/g, " ").slice(0, 31) || "Sheet1")}" sheetId="1" r:id="rId1"/></sheets></workbook>`],
+            ["xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+            ["xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs></styleSheet>`],
+            ["xl/worksheets/sheet1.xml", sheetXml]
+        ];
+        return Pcb.zip(files);
+    }
+};

@@ -122,6 +122,14 @@ class PropertiesPanel {
             html += `<div class="prop-note">NE555 timer: supply on VCC / GND, RESET is pulled high if left open.</div>`;
         }
 
+        // fields for the bill of materials, on every part that is bought
+        if (!["GND", "TEXT", "NODEIC", "POWER", "NETLABEL", "PORT", "OFFSHEET", "SHEET", "BUSTAP", "SCOPE", "LOGAN", "VM", "AM", "CLAMP"].includes(type)) {
+            html += `<div class="prop-note" style="margin-top:10px;border-top:1px solid var(--border,#39424c);padding-top:6px"><b>Bill of materials</b></div>` +
+                this.text("Manufacturer part number", "mpn", c.mpn || "", "e.g. RC0603FR-071KL") +
+                this.text("Manufacturer", "mfr", c.mfr || "", "") +
+                this.text("Footprint", "footprint", c.footprint || "", "blank = the PCB footprint, if any");
+        }
+
         this.el.innerHTML = html;
     }
 

@@ -172,11 +172,23 @@ window.analysisTests = async function () {
     const rows2 = Exporter.bom(editor), same = rows2.find(r => r.refs.includes("R2"));
     ok("parts with the same value and tolerance share one line (R2 and R3)", same && same.refs.includes("R3") && same.qty === 2 && same.tol === "5%" && !rows2.find(r => r.refs.includes("R1")).refs.includes("R2"), rows2.map(r => r.refs.join("+")));
     const bomLines = Exporter.bomCsv(editor).split("\r\n");
-    ok("the CSV has a header and one row per line", bomLines[0] === "Item,Reference,Quantity,Value,Part,Tolerance" && bomLines.filter(Boolean).length === rows2.length + 1, bomLines.slice(0, 3));
+    ok("the CSV has a header and one row per line", bomLines[0] === "Item,Reference,Quantity,Value,Part,Tolerance,Footprint,MPN,Manufacturer" && bomLines.filter(Boolean).length === rows2.length + 1, bomLines.slice(0, 3));
     ok("references with several parts are quoted-safe and space separated", bomLines.some(l => /^\d+,R2 R3,2,/.test(l)), bomLines);
     Commands.run("file.bom");
     ok("File > Bill of Materials opens its table", !!document.querySelector(".dialog .bom table") && document.querySelectorAll(".dialog .bom tbody tr").length === rows2.length);
+    ok("... with Footprint, MPN and Maker columns and an XLSX download", /Footprint/.test(document.querySelector(".dialog .bom").textContent) && [...document.querySelectorAll(".dialog .btn")].some(b => b.textContent === "Download XLSX"));
     Dialog.close("t");
+    // manufacturer part number, maker and footprint: grouped, in the CSV and the workbook
+    byName("R1").mpn = "RC0603FR-0710KL"; byName("R1").mfr = "Yageo"; byName("R1").footprint = "R_0603";
+    byName("R2").mpn = "RC0603FR-0710KL"; byName("R2").mfr = "Yageo"; byName("R2").footprint = "R_0603";
+    const rows3 = Exporter.bom(editor), line = rows3.find(r => r.refs.includes("R1"));
+    ok("parts with different MPN / footprint do not share a line (R1 + R2 differ from R3 in tolerance anyway; R1 alone with its MPN)", line && line.mpn === "RC0603FR-0710KL" && line.mfr === "Yageo" && line.footprint === "R_0603", line);
+    ok("the CSV carries them", Exporter.bomCsv(editor).split("\r\n").some(l => /RC0603FR-0710KL,Yageo$/.test(l) && /,R_0603,/.test(l)), Exporter.bomCsv(editor).split("\r\n").slice(1, 4));
+    const xl = Exporter.bomXlsx(editor, "ce-amp");
+    ok("the workbook is a ZIP with the parts of an xlsx", xl[0] === 0x50 && xl[1] === 0x4b && ["[Content_Types].xml", "xl/workbook.xml", "xl/worksheets/sheet1.xml", "xl/styles.xml"].every(n => new TextDecoder("latin1").decode(xl).includes(n)), xl.length);
+    const sheetText = new TextDecoder().decode(xl);
+    ok("... with the header row bold and frozen, quantities as numbers, MPN as text", /<pane ySplit="1"/.test(sheetText) && /<c r="A1" s="1" t="inlineStr"><is><t xml:space="preserve">Item/.test(sheetText) && /RC0603FR-0710KL/.test(sheetText) && /<c r="C2"><v>\d+<\/v><\/c>/.test(sheetText), sheetText.slice(sheetText.indexOf("<sheetData>"), sheetText.indexOf("<sheetData>") + 300));
+    window.__xlsxSample = btoa(String.fromCharCode(...xl));
     const view = [editor.zoom, editor.panX, editor.panY, editor.width];
     const cv = Exporter.renderImage(editor, 1);
     ok("the picture covers the design with a margin and is not blank", cv && cv.width > 300 && cv.height > 200 && (() => { const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data; const bg = [d[0], d[1], d[2]]; for (let i = 0; i < d.length; i += 4 * 7) if (d[i] !== bg[0] || d[i + 1] !== bg[1] || d[i + 2] !== bg[2]) return true; return false; })(), cv && [cv.width, cv.height]);
