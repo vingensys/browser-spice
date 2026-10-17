@@ -606,6 +606,13 @@ window.analysisTests = async function () {
     pin.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await wait(100);
     ok("Enter runs it (the NOISE tab opens)", graph.kind === "noise" && !document.querySelector(".palette"), graph.kind);
     pin && Dialog.close("t");
+    Commands.run("palette.open");
+    const pin2 = document.querySelector(".palette-input");
+    pin2.value = "place capacitor"; pin2.dispatchEvent(new Event("input"));
+    ok("the palette lists parts as Place <part>", /Place CAP/.test(document.querySelector(".palette-list .palette-row.sel").textContent), document.querySelector(".palette-list").textContent);
+    pin2.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); await wait(100);
+    ok("Enter arms the placement tool for it", editor.isPlacing() && !document.querySelector(".palette"));
+    editor.setTool("select");
     document.getElementById("simTstop").value = "20m"; document.getElementById("simTstep").value = "100u"; document.getElementById("simUic").checked = true;
     graph.show("tran"); await runner.runTransient(); await wait(100);
     editor.measures = [{ name: "vend", kind: "tran", fn: "find", sig: "V(c1)", at: 0.02 }];

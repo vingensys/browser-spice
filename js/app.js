@@ -121,7 +121,7 @@
     C("file.kicadsch", "Export KiCad Schematic (.kicad_sch)…", { run: () => Exporter.saveKicadSch(editor) });
     C("file.kicad", "Export KiCad Netlist…", { run: () => { const text = Exporter.kicadNetlist(editor); download("design.net", text, "text/plain"); } });
     C("file.report", "Export Report (HTML)…", { run: async () => { const html = await Report.build(editor, runner, plotter, doc); download("report.html", html, "text/html"); } });
-    C("palette.open", "Command Palette…", { keys: "Ctrl+K", global: true, run: () => Palette.open() });
+    C("palette.open", "Command Palette…", { keys: "Ctrl+K", global: true, run: () => Palette.open(editor) });
     C("file.print", "Print…", { run: () => window.print() });
 
     C("edit.undo", "Undo", { icon: "undo", keys: "Ctrl+Z", enabled: () => editor.historyStack.length > 0, run: () => editor.undo() });
