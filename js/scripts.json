@@ -43,6 +43,7 @@
  "js/ui/kicad-import.js",
  "js/ui/eagle-import.js",
  "js/pcb/pcb.js",
+ "js/pcb/length.js",
  "js/ui/pcb-view.js",
  "js/ui/catalog.js",
  "js/cad/parts.js",

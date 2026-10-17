@@ -1343,6 +1343,28 @@ window.analysisTests = async function () {
             ok("one undo of the schematic puts the old references back", editor.components.filter(c => /^R\d+$/.test(c.name)).every(c => before.includes(c.name)));
             editor.redo();
         }
+        {
+            const keepPcb = editor.pcb, keepSel = pcbView.sel;
+            const lb = Pcb.blank(80, 40);
+            lb.parts = [["A", "1", 10, 10], ["B", "1", 60, 10], ["C", "2", 10, 25], ["D", "2", 40, 25]].map(([ref, net, x, y]) => { const q = { ref, kind: "X", nodes: [net], x, y, rot: 0, placed: true }; Pcb.setPackage(q, undefined, lb.footprints); return q; });
+            lb.tracks = [{ id: 1, layer: "F", w: 0.3, pts: [[10, 10], [60, 10]] }, { id: 2, layer: "F", w: 0.3, pts: [[10, 25], [40, 25]] }];
+            editor.pcb = lb; pcbView.sel = null;
+            pcbView.act("lengths");
+            const ln = pcbView.root.querySelector("#pcbLen");
+            ok("Lengths… lists every net with its copper length", !ln.classList.contains("hidden") && /50\.00/.test(ln.textContent) && /30\.00/.test(ln.textContent), ln.textContent.slice(0, 200));
+            const sel = ln.querySelector("#lnNets"); [...sel.options].forEach(o => { o.selected = true; });
+            ln.querySelector("#lnName").value = "bus";
+            ln.querySelector('[data-ln="add"]').click();
+            ok("a match group is added and shows each net's difference from the target", lb.groups && lb.groups.length === 1 && /-20\.00/.test(ln.textContent) && /✗/.test(ln.textContent), ln.textContent.slice(-400));
+            ln.querySelector('[data-ln="tune"]').click();
+            const lens2 = PcbLength.netLengths(lb);
+            ok("Tune to match lengthens the short net to the target", Math.abs(lens2.get("2").length - 50) < 0.01 && /✓/.test(ln.textContent), lens2.get("2").length);
+            ok("the group is saved with the board", JSON.parse(JSON.stringify(lb)).groups[0].name === "bus");
+            ln.querySelector('[data-ln="del"]').click();
+            ok("Remove group takes it out", lb.groups.length === 0);
+            ln.querySelector('[data-ln="close"]').click();
+            editor.pcb = keepPcb; pcbView.sel = keepSel; pcbView.rev++; pcbView.draw();
+        }
         pcbView.root.querySelector("#pcbZoneNet").value = "0";
         pcbView.layer = "B"; pcbView.act("pourboard");
         ok("Pour board adds a pour on the active layer and net", editor.pcb.zones.length === 1 && editor.pcb.zones[0].layer === "B" && editor.pcb.zones[0].net === "0", editor.pcb.zones);

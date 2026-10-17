@@ -737,6 +737,7 @@ class Pcb {
         });
         if (zones) for (const f of Pcb.fillZones(pcb)) for (const p of f.islands) issues.push({ type: "zone", msg: `${p.part.ref}.${p.i + 1} is inside pour ${f.zone.id} but cut off from it (islanded by clearance to other nets)`, x: p.x, y: p.y });
         issues.push(...Pcb.fabCheck(pcb));
+        if (typeof PcbLength !== "undefined") issues.push(...PcbLength.issues(pcb));
         for (const l of Pcb.ratsnest(pcb, conn)) issues.push({ type: "unrouted", msg: `net ${l.net}: ${l.a.part.ref}.${l.a.i + 1} to ${l.b.part.ref}.${l.b.i + 1} is not routed`, x: l.a.x, y: l.a.y });
         return issues;
     }

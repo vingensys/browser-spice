@@ -56,6 +56,7 @@ class PcbView {
                 <button class="tb-btn txt" data-a="pourboard" title="Pour the whole board on the active layer with the chosen net">Pour board</button>
                 <button class="tb-btn txt" data-a="footprints" title="Define your own footprints, or import a KiCad .kicad_mod">Footprints…</button>
                 <span class="sep"></span>
+                <button class="tb-btn txt" data-a="lengths" title="Track lengths, length-match groups and differential pairs, with serpentine tuning">Lengths…</button>
                 <button class="tb-btn txt" data-a="drc" title="Check clearances, shorts, board edge, track width and unrouted nets">Check rules</button>
                 <button class="tb-btn txt" data-a="export" title="Download Gerber (F.Cu, B.Cu, edge) and Excellon drill files as a ZIP">Export Gerber…</button>
                 <span class="grow"></span>
@@ -66,6 +67,12 @@ class PcbView {
                 <div class="pcb-side"><div id="pcbIssues" class="pcb-issues"></div></div>
             </div>
             <div class="pcb-status" id="pcbStatus"></div>
+            <div id="pcbLen" class="pcb-fped hidden">
+                <div class="pcb-fped-box" style="width:640px;max-height:86vh;display:flex;flex-direction:column">
+                    <div class="pcb-fped-head"><b>Track lengths</b><span class="grow"></span><button class="tb-btn" data-ln="close" title="Close">✕</button></div>
+                    <div id="lnBody" style="padding:10px;overflow:auto;display:flex;flex-direction:column;gap:8px"></div>
+                </div>
+            </div>
             <div id="pcbBack" class="pcb-fped hidden">
                 <div class="pcb-fped-box" style="width:460px">
                     <div class="pcb-fped-head"><b>Back-annotate to the schematic</b><span class="grow"></span><button class="tb-btn" data-ba="close" title="Close">✕</button></div>
@@ -233,9 +240,78 @@ class PcbView {
             case "pourboard": this.addZone([[0.5, 0.5], [p.outline.w - 0.5, 0.5], [p.outline.w - 0.5, p.outline.h - 0.5], [0.5, p.outline.h - 0.5]]); break;
             case "footprints": this.openFootprints(); break;
             case "backannotate": this.openBackAnnotate(); break;
+            case "lengths": this.openLengths(); break;
             case "drc": this.runDrc(); break;
             case "export": this.exportGerber(); break;
         }
+    }
+
+    // ---------------------------------------------------------------- lengths, match groups, pairs
+    openLengths() {
+        const ed = this.root.querySelector("#pcbLen");
+        ed.classList.remove("hidden");
+        if (!this.lnBound) {
+            this.lnBound = true;
+            ed.addEventListener("click", (e) => {
+                const b = e.target.closest("[data-ln]"); if (!b) return;
+                const a = b.dataset.ln, p = this.pcb;
+                if (a === "close") { ed.classList.add("hidden"); this.cv.focus(); return; }
+                if (a === "add") {
+                    const q = (id) => ed.querySelector("#" + id), nets = [...q("lnNets").selectedOptions].map(o => o.value);
+                    const name = q("lnName").value.trim() || `group${(p.groups || []).length + 1}`;
+                    if (nets.length < 2) { this.lengthsMsg("Pick at least two nets (Ctrl+click for several)."); return; }
+                    const pair = q("lnPair").checked;
+                    if (pair && nets.length !== 2) { this.lengthsMsg("A differential pair has exactly two nets."); return; }
+                    const tv = q("lnTarget").value.trim(), tl = q("lnTol").value.trim();
+                    this.snapshot();
+                    (p.groups = p.groups || []).push({ name, nets, pair, target: tv === "" ? null : Number(tv), tol: tl === "" ? (pair ? 0.1 : 0.5) : Number(tl) });
+                    this.changed(); this.renderLengths(); return;
+                }
+                const i = Number(b.dataset.i), g = (p.groups || [])[i];
+                if (!g) return;
+                if (a === "del") { this.snapshot(); p.groups.splice(i, 1); this.changed(); this.renderLengths(); return; }
+                if (a === "tune") {
+                    this.snapshot();
+                    const res = PcbLength.tuneGroup(p, g);
+                    const bad = res.filter(r => !r.ok);
+                    this.changed(); this.renderLengths();
+                    this.lengthsMsg(res.length ? `${res.length - bad.length} of ${res.length} net(s) tuned${bad.length ? `. ${bad.map(r => `Net ${r.net}: ${r.reason}`).join(" ")}` : "."}` : "Already within tolerance.");
+                }
+            });
+        }
+        this.renderLengths();
+    }
+
+    lengthsMsg(t) { const el = this.root.querySelector("#lnMsg"); if (el) el.textContent = t; }
+
+    renderLengths() {
+        const body = this.root.querySelector("#lnBody"), p = this.pcb, esc = PropertiesPanel.esc;
+        const lens = PcbLength.netLengths(p), nets = new Map();
+        for (const pad of Pcb.pads(p)) if (pad.net) { if (!nets.has(String(pad.net))) nets.set(String(pad.net), []); nets.get(String(pad.net)).push(`${pad.part.ref}.${pad.i + 1}`); }
+        const list = [...nets.keys()].sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
+        const label = (n) => `${n}: ${nets.get(n).slice(0, 3).join(", ")}${nets.get(n).length > 3 ? ", …" : ""}`;
+        const rows = list.filter(n => (nets.get(n) || []).length > 1).map(n => { const l = lens.get(n); return `<tr><td>${esc(label(n))}</td><td style="text-align:right">${l ? l.length.toFixed(2) : "–"}</td><td style="text-align:right">${l ? l.vias : "–"}</td></tr>`; }).join("");
+        const rep = PcbLength.report(p);
+        const groups = rep.map((r, i) => `<div style="border:1px solid var(--ui-border,#444);border-radius:4px;padding:6px">
+            <b>${esc(r.group.name)}</b> ${r.group.pair ? "(differential pair)" : "(match group)"}: target ${r.target.toFixed(2)} mm, tolerance ${r.tol} mm, spread ${r.spread.toFixed(2)} mm ${r.ok ? "✓" : "✗"}
+            <table style="margin-top:4px">${r.rows.map(x => `<tr><td>net ${esc(x.net)}</td><td style="text-align:right;padding-left:12px">${x.length ? x.length.toFixed(2) + " mm" : "not routed"}</td><td style="text-align:right;padding-left:12px">${x.length ? (x.delta >= 0 ? "+" : "") + x.delta.toFixed(2) : ""}</td></tr>`).join("")}</table>
+            <button class="tb-btn txt" data-ln="tune" data-i="${i}" title="Add serpentine to the shorter nets until they meet the target">Tune to match</button>
+            <button class="tb-btn txt" data-ln="del" data-i="${i}">Remove group</button></div>`).join("");
+        body.innerHTML = `<div><b>Nets</b> (length of copper, vias)<div style="max-height:22vh;overflow:auto"><table style="width:100%"><tr><th style="text-align:left">Net</th><th style="text-align:right">mm</th><th style="text-align:right">Vias</th></tr>${rows || '<tr><td colspan="3">No nets with two or more pads.</td></tr>'}</table></div></div>
+            <div><b>Match groups and pairs</b>${groups || '<div class="pcb-note">None yet.</div>'}</div>
+            <fieldset style="border:1px solid var(--ui-border,#444)"><legend>New group</legend>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-start">
+                    <label>Name <input id="lnName" size="10"></label>
+                    <label>Nets <select id="lnNets" multiple size="5">${list.filter(n => (nets.get(n) || []).length > 1).map(n => `<option value="${esc(n)}">${esc(label(n))}</option>`).join("")}</select></label>
+                    <div style="display:flex;flex-direction:column;gap:4px">
+                        <label><input type="checkbox" id="lnPair" style="width:auto"> differential pair</label>
+                        <label>Target mm <input id="lnTarget" size="6" placeholder="longest"></label>
+                        <label>Tolerance mm <input id="lnTol" size="6" placeholder="0.5 / 0.1"></label>
+                        <button class="tb-btn txt" data-ln="add">Add group</button>
+                    </div>
+                </div></fieldset>
+            <div class="pcb-note" id="lnMsg"></div>
+            <div class="pcb-note">Tuning inserts square serpentine bumps in the middle of the net's longest straight run, on the side that creates no rule violation. A net's length is all its copper; the rule check lists groups outside tolerance.</div>`;
     }
 
     // ---------------------------------------------------------------- back-annotation

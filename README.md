@@ -98,6 +98,8 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 
 **Fab rules**: the Fab list (or `{op: "rules", fab: "generic"}` over MCP) checks the board against the limits of a manufacturing service as well as your own rules: minimum track, drill size, annular ring of pads and vias, hole-to-hole spacing, solder-mask webs between pad openings, board size and edge margin (presets: generic 2-layer prototype, relaxed, tight; the numbers are typical, so check your service's). Silkscreen running over pads is noted separately, since the fab clips it. Export refuses a board with fab violations unless forced.
 
+**Lengths and pairs**: PCB > Lengths… lists the copper length of each net; make a *match group* (a bus) or a *differential pair* from two or more nets with a target (default: the longest) and a tolerance, and *Tune to match* adds a serpentine to the shorter nets, centred on their longest straight run on the side that breaks no rule. Groups out of tolerance appear in Check rules. Pairs are matched in length only; the two tracks are not routed as a coupled pair.
+
 **Back-annotation**: PCB > Back-annotate… numbers the parts by where they sit on the board (left to right in rows, or top to bottom) and renames the schematic's references to match, and writes each part's footprint into its Footprint field, so BOMs and KiCad exports agree with the board. Undo is separate for the board and the schematic.
 
 **Footprint library**: in Footprints… pick *Import folder…* (a KiCad `.pretty` folder) or *Import files…* once; the library stays in this browser, is searchable, and *Use on selected part* copies the chosen footprint into the design. Silkscreen lines, rectangles, circles, arcs and polygons are imported; other layers are ignored.

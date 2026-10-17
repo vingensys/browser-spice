@@ -42,7 +42,8 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 - Also done: push-and-shove routing (tracks and vias), user-defined footprints (editor and KiCad import) and copper pours.
 - Done: back-annotation of references and footprints to the schematic.
 - Done: whole footprint-library import (a .pretty folder, kept in the browser, searchable).
-- Not done: planes, differential pairs, length tuning, 3D view, swapping gates or pins from the board.
+- Done: net lengths, length-match groups, differential-pair skew and serpentine length tuning (pairs are not routed as coupled traces; each net is routed on its own).
+- Not done: planes, coupled differential-pair routing, 3D view, swapping gates or pins from the board.
 
 ### 5. Product
 - Cloud save, version history, comments, collaboration; embeddable simulator widgets; plugin API for parts and analyses.
