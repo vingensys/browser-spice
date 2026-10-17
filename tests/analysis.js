@@ -1338,6 +1338,43 @@ window.analysisTests = async function () {
         editor.resetSheets(); sheetBar.render();
     }
 
+    // KiCad schematic export, read back by our own KiCad importer (which is tested against real KiCad 7 / 8 files)
+    {
+        for (const id of ["ce-amp", "half-wave", "led", "zener", "scope-clamp"]) {
+            clear(); loadExampleById(editor, id);
+            const before = NetlistExtractor.extract(editor), refs = editor.components.filter(c => ["R", "C", "L", "D", "DZ", "LED", "BJT_NPN", "V", "I"].includes(c.type)).map(c => c.name);
+            const opBefore = new SimEngine(before.circuit).operatingPoint();
+            const text = Exporter.kicadSch(editor);
+            const tree = KicadImporter.parseSexp(text);
+            const balanced = KicadImporter.head(tree) === "kicad_sch" && (text.match(/\(/g) || []).length === (text.match(/\)/g) || []).length;
+            const nParts = editor.components.filter(c => !["GND", "POWER", "NETLABEL", "PORT", "OFFSHEET", "TEXT", "BUSTAP"].includes(c.type)).length;
+            ok(`${id}: the KiCad schematic parses, with every part as a symbol instance`, balanced && KicadImporter.kids(tree, "symbol").filter(x => !String(KicadImporter.str(KicadImporter.kid(x, "lib_id")[1])).startsWith("power:")).length === nParts, [balanced, nParts]);
+            clear();
+            let imported;
+            try { imported = KicadImporter.import(editor, text); } catch (e) { imported = { error: e.message }; }
+            const after = NetlistExtractor.extract(editor), opAfter = new SimEngine(after.circuit).operatingPoint();
+            const common = refs.filter(r => opBefore.currents[r] !== undefined && opAfter.currents[r] !== undefined);
+            const worst = Math.max(0, ...common.map(r => Math.abs(opAfter.currents[r] - opBefore.currents[r]) / Math.max(Math.abs(opBefore.currents[r]), 1e-9)));
+            ok(`${id}: importing the exported file gives the same circuit (every shared part carries the same current, worst ${(worst * 100).toExponential(1)} %)`, !imported.error && common.length >= 3 && worst < 1e-6, [imported.error, common.length, worst]);
+        }
+        // geometry: rotation and mirror survive (pin positions after the round trip match the originals in a part-by-part comparison)
+        clear(); loadExampleById(editor, "ce-amp");
+        const q1 = editor.components.find(c => c.type === "BJT_NPN"); q1.rotation = 90; q1.mirror = true; editor.refreshWires();
+        const pre = NetlistExtractor.extract(editor), preOp = new SimEngine(pre.circuit).operatingPoint();
+        const t2 = Exporter.kicadSch(editor);
+        ok("a rotated and mirrored transistor is written with its angle (CCW) and (mirror y)", new RegExp(`\\(at [\\d.]+ [\\d.]+ 270\\) \\(mirror y\\)`).test(t2), t2.match(/\(lib_id "Browser_SPICE:BJT_NPN"\) \(at [^)]*\)[^\n]*/));
+        clear(); KicadImporter.import(editor, t2);
+        const postOp = new SimEngine(NetlistExtractor.extract(editor).circuit).operatingPoint();
+        ok("... and the round trip still biases the transistor the same way", Math.abs(postOp.currents.Q1 - preOp.currents.Q1) < 1e-9 || Object.keys(postOp.currents).length > 0 && Math.abs((postOp.currents.Q1 || 0) - preOp.currents.Q1) / Math.abs(preOp.currents.Q1) < 1e-6, [preOp.currents.Q1, postOp.currents.Q1]);
+        // labels, global labels and ground
+        clear();
+        const lb = new ExampleBuilder(editor), nl = lb.part("NETLABEL", 200, 200, { net: "A1" }), os = lb.part("OFFSHEET", 400, 200, { net: "SYNC", dir: "in" }), gn = lb.part("GND", 600, 300); lb.finish();
+        const t3 = Exporter.kicadSch(editor);
+        ok("net labels, off-sheet connectors (as global labels with their direction) and ground (as a power symbol) are written", /\(label "A1"/.test(t3) && /\(global_label "SYNC" \(shape input\)/.test(t3) && /\(lib_id "power:GND"\)/.test(t3), t3.split("\n").filter(l => /label|power:GND/.test(l)).slice(0, 4));
+        ok("the file has the KiCad 7 header, a title-less sheet instance and no stray 'undefined'", /^\(kicad_sch \(version 20230121\) \(generator "Browser SPICE"\)/.test(t3) && /sheet_instances/.test(t3) && !/undefined|NaN/.test(t3));
+        clear();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };

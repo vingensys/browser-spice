@@ -203,6 +203,126 @@ const Exporter = {
         return true;
     },
 
+    // ---- KiCad schematic (.kicad_sch, KiCad 7 format) ----------------------------------------------------------------
+
+    // The open sheet as a KiCad schematic: every part becomes a symbol (a box with its pins; the parts KiCad can simulate carry Sim.* fields
+    // too), wires and junctions keep their geometry, ground / power / net labels / ports / off-sheet connectors become power symbols and
+    // labels, notes become text. One sheet only (hierarchical sheets are not followed). 20 px = 0.1 in = 2.54 mm.
+    kicadSch(editor) {
+        const K = 0.127, mm = (v) => Number((v * K).toFixed(3)), q = (s) => `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+        let seed = 12345;
+        const uuid = () => { const h = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed.toString(16).padStart(8, "0"); }; const a = h(), b = h(), c = h(), d = h(); return `${a}-${b.slice(0, 4)}-4${b.slice(4, 7)}-8${c.slice(0, 3)}-${c.slice(3)}${d.slice(0, 4)}`; };
+        const fx = (size = 1.27) => `(effects (font (size ${size} ${size})))`;
+        const spice = (v, unit = "") => Units.formatSI(Units.parseSI(v) || 0, unit).replace(/\s/g, "").replace("µ", "u");
+        const SKIP_SYMBOL = new Set(["GND", "POWER", "NETLABEL", "PORT", "OFFSHEET", "TEXT", "BUSTAP", "NODEIC"]);
+        const libs = new Map(), out = [];
+        const body = [];
+
+        // a symbol from the part's pins and box (the pin names double as numbers; y is up in a library symbol)
+        const libSymbol = (comp) => {
+            const def = editor.getSymbolDef(comp), key = `${comp.type}|${def.pins.map(p => p[0]).join(",")}`;
+            if (libs.has(key)) return libs.get(key).id;
+            const id = `Browser_SPICE:${comp.type}${libs.size ? "_" + libs.size : ""}`, short = id.split(":")[1];
+            const [x1, y1, x2, y2] = def.box;
+            const pins = def.pins.map(([name, x, y, dx, dy]) => {
+                const ang = ((Math.round(Math.atan2(dy, -dx) * 180 / Math.PI) % 360) + 360) % 360;       // from the connection point toward the body, y up
+                return `      (pin passive line (at ${mm(x)} ${mm(-y)} ${ang}) (length 2.54) (name ${q(name)} ${fx()}) (number ${q(name)} ${fx()}))`;
+            });
+            const text = [
+                `    (symbol ${q(id)} (in_bom yes) (on_board yes)`,
+                `      (property "Reference" ${q(SchematicEditor.REF_PREFIX[comp.type] || "U")} (at 0 ${mm(-y1 + 8)} 0) ${fx()})`,
+                `      (property "Value" ${q(comp.type)} (at 0 ${mm(-y2 - 8)} 0) ${fx()})`,
+                `      (property "Footprint" "" (at 0 0 0) (effects (font (size 1.27 1.27)) hide))`,
+                `      (symbol ${q(short + "_0_1")} (rectangle (start ${mm(x1 + 12)} ${mm(-y1 - 8)}) (end ${mm(x2 - 12)} ${mm(-y2 + 8)}) (stroke (width 0.254) (type default)) (fill (type background))))`,
+                `      (symbol ${q(short + "_1_1")}`, ...pins, "      )", "    )"
+            ].join("\n");
+            libs.set(key, { id, text });
+            return id;
+        };
+        const powerSymbol = (net) => {
+            const id = net === "GND" ? "power:GND" : `power:${net}`;
+            if (!libs.has(id)) libs.set(id, { id, text: [
+                `    (symbol ${q(id)} (power) (pin_names (offset 0) hide) (in_bom no) (on_board no)`,
+                `      (property "Reference" "#PWR" (at 0 -3.81 0) (effects (font (size 1.27 1.27)) hide))`,
+                `      (property "Value" ${q(net)} (at 0 3.81 0) ${fx()})`,
+                `      (symbol ${q(id.split(":")[1] + "_1_1")} (pin power_in line (at 0 0 ${net === "GND" ? 90 : 270}) (length 0) hide (name ${q(net)} ${fx()}) (number "1" ${fx()})))`,
+                "    )"].join("\n") });
+            return id;
+        };
+        // model fields KiCad's ngspice understands (the importer reads the same ones)
+        const simFields = (comp) => {
+            const f = [], P = (k, v) => f.push(`    (property ${q(k)} ${q(v)} (at 0 0 0) (effects (font (size 1.27 1.27)) hide))`);
+            const t = comp.type;
+            if (t === "R" || t === "C" || t === "L") P("Sim.Device", t);
+            else if (t === "V" || t === "I") {
+                const st = comp.sourceType || "DC", u = t === "V" ? "V" : "A";
+                P("Sim.Device", t); P("Sim.Pins", "2=+ 1=-");
+                if (st === "DC") { P("Sim.Type", "DC"); P("Sim.Params", `dc=${spice(comp.dcVoltage !== undefined ? comp.dcVoltage : comp.value, u)}`); }
+                else if (st === "AC") { P("Sim.Type", "SIN"); P("Sim.Params", `dc=${spice(comp.dcOffset || 0)} ampl=${spice(comp.acMagnitude === undefined ? 1 : comp.acMagnitude)} f=${spice(comp.frequency || 1000)}`); }
+                else if (st === "PULSE") { const p = comp.pulse || {}; P("Sim.Type", "PULSE"); P("Sim.Params", `y1=${spice(p.v1 || 0)} y2=${spice(p.v2 === undefined ? 5 : p.v2)} td=${spice(p.delay || 0)} tr=${spice(p.rise || 1e-6)} tf=${spice(p.fall || 1e-6)} tw=${spice(p.width || 5e-4)} per=${spice(p.period || 1e-3)}`); }
+                else if (st === "SQUARE") { const g = comp.gen || {}, T = 1 / (Units.parseSI(g.freq) || 1000), duty = (Units.parseSI(g.duty) || 50) / 100; P("Sim.Type", "PULSE"); P("Sim.Params", `y1=${spice(g.low || 0)} y2=${spice(g.high === undefined ? 5 : g.high)} td=0 tr=1n tf=1n tw=${spice(T * duty)} per=${spice(T)}`); }
+            } else if (t === "D" || t === "LED" || t === "DZ") { P("Sim.Device", "D"); P("Sim.Pins", "1=A 2=K"); if (comp.model) P("Sim.Name", comp.model); }
+            else if (t === "BJT_NPN" || t === "BJT_PNP") { P("Sim.Device", t === "BJT_NPN" ? "NPN" : "PNP"); if (comp.model) P("Sim.Name", comp.model); }
+            else if (t === "NMOS" || t === "PMOS") { P("Sim.Device", t); if (comp.model) P("Sim.Name", comp.model); }
+            return f;
+        };
+
+        // parts
+        const comps = editor.components.filter(c => !editor.isOverlay(c));
+        for (const c of comps) {
+            const X = mm(c.x), Y = mm(c.y);
+            if (c.type === "GND" || c.type === "POWER") {
+                const net = c.type === "GND" ? "GND" : String(c.net || "VCC").trim().toUpperCase();
+                const lib = powerSymbol(net);
+                const p = editor.getTerminalPosition(c, editor.getTerminals(c)[0]);
+                body.push(`  (symbol (lib_id ${q(lib)}) (at ${mm(p.x)} ${mm(p.y)} 0) (unit 1) (in_bom no) (on_board no) (uuid ${q(uuid())})\n    (property "Reference" "#PWR${body.length}" (at ${mm(p.x)} ${mm(p.y)} 0) (effects (font (size 1.27 1.27)) hide))\n    (property "Value" ${q(net)} (at ${mm(p.x)} ${mm(p.y + 12)} 0) ${fx()})\n    (pin "1" (uuid ${q(uuid())})))`);
+                continue;
+            }
+            if (c.type === "NETLABEL" || c.type === "PORT" || c.type === "OFFSHEET") {
+                const p = editor.getTerminalPosition(c, editor.getTerminals(c)[0]), name = String(c.net || "NET").trim();
+                if (c.type === "NETLABEL") body.push(`  (label ${q(name)} (at ${mm(p.x)} ${mm(p.y)} 0) ${fx()} (uuid ${q(uuid())}))`);
+                else {
+                    const shape = c.type === "PORT" ? "bidirectional" : ({ in: "input", out: "output", bidir: "bidirectional", passive: "passive" }[c.dir || "bidir"]);
+                    body.push(`  (global_label ${q(name)} (shape ${shape}) (at ${mm(p.x)} ${mm(p.y)} 0) ${fx()} (uuid ${q(uuid())})\n    (property "Intersheet References" "\${INTERSHEET_REFS}" (at 0 0 0) (effects (font (size 1.27 1.27)) hide)))`);
+                }
+                continue;
+            }
+            if (c.type === "TEXT") { body.push(`  (text ${q(c.text || c.value || "")} (at ${X} ${Y} 0) ${fx()} (uuid ${q(uuid())}))`); continue; }
+            if (SKIP_SYMBOL.has(c.type)) continue;
+            const lib = libSymbol(c), ang = ((360 - ((c.rotation || 0) % 360)) % 360);
+            const value = ["R", "C", "L"].includes(c.type) ? spice(c.value) : (Exporter.describe(c) || c.type);
+            const props = [`    (property "Reference" ${q(c.name)} (at ${X} ${mm(c.y - 28)} 0) ${fx()})`, `    (property "Value" ${q(value)} (at ${X} ${mm(c.y + 28)} 0) ${fx()})`,
+                `    (property "Footprint" ${q(c.footprint || "")} (at ${X} ${Y} 0) (effects (font (size 1.27 1.27)) hide))`];
+            if (c.mpn) props.push(`    (property "MPN" ${q(c.mpn)} (at ${X} ${Y} 0) (effects (font (size 1.27 1.27)) hide))`);
+            if (c.mfr) props.push(`    (property "Manufacturer" ${q(c.mfr)} (at ${X} ${Y} 0) (effects (font (size 1.27 1.27)) hide))`);
+            props.push(`    (property "BrowserSpiceType" ${q(c.type)} (at ${X} ${Y} 0) (effects (font (size 1.27 1.27)) hide))`, ...simFields(c));
+            const pins = editor.getSymbolDef(c).pins.map(p => `    (pin ${q(p[0])} (uuid ${q(uuid())}))`);
+            body.push(`  (symbol (lib_id ${q(lib)}) (at ${X} ${Y} ${ang})${c.mirror ? " (mirror y)" : ""} (unit 1) (in_bom yes) (on_board yes) (uuid ${q(uuid())})\n${props.join("\n")}\n${pins.join("\n")})`);
+        }
+        // wires (one segment at a time) and junction dots
+        for (const w of editor.wires) {
+            const r = w.route || [];
+            for (let i = 0; i < r.length - 1; i++) {
+                if (r[i].x === r[i + 1].x && r[i].y === r[i + 1].y) continue;
+                body.push(`  (${w.bus ? "bus" : "wire"} (pts (xy ${mm(r[i].x)} ${mm(r[i].y)}) (xy ${mm(r[i + 1].x)} ${mm(r[i + 1].y)})) (stroke (width 0) (type default)) (uuid ${q(uuid())}))`);
+            }
+        }
+        for (const key of editor.computeJunctions()) { const [x, y] = key.split(",").map(Number); body.push(`  (junction (at ${mm(x)} ${mm(y)}) (diameter 0) (color 0 0 0 0) (uuid ${q(uuid())}))`); }
+
+        const tb = editor.titleBlock || {};
+        out.push(`(kicad_sch (version 20230121) (generator "Browser SPICE") (uuid ${q(uuid())})`, `  (paper "A3")`);
+        if (tb.title || tb.company || tb.author || tb.date || tb.rev) out.push(`  (title_block${tb.title ? ` (title ${q(tb.title)})` : ""}${tb.date ? ` (date ${q(tb.date)})` : ""}${tb.rev ? ` (rev ${q(tb.rev)})` : ""}${tb.company ? ` (company ${q(tb.company)})` : ""})`);
+        out.push("  (lib_symbols", ...[...libs.values()].map(l => l.text), "  )", ...body, `  (sheet_instances (path "/" (page "1")))`, ")");
+        return out.join("\n") + "\n";
+    },
+
+    saveKicadSch(editor) {
+        if (!editor.components.length && !editor.wires.length) { if (window.runner) window.runner.toast("There is nothing on the sheet to export.", "info"); return false; }
+        window.downloadFile("schematic.kicad_sch", Exporter.kicadSch(editor), "text/plain");
+        if (window.runner) window.runner.toast(editor.sheets && editor.sheets.length > 1 ? "Exported the open sheet only (hierarchical sheets are not followed)." : "Exported a KiCad 7 schematic.", "info");
+        return true;
+    },
+
     // ---- KiCad netlist ------------------------------------------------------------------------------------------------
 
     // a KiCad "export" netlist (.net) of the open sheet: every part with its pin numbers / names and the nets they join

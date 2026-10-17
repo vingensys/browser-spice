@@ -222,6 +222,11 @@ class SchematicImporter {
             case "G": return { ...base, type: "G", props: { value: Units.formatSI(e.gm, "S") } };
             case "D": {
                 const m = deck.models[e.model];
+                // a model named but not defined in the deck may be one of the library parts (an LED colour, a zener): then the part is that kind
+                if (!m && typeof SIM_MODELS !== "undefined") for (const kind of ["LED", "DZ", "D"]) {
+                    const lib = SIM_MODELS[kind] && Object.keys(SIM_MODELS[kind]).find(k => k.toLowerCase() === String(e.model).toLowerCase());
+                    if (lib) return { ...base, type: kind, props: { model: lib, value: lib } };
+                }
                 const params = SpiceParser.diodeParams(m);
                 const type = /led/.test(e.model) ? "LED" : (isFinite(params.bv) && params.bv < 30 ? "DZ" : "D");
                 return { ...base, type, props: { model: e.model.toUpperCase(), value: e.model.toUpperCase(), customParams: m ? params : undefined } };
