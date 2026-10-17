@@ -152,6 +152,7 @@
     C("view.reset", "Zoom 100%", { keys: "Ctrl+0", run: () => editor.resetView() });
     C("view.grid", "Grid", { icon: "grid", keys: "Ctrl+G", global: true, checked: () => editor.showGrid !== false, run() { editor.showGrid = editor.showGrid === false; editor.draw(); } });
     C("view.graph", "Graph Window", { icon: "graph", checked: () => graph.visible, run: () => (graph.visible ? graph.hide() : graph.show()) });
+    C("view.describe", "Describe Sheet (for screen readers)…", { keys: "Ctrl+Shift+D", global: true, run: () => SheetDescriber.open(editor) });
     C("view.classic", "Classic (ISIS) Colours", { checked: () => Theme.name === "classic", run: () => Theme.set("classic") });
     C("view.dark", "Dark Colours", { checked: () => Theme.name === "dark", run: () => Theme.set("dark") });
 
@@ -295,7 +296,7 @@
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", { sub: "Open Recent", items: recentItems }, "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.pdf", "file.kicadsch", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
-        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "-", "view.classic", "view.dark"] },
+        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "view.describe", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },

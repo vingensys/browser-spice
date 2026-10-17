@@ -348,6 +348,14 @@ window.analysisTests = async function () {
         plotter.data = keep; plotter.draw();
     }
 
+    {
+        const d = SheetDescriber.build(editor);
+        ok("the sheet description lists the parts and what the nets join", d.lines[0] === "Parts:" && d.lines.some(l => /^R1: /.test(l)) && d.lines.some(l => /^GND joins .*pin/.test(l)) && /\d+ parts?, \d+ nets?/.test(d.summary), d.summary + "\n" + d.lines.join("\n"));
+        Commands.run("view.describe"); await wait(100);
+        ok("View > Describe Sheet shows it and announces the summary", !!document.querySelector(".dialog .sheet-description") && document.querySelector("#srLive") && document.querySelector("#srLive").getAttribute("aria-live") === "polite");
+        Dialog.close("t");
+    }
+
     const tfInfo = NetlistExtractor.extract(editor);
     Commands.run("graph.tf");
     ok("Graph > Transfer Function opens its dialog", !!document.querySelector(".dialog .tf #tfOut"));

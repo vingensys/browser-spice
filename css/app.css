@@ -723,3 +723,7 @@ body.nosidebar #leftpane { display: none; }
 .mcu-ram b { color: #8c98a8; font-weight: normal; font-size: 11px; }
 .mcu-grid { display: grid; grid-template-columns: repeat(16, 1fr); font-family: Consolas, monospace; font-size: 10px; gap: 1px; }
 .mcu-grid span { color: #5b6573; text-align: center; } .mcu-grid span.nz { color: #d8dee9; } .mcu-grid span.chg { background: #5b4a00; color: #ffe08a; }
+
+/* screen-reader only text and the sheet description */
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.sheet-description { max-height: 50vh; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 0; }

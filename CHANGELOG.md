@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- View > Describe Sheet (Ctrl+Shift+D): the parts, what each net joins and any unconnected pins as plain text, announced through a live region for screen readers.
 - Graphs that mix voltage and current traces put the currents on their own scale on the right (Graph > Separate Current Axis turns it off).
 - Measurements can be expressions of other measurements (`.meas tran gain param='vout/vin'`), in the dialog, in decks and in the MCP server.
 - File > Open Recent (the last 8 saved or opened designs, kept in this browser).
