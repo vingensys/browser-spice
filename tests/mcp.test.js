@@ -171,6 +171,25 @@ const LP = "lp\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nC1 out 0 159.155n\n.ac dec 20 1
         const rr = await call("pcb_route", { board_id: board.board_id });
         if (rr.failed) throw new Error(JSON.stringify(rr));
     });
+    await test("pcb_edit length_group and tune: a group is matched by serpentine and ends within tolerance", async () => {
+        const b = await call("pcb_create", { netlist: "t\nV1 a 0 1\nR1 a b 1k\nR2 b c 1k\nR3 c 0 1k\nR4 a d 1k\nR5 d 0 1k\n.end", width: 70, height: 50 });
+        await call("pcb_route", { board_id: b.board_id });
+        const d = await call("pcb_describe", { board_id: b.board_id, include: ["nets"] });
+        const names = Object.keys(d.nets).filter(n => n !== "GND");
+        const all = await call("pcb_edit", { board_id: b.board_id, actions: [{ op: "length_group", name: "all", nets: names, tolerance: 0.2 }] });
+        const rows = all.results[0].report.filter(r => r.mm > 1).sort((x, y) => x.mm - y.mm);
+        let best = [rows[0], rows[1]];
+        for (let i = 1; i + 1 < rows.length; i++) if (rows[i + 1].mm - rows[i].mm < best[1].mm - best[0].mm) best = [rows[i], rows[i + 1]];
+        if (rows.length < 2) throw new Error(JSON.stringify(all).slice(0, 300));
+        const target = best[1].mm + 3;                                                        // a few millimetres longer than the longer one: room for a serpentine
+        await call("pcb_edit", { board_id: b.board_id, actions: [{ op: "length_group", name: "bus", nets: best.map(r => r.net), target, tolerance: 0.2 }] });
+        const t = await call("pcb_edit", { board_id: b.board_id, actions: [{ op: "tune", group: "bus" }] });
+        if (t.error || !t.results[0].within_tolerance) throw new Error(JSON.stringify(t).slice(0, 400));
+        const k = await call("pcb_check", { board_id: b.board_id });
+        if (k.counts.clearance || k.counts.short || (k.issues.length || []).some(i => /bus/.test(i.message))) throw new Error(JSON.stringify(k.counts) + JSON.stringify(k.issues.length));   // the throwaway "all" group may still be out of tolerance
+        const bad = await call("pcb_edit", { board_id: b.board_id, actions: [{ op: "tune", group: "nope" }] });
+        if (!/no length group/.test(bad.error)) throw new Error(JSON.stringify(bad));
+    });
     await test("pcb_edit track: 'shove' pushes another net's track aside, leaving the rules clean", async () => {
         const b = await call("pcb_create", { netlist: "t\nV1 a 0 1\nV2 c 0 1\nR1 a b 1k\nR2 c d 1k\n.end", width: 40, height: 30, auto_place: false });
         const id = b.board_id;

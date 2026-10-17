@@ -2,7 +2,7 @@
 // check the rules, look at it (SVG) and export Gerber / Excellon. A board lives in the server process under an id.
 // The kernel is the same js/pcb/pcb.js the web app's PCB view uses.
 const fs = require("fs"), path = require("path");
-const { SpiceParser, Pcb, KicadImporter } = require("./engine.cjs");
+const { SpiceParser, Pcb, PcbLength, KicadImporter } = require("./engine.cjs");
 
 const boards = new Map();
 let counter = 0;
@@ -106,8 +106,24 @@ function act(b, a) {
             return { pour: z.id, layer, net: netName(net), copper_mm2: round(fz.rects.reduce((s, r) => s + (r[2] - r[0]) * (r[3] - r[1]), 0), 1), pads_connected: fz.connected.length, pads_cut_off: fz.islands.map(p => `${p.part.ref}.${p.i + 1}`) };
         }
         case "remove_pour": { const before = pcb.zones.length; pcb.zones = pcb.zones.filter(z => z.id !== a.id && !(a.layer && z.layer === a.layer && a.id === undefined)); return { removed: before - pcb.zones.length }; }
+        case "length_group": {
+            const nets = (a.nets || []).map(String);
+            if (nets.length < 2) throw new Error("a length group needs at least two nets");
+            if (a.pair && nets.length !== 2) throw new Error("a differential pair has exactly two nets");
+            const g = { name: String(a.name || `group${(pcb.groups || []).length + 1}`), nets, pair: !!a.pair, target: Number.isFinite(Number(a.target)) && Number(a.target) > 0 ? Number(a.target) : null, tol: Number.isFinite(Number(a.tolerance)) ? Number(a.tolerance) : (a.pair ? 0.1 : 0.5) };
+            pcb.groups = (pcb.groups || []).filter(x => x.name !== g.name); pcb.groups.push(g);
+            return { group: g.name, report: PcbLength.report({ ...pcb, groups: [g] })[0].rows.map(r => ({ net: netName(r.net), mm: round(r.length), delta_mm: round(r.delta) })) };
+        }
+        case "tune": {
+            const g = (pcb.groups || []).find(x => x.name === a.group);
+            if (!g) throw new Error(`no length group "${a.group}" (make one with length_group)`);
+            const res = PcbLength.tuneGroup(pcb, g), bad = res.filter(r => !r.ok);
+            if (bad.length) throw new Error(`could not tune: ${bad.map(r => `net ${netName(r.net)}: ${r.reason}`).join("; ")}`);
+            const rep = PcbLength.report(pcb).find(r => r.group.name === g.name);
+            return { tuned: res.map(r => netName(r.net)), within_tolerance: rep.ok, spread_mm: round(rep.spread), target_mm: round(rep.target) };
+        }
         case "delete_track": { const before = pcb.tracks.length; pcb.tracks = pcb.tracks.filter(t => t.id !== a.id); return { removed: before - pcb.tracks.length }; }
-        default: throw new Error(`unknown op "${a.op}" (move, flip, package, outline, rules, auto_place, clear_routing, define_footprint, import_kicad_footprint, via, track, pour, remove_pour, delete_track)`);
+        default: throw new Error(`unknown op "${a.op}" (move, flip, package, outline, rules, auto_place, clear_routing, define_footprint, import_kicad_footprint, via, track, pour, remove_pour, delete_track, length_group, tune)`);
     }
 }
 
@@ -218,7 +234,7 @@ const TOOLS = [
     },
     {
         name: "pcb_edit",
-        description: "Change a board with a list of actions, applied in order and all-or-nothing (if one fails, none of them stay and you are told which). Ops: move {ref,x,y,rot,shove} (shove: true pushes other nets' tracks and vias out of the part's way and refuses a move that cannot work), flip {ref} (SMD only), package {ref,package}, outline {width,height}, rules {clearance,track_width,via,via_drill,edge,fab:'generic'|'relaxed'|'tight'|'none'}, auto_place {fit} (clears routing), clear_routing, define_footprint {definition} (text: footprint NAME / pad N X Y W H [round|rect] [drill D] / line … / circle X Y R / map …), import_kicad_footprint {text}, via {x,y,shove}, track {layer,points:[[x,y],…],net,width,mode:'shove'|'walk'|'off'} (lays a track the way the interactive router does: 'shove' pushes other nets' tracks and vias aside, 'walk' routes around them at 0/45/90 degrees, 'off' places it as given), pour {layer,net,points,thermal} (copper pour; net '0' is ground), remove_pour {id}, delete_track {id}.",
+        description: "Change a board with a list of actions, applied in order and all-or-nothing (if one fails, none of them stay and you are told which). Ops: move {ref,x,y,rot,shove} (shove: true pushes other nets' tracks and vias out of the part's way and refuses a move that cannot work), flip {ref} (SMD only), package {ref,package}, outline {width,height}, rules {clearance,track_width,via,via_drill,edge,fab:'generic'|'relaxed'|'tight'|'none'}, auto_place {fit} (clears routing), clear_routing, define_footprint {definition} (text: footprint NAME / pad N X Y W H [round|rect] [drill D] / line … / circle X Y R / map …), import_kicad_footprint {text}, via {x,y,shove}, track {layer,points:[[x,y],…],net,width,mode:'shove'|'walk'|'off'} (lays a track the way the interactive router does: 'shove' pushes other nets' tracks and vias aside, 'walk' routes around them at 0/45/90 degrees, 'off' places it as given), pour {layer,net,points,thermal} (copper pour; net '0' is ground), remove_pour {id}, delete_track {id}, length_group {name,nets:[…],pair,target,tolerance} (a length-match group or differential pair; the target defaults to the longest net), tune {group} (adds serpentine to the shorter nets until the group is within tolerance; fails with the reason if a net has no room).",
         inputSchema: { type: "object", required: ["board_id", "actions"], properties: { board_id: BOARD_ID, actions: { type: "array", items: { type: "object", properties: { op: { type: "string" } }, required: ["op"] } } } },
         run: edit
     },

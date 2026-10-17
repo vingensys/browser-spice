@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- MCP: pcb_edit has length_group and tune (match groups, differential pairs, serpentine tuning); pcb_check lists groups outside tolerance.
 - PCB: 3D view (copper, pads, vias, silkscreen and the parts as boxes of typical package height; drag to turn, wheel to zoom, Top / Angle / Bottom, Save PNG). Drawn on a 2D canvas with a perspective projection, no WebGL.
 - PCB: Lengths… shows the copper length of every net, and lets you define length-match groups and differential pairs (target, tolerance); Tune to match adds square serpentine bumps in the middle of the shorter nets' longest straight run, on the side that creates no rule violation. The rule check lists groups outside tolerance.
 - PCB: Back-annotate… numbers the parts by their place on the board (rows or columns) and renames the schematic's references to match, and writes each part's footprint to its Footprint field. Parts in sub-sheets are skipped.
