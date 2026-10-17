@@ -867,6 +867,29 @@ test("regulator holds its output and drops out below vout + dropout", () => {
     near(neg, -5, 0.02, "negative regulator");
 });
 
+test("regulator current limit: a heavy load pulls the output down to a load line, a short gives the limit", () => {
+    const run = (rl, model = "7805", vin = 12) => build(c => {
+        c.add(new VoltageSource("V1", ["in", "0"], vdc(vin)));
+        c.add(new Regulator("U1", ["in", "out", "0"], simModel("REG", model).params));
+        c.add(new Resistor("RL", ["out", "0"], { r: rl }));
+    }).operatingPoint();
+    near(run(10).nodeVoltages.out, 5, 0.03, "0.5 A is below the 1.5 A limit: still regulating");
+    const heavy = run(1);
+    near(heavy.nodeVoltages.out, 1.485, 0.02, "1 ohm: the output is held at ilim * R (the knee costs 1 %)");
+    near(run(0.01).nodeVoltages.out / 0.01, 1.485, 0.02, "a near short gives the limit current");
+    near(run(100, "78L05").nodeVoltages.out, 5, 0.03, "78L05 at 50 mA");
+    const l = run(20, "78L05");                     // 250 mA wanted, 150 mA limit
+    near(l.nodeVoltages.out, 0.15 * 20 * 0.99, 0.05, "78L05: limited at 150 mA");
+    // from a cold start into a capacitor the current is limited too: dv/dt = ilim / C
+    const c = build(k => {
+        k.add(new VoltageSource("V1", ["in", "0"], vdc(12)));
+        k.add(new Regulator("U1", ["in", "out", "0"], simModel("REG", "7805").params));
+        k.add(new Capacitor("C1", ["out", "0"], { c: 1e-3 }));
+    });
+    const r = c.transient({ tStop: 2e-3, tStep: 20e-6, uic: true });
+    near(r.nodeHistories.out[r.timePoints.findIndex(t => t >= 2e-3)], 1.485 * 2e-3 / 1e-3, 0.15, "inrush into 1 mF is limited to 1.5 A");
+});
+
 test("D flip-flop wired as a toggle divides the clock by two", () => {
     const c = new SimCircuit();
     c.add(new VoltageSource("VCK", ["ck", "0"], { wave: Waveform.pulse({ v1: 0, v2: 5, delay: 0.5e-3, rise: 1e-6, fall: 1e-6, width: 0.4e-3, period: 1e-3 }) }));

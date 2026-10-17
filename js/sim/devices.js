@@ -466,6 +466,33 @@ class VCVS extends Element {
     current(x) { return x[this.br]; }
 }
 
+// Current-controlled voltage source: v(out) = rm * I(control), the control being a voltage source (an ammeter) by name.
+class CCVS extends Element {
+    constructor(name, nodes, { ctrl, rm = 1 } = {}) {
+        super(name, nodes);
+        this.ctrlName = ctrl;
+        this.rm = rm;
+        this.branches = 1;
+    }
+
+    bind(circuit) {
+        super.bind(circuit);
+        this.ctrl = circuit.elements.find(e => e.name === this.ctrlName);
+        if (!this.ctrl || !this.ctrl.branches) throw new Error(`${this.name}: control source ${this.ctrlName} not found`);
+    }
+
+    stampAny(add) {
+        const [p, n] = this.n, br = this.br;
+        add(p, br, 1); add(n, br, -1);
+        add(br, p, 1); add(br, n, -1);
+        add(br, this.ctrl.br, -this.rm);
+    }
+
+    stamp(ctx) { this.stampAny((i, j, v) => ctx.sys.add(i, j, v)); }
+    stampAC(ac) { this.stampAny((i, j, v) => ac.add(i, j, v, 0)); }
+    current(x) { return x[this.br]; }
+}
+
 class VCCS extends Element {
     // nodes: [out+, out-, ctrl+, ctrl-]; current out+ -> out- = gm * v(ctrl)
     constructor(name, nodes, { gm }) {

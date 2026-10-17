@@ -330,12 +330,18 @@ class NetlistExtractor {
                     // current flows from pin 1 through the source to pin 2
                     els.push({ ...base, kind: "I", nodes: [pin("1"), pin("2")], params: NetlistExtractor.sourceParams(comp) });
                     break;
-                case "E":
-                    els.push({ ...base, kind: "E", nodes: [pin("O+"), pin("O-"), pin("C+"), pin("C-")], params: { gain: Units.parseSI(comp.value) || 0 } });
+                case "E": case "G": {
+                    const isE = comp.type === "E", k = Units.parseSI(comp.value) || 0, bw = Units.parseSI(comp.bw);
+                    const o = [pin("O+"), pin("O-")], cc = [pin("C+"), pin("C-")];
+                    if (!(bw > 0)) { els.push({ ...base, kind: comp.type, nodes: [...o, ...cc], params: isE ? { gain: k } : { gm: k } }); break; }
+                    // with a bandwidth: the ideal source drives a one-pole RC (R = 1 k), and a unity source copies the filtered value to the output
+                    const f = `${comp.name}_bwf`, g = `${comp.name}_bwg`;
+                    els.push({ name: `E${comp.name}_bwa`, comp, kind: "E", nodes: [f, "0", ...cc], params: { gain: k } });          // (a G becomes a voltage of gm * v, read as amps by the last stage)
+                    els.push({ name: `R${comp.name}_bw`, comp, kind: "R", nodes: [f, g], params: { r: 1000 } });
+                    els.push({ name: `C${comp.name}_bw`, comp, kind: "C", nodes: [g, "0"], params: { c: 1 / (2 * Math.PI * bw * 1000) } });
+                    els.push({ ...base, kind: comp.type, nodes: [...o, g, "0"], params: isE ? { gain: 1 } : { gm: 1 } });
                     break;
-                case "G":
-                    els.push({ ...base, kind: "G", nodes: [pin("O+"), pin("O-"), pin("C+"), pin("C-")], params: { gm: Units.parseSI(comp.value) || 0 } });
-                    break;
+                }
                 case "SW":
                     els.push({ ...base, kind: "SW", nodes: [pin("1"), pin("2")], params: { closed: !!comp.closed, ron: 1e-3, roff: 1e9 } });
                     break;
@@ -544,6 +550,8 @@ class NetlistExtractor {
                 case "SUBCKT": SpiceParser.addSubckt(c, e.def, e.nodes, e.name); break;
                 case "BSRC": c.add(new BSource(e.name, e.nodes, { mode: e.params.mode, expr: e.params.expr })); break;
                 case "CCCS": c.add(new CCCS(e.name, e.nodes, { ctrl: e.ctrl, gain: p.gain, vsat: p.vsat })); break;
+                case "CCVS": c.add(new CCVS(e.name, e.nodes, { ctrl: e.ctrl, rm: p.rm })); break;
+                case "GMTANH": c.add(new GmTanh(e.name, e.nodes, { gain: p.gain, vsat: p.vsat })); break;
             }
         }
         return c;
@@ -835,8 +843,10 @@ class NetlistExtractor {
                     // coil: R + L; the contact is a voltage-controlled switch across the coil resistor
                     const nm = String(e.name).replace(/[^A-Za-z0-9_]/g, "_");
                     const vt = (p.pull + p.drop) / 2 * p.rcoil, vh = (p.pull - p.drop) / 2 * p.rcoil;
+                    // (the switch follows |coil voltage drop| = |I| * R, so a coil driven the other way round pulls in just the same)
                     lines.push(`R${nm}_C ${n[0]} ${nm}_m ${f(p.rcoil)}`, `L${nm}_C ${nm}_m ${n[1]} ${f(p.lcoil)}`,
-                        `S${nm} ${n[2]} ${n[3]} ${n[0]} ${nm}_m SW_${nm}`);
+                        `B${nm}_A ${nm}_a 0 V=abs(V(${n[0]})-V(${nm}_m))`,
+                        `S${nm} ${n[2]} ${n[3]} ${nm}_a 0 SW_${nm}`);
                     extra.push(`.model SW_${nm} SW(VT=${f(vt)} VH=${f(vh)} RON=${f(p.ron || 0.05)} ROFF=${f(p.roff || 1e9)})`);
                     break;
                 }
@@ -850,9 +860,15 @@ class NetlistExtractor {
                     const neg = p.vout < 0, a = Math.abs(p.vout);
                     const b = neg ? `(V(${n[2]})-V(${n[0]})-${f(p.dropout)})` : `(V(${n[0]})-V(${n[2]})-${f(p.dropout)})`;
                     const sm = `0.5*(${f(a)}+${b}-sqrt((${f(a)}-${b})*(${f(a)}-${b})+0.0025))`;
+                    // target level, the unlimited pass current as a number (V(x) = amps), and the pass element itself: IN -> OUT, limited at
+                    // ilim by the same smooth knee as the built-in model; the quiescent current runs IN -> GND
                     lines.push(`B${nm}_T ${nm}_o 0 V=V(${n[2]})${neg ? "-" : "+"}${sm}`,
-                        `R${nm}_O ${nm}_o ${n[1]} ${f(p.ro)}`,
-                        `B${nm}_I ${n[0]} ${n[2]} I=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}+${f(p.iq)}`);
+                        `B${nm}_X ${nm}_x 0 V=(V(${nm}_o)-V(${n[1]}))/${f(p.ro)}`);
+                    if (p.ilim > 0) {
+                        const L = f(p.ilim), e2 = f((0.02 * p.ilim) ** 2);
+                        lines.push(`B${nm}_P ${n[0]} ${n[1]} I=0.5*(V(${nm}_x)+${L}-sqrt((V(${nm}_x)-${L})*(V(${nm}_x)-${L})+${e2}))`);
+                    } else lines.push(`B${nm}_P ${n[0]} ${n[1]} I=V(${nm}_x)`);
+                    lines.push(`I${nm}_Q ${n[0]} ${n[2]} DC ${f(p.iq)}`);
                     break;
                 }
                 case "SUBCKT": {
@@ -873,6 +889,14 @@ class NetlistExtractor {
                     lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} I=${f(p.gain)}*I(${sense})*tanh(V(${n[0]},${n[1]})/${f(p.vsat)})`);
                     break;
                 }
+                case "CCVS": {
+                    const sense = NetlistExtractor.spiceName({ kind: "V", name: e.ctrl });
+                    lines.push(`H${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} ${sense} ${f(p.rm)}`);
+                    break;
+                }
+                case "GMTANH":
+                    lines.push(`B${String(e.name).replace(/[^A-Za-z0-9_]/g, "_")} ${n[0]} ${n[1]} I=${f(p.gain)}*V(${n[2]},${n[3]})*tanh(V(${n[0]},${n[1]})/${f(p.vsat)})`);
+                    break;
                 case "SCR": case "TRIAC": {
                     // a latch node x (0 off, 1 on) with a behavioural conduction path; see thyristorSubckt
                     const id = `${e.kind}_${String(e.model || "X").replace(/[^A-Za-z0-9_]/g, "_")}`;

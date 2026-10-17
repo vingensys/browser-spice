@@ -84,8 +84,8 @@ class PropertiesPanel {
                 this.text("Sensitivity (V per A)", "sens", c.sens === undefined ? "0.1" : c.sens, "0.1 = 100 mV/A") +
                 `<div class="prop-note">The output pin carries volts = amps x sensitivity. Wire it to a scope channel; the scope shows amps. The reading is the current of the clamped part as the simulator defines it (into its first pin).</div>`;
         }
-        else if (type === "E") html += this.text("Voltage gain", "value", c.value, "10");
-        else if (type === "G") html += this.text("Transconductance (S)", "value", c.value, "10m");
+        else if (type === "E") html += this.text("Voltage gain", "value", c.value, "10") + this.text("Bandwidth (Hz)", "bw", c.bw === undefined ? "" : c.bw, "blank = ideal (infinite)");
+        else if (type === "G") html += this.text("Transconductance (S)", "value", c.value, "10m") + this.text("Bandwidth (Hz)", "bw", c.bw === undefined ? "" : c.bw, "blank = ideal (infinite)");
         else if (type === "SW") html += this.select("State", "closed", [["false", "Open"], ["true", "Closed"]], String(!!c.closed), "Double-click the switch to toggle it.");
         else if (type === "POT") html += this.text("Total resistance", "value", c.value, "10k") +
             `<div class="property"><label>Wiper position</label>

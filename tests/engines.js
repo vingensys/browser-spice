@@ -100,6 +100,66 @@ window.engineTests = async function () {
         b.finish();
     }, { tStop: 3.5e-3, tStep: 10e-6 });
 
+    // controlled sources and the optocoupler with a bandwidth (a one-pole filter), against ngspice
+    const pulseV = (b, x, y) => b.part("V", x, y, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 1, delay: 100e-6, rise: 1e-6, fall: 1e-6, width: 1.5e-3, period: 3e-3 } });
+    await compare("vcvs-bandwidth", () => {
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        const b = new ExampleBuilder(editor);
+        const v = pulseV(b, 100, 300), e = b.part("E", 360, 260, { value: "2", bw: "1k" }), r = b.part("R", 620, 340, { rot: 90, value: "1 kΩ" }), g = b.part("GND", 360, 500);
+        b.wire(v, "2", e, "C+"); b.wire(e, "C-", g, "1"); b.wire(e, "O+", r, "1"); b.wire(e, "O-", g, "1"); b.wire(r, "2", g, "1"); b.wire(v, "1", g, "1");
+        b.vprobe(r, "1", "out");
+        b.finish();
+    }, { tStop: 3e-3, tStep: 5e-6 }, { op: 0.01, tran: 0.01 });
+    await compare("vccs-bandwidth", () => {
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        const b = new ExampleBuilder(editor);
+        const v = pulseV(b, 100, 300), gm = b.part("G", 360, 260, { value: "2 mS", bw: "2k" }), r = b.part("R", 620, 340, { rot: 90, value: "1 kΩ" }), g = b.part("GND", 360, 500);
+        b.wire(v, "2", gm, "C+"); b.wire(gm, "C-", g, "1"); b.wire(gm, "O+", r, "1"); b.wire(gm, "O-", g, "1"); b.wire(r, "2", g, "1"); b.wire(v, "1", g, "1");
+        b.vprobe(r, "1", "out");
+        b.finish();
+    }, { tStop: 3e-3, tStep: 5e-6 }, { op: 0.01, tran: 0.01 });
+    await compare("optocoupler-bandwidth", () => {
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        const b = new ExampleBuilder(editor);
+        const v = b.part("V", 100, 300, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 100e-6, rise: 1e-6, fall: 1e-6, width: 500e-6, period: 1e-3 } });
+        const r1 = b.part("R", 260, 200, { value: "330 Ω" });
+        const u = b.part("OPTO", 460, 300, { model: "PC817", value: "PC817", bw: "10k" });
+        const vcc = b.part("V", 700, 300, { rot: 270, dcVoltage: 5, value: "5 V" });
+        const r2 = b.part("R", 700, 160, { value: "1 kΩ" });
+        const g = b.part("GND", 460, 500);
+        b.wire(v, "2", r1, "1"); b.wire(r1, "2", u, "A"); b.wire(u, "K", g, "1"); b.wire(v, "1", g, "1");
+        b.wire(vcc, "2", r2, "1"); b.wire(r2, "2", u, "C"); b.wire(u, "E", g, "1"); b.wire(vcc, "1", g, "1");
+        b.vprobe(u, "C", "out");
+        b.finish();
+    }, { tStop: 2e-3, tStep: 2e-6 }, { op: 0.01, tran: 0.04 });
+    {   // closed form: a 1 kHz one-pole E source (gain 2) steps to 2 * (1 - exp(-t / tau)) with tau = 1 / (2 pi 1 kHz)
+        loadExampleById(editor, "rc-ladder");
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+        const b = new ExampleBuilder(editor);
+        const v = b.part("V", 100, 300, { rot: 270, dcVoltage: 1, value: "1 V" }), e = b.part("E", 360, 260, { value: "2", bw: "1k" }), r = b.part("R", 620, 340, { rot: 90, value: "1 kΩ" }), g = b.part("GND", 360, 500);
+        b.wire(v, "2", e, "C+"); b.wire(e, "C-", g, "1"); b.wire(e, "O+", r, "1"); b.wire(e, "O-", g, "1"); b.wire(r, "2", g, "1"); b.wire(v, "1", g, "1"); b.finish();
+        const info = NetlistExtractor.extract(editor), tau = 1 / (2 * Math.PI * 1000);
+        const res = new SimEngine(info.circuit).transient({ tStop: 1e-3, tStep: 2e-6, uic: true });
+        const out = info.getTerminalNodeName(r, "1"), at = (t) => res.nodeHistories[out][res.timePoints.findIndex(x => x >= t)];
+        const err = Math.max(...[0.5, 1, 2, 3].map(k => Math.abs(at(k * tau) - 2 * (1 - Math.exp(-k)))));
+        results.push({ id: "vcvs-bandwidth-closed-form", pass: err < 0.03, op: 0, tran: +(err * 100).toFixed(2) });
+    }
+
+    // regulators: regulating, at the current limit, and the load line of an overloaded output (the exported pass element has the same knee)
+    for (const [id, rl, model, vin] of [["reg-regulating", "10 Ω", "7805", 12], ["reg-limit-1R", "1 Ω", "7805", 12], ["reg-limit-78L05", "20 Ω", "78L05", 12], ["reg-limit-neg", "1 Ω", "7905", -12]]) {
+        await compare(id, () => {
+            editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;
+            const b = new ExampleBuilder(editor);
+            const v = b.part("V", 100, 300, { rot: 270, dcVoltage: vin, value: `${vin} V` });
+            const u = b.part("REG", 400, 240, { model, value: model });
+            const r = b.part("R", 700, 340, { rot: 90, value: rl });
+            const g = b.part("GND", 400, 480);
+            b.wire(v, "2", u, "IN"); b.wire(u, "OUT", r, "1"); b.wire(r, "2", g, "1"); b.wire(u, "GND", g, "1"); b.wire(v, "1", g, "1");
+            b.vprobe(u, "OUT", "out");
+            b.finish();
+        }, null, { op: 0.005, tran: 0.04 });
+    }
+
     // logic gates driven by pulses (built-in smooth gates vs the exported u() expressions)
     await compare("gates", () => {
         editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1;

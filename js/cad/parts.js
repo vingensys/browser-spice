@@ -735,12 +735,22 @@ PartLib.add("OPTO", {
         const m = simModel("OPTO", model);
         const led = (SIM_MODELS.LED.IR || SIM_MODELS.LED.RED).params;
         const mid = k.node("m");
-        return [
+        const front = [
             { name: k.sub("s"), comp: c, kind: "V", nodes: [k.pin("A"), mid], params: { sourceType: "DC", dc: 0, acMag: 0 } },
-            { name: k.sub("d"), comp: c, kind: "D", model: SIM_MODELS.LED.IR ? "IR" : "RED", modelKind: "LED", nodes: [mid, k.pin("K")], params: led },
-            { name: k.sub("c"), comp: c, kind: "CCCS", ctrl: k.sub("s"), nodes: [k.pin("C"), k.pin("E")], params: { gain: m.params.ctr, vsat: m.params.vsat } }
+            { name: k.sub("d"), comp: c, kind: "D", model: SIM_MODELS.LED.IR ? "IR" : "RED", modelKind: "LED", nodes: [mid, k.pin("K")], params: led }
         ];
+        const bw = Units.parseSI(c.bw);
+        if (!(bw > 0)) return [...front, { name: k.sub("c"), comp: c, kind: "CCCS", ctrl: k.sub("s"), nodes: [k.pin("C"), k.pin("E")], params: { gain: m.params.ctr, vsat: m.params.vsat } }];
+        // with a bandwidth the LED current becomes a voltage (1 V per A), passes a one-pole RC, and drives the saturating output stage
+        const f = k.node("f"), g = k.node("g");
+        return [...front,
+            { name: k.sub("h"), comp: c, kind: "CCVS", ctrl: k.sub("s"), nodes: [f, "0"], params: { rm: 1 } },
+            { name: k.sub("r"), comp: c, kind: "R", nodes: [f, g], params: { r: 1000 } },
+            { name: k.sub("k"), comp: c, kind: "C", nodes: [g, "0"], params: { c: 1 / (2 * Math.PI * bw * 1000) } },
+            { name: k.sub("c"), comp: c, kind: "GMTANH", nodes: [k.pin("C"), k.pin("E"), g, "0"], params: { gain: m.params.ctr, vsat: m.params.vsat } }];
     },
+    rows: (p, c) => p.text("Bandwidth (Hz)", "bw", c.bw === undefined ? "" : c.bw, "blank = ideal (typically 30-200 kHz)") +
+        `<div class="prop-note">Roughly the -3 dB frequency of the current transfer (the phototransistor's rise and fall time is about 0.35 / bandwidth). Blank is an ideal coupler.</div>`,
     catalog: []
 });
 

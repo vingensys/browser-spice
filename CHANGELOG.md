@@ -2,6 +2,10 @@
 
 ## 1.0 (current)
 
+Parts
+- Voltage regulators now current-limit at their rated current (a short gives ilim, an overload follows the load line), also in the SPICE export.
+- Controlled sources (E, G) and the optocoupler have an optional bandwidth (one-pole filter), in both engines and in the export; the relay export follows |coil current|.
+
 Microcontroller
 - PIC16F84A: the whole instruction set, Timer0, interrupts, SLEEP, watchdog, EEPROM and the ports, simulated together with the circuit; an MPASM-style assembler and Intel HEX loader in the app; a debugger (Debug > Microcontroller…) with step, breakpoints, registers, pins, RAM and EEPROM. Examples: LED chaser, Timer0 interrupt blinker. See docs/PIC.md.
 

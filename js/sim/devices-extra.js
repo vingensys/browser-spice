@@ -274,7 +274,7 @@ class Thyristor extends Element {
 // (for an LM317 it is the ADJ pin and vout is the 1.25 V reference). vout < 0 models a
 // negative regulator (7905). Below vout + dropout the output follows the input down.
 class Regulator extends NonlinearElement {
-    constructor(name, nodes, { vout = 5, dropout = 2, ro = 0.05, iq = 5e-3, ilim = 1.5 } = {}) { // ilim is informational
+    constructor(name, nodes, { vout = 5, dropout = 2, ro = 0.05, iq = 5e-3, ilim = 1.5 } = {}) {
         super(name, nodes);
         this.vout = vout;
         this.dropout = dropout;
@@ -302,9 +302,16 @@ class Regulator extends NonlinearElement {
         const dRelDin = m.db; // d(rel)/d(vin) is db for either polarity (the two sign flips cancel)
         const G = 1 / this.ro;
 
-        // current delivered into OUT from the pass element (IN -> OUT). There is no hard current
-        // limit: a saturating characteristic stalls Newton's method from a cold start.
-        const i = G * (rel - vout), di = 1;
+        // current delivered into OUT from the pass element (IN -> OUT), limited at ilim by a smooth knee (a hard limit has a zero slope
+        // that stalls Newton's method from a cold start; this one keeps 1 % of ilim of curve either side of the knee). The output
+        // voltage then falls with the load: a short circuit gives ilim and a load line vout = ilim * R.
+        const i0 = G * (rel - vout);
+        let i = i0, di = 1;
+        if (this.ilim > 0) {
+            const e = 0.02 * this.ilim, r = Math.sqrt((i0 - this.ilim) * (i0 - this.ilim) + e * e);
+            i = 0.5 * (i0 + this.ilim + (-r));
+            di = 0.5 * (1 - (i0 - this.ilim) / r);
+        }
 
         // linearise i(vin, vout, vgnd-relative): i depends on (vi, vo, vg) through vin = vi - vg, vout = vo - vg
         const dI_dvin = di * G * dRelDin, dI_dvout = -di * G;
@@ -333,6 +340,39 @@ class Regulator extends NonlinearElement {
 
     stampAC(ac) { this.stampACJacobian(ac); }
     current() { return this.iNow || 0; }
+}
+
+
+// -------------------------------------------- voltage-controlled current source with a saturating output
+
+// Output current gain * v(ctrl) * tanh(v_out / vsat): the CCCS below, but controlled by a voltage (the filtered LED current of an
+// optocoupler with a bandwidth). nodes: [OUT+, OUT-, CTRL+, CTRL-]; current flows from OUT+ through the device to OUT-.
+class GmTanh extends NonlinearElement {
+    constructor(name, nodes, { gain = 1, vsat = 0.3 } = {}) {
+        super(name, nodes);
+        this.gain = gain; this.vsat = vsat; this.iOut = 0;
+    }
+
+    stamp(ctx) {
+        const [a, b, cp, cn] = this.n, s = ctx.sys;
+        const vc = ctx.v(cp) - ctx.v(cn), vo = ctx.v(a) - ctx.v(b);
+        const th = Math.tanh(vo / this.vsat), dth = (1 - th * th) / this.vsat, k = this.gain;
+        const i = k * vc * th;
+        const dC = k * th, dA = k * vc * dth;                        // d i / d vc, d i / d vo
+        const J = [[a, cp, dC], [a, cn, -dC], [a, a, dA], [a, b, -dA]];
+        const ieq = i - (dC * vc + dA * vo);
+        for (const [row, col, v] of J) { s.add(row, col, v); s.add(b, col, -v); }
+        s.rhs(a, -ieq); s.rhs(b, ieq);
+        this.iOut = i; this.dI = { dC, dA };
+    }
+
+    stampAC(ac) {
+        if (!this.dI) return;
+        const [a, b, cp, cn] = this.n, { dC, dA } = this.dI;
+        for (const [row, col, v] of [[a, cp, dC], [a, cn, -dC], [a, a, dA], [a, b, -dA]]) { ac.add(row, col, v, 0); ac.add(b, col, -v, 0); }
+    }
+
+    current() { return this.iOut; }
 }
 
 
