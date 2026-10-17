@@ -32,7 +32,7 @@ class DocumentStore {
     serialize() {
         const ed = this.editor;
         return {
-            format: "browser-spice/1",
+            format: `${DesignFormat.NAME}/${DesignFormat.VERSION}`,
             components: ed.components.map(c => this.strip(c)),
             wires: ed.wires.map(({ blocked, ...w }) => w),
             probes: ed.probes.map(p => this.strip(p)),
@@ -67,9 +67,11 @@ class DocumentStore {
     // ---- load ----------------------------------------------------------------------
 
     // Validate and load a design. Throws on something that is not a design; skips damaged parts and says so.
-    apply(state, { undoable = true } = {}) {
-        if (!state || typeof state !== "object" || !Array.isArray(state.components)) throw new Error("this is not a Browser SPICE design file");
-        const notes = [];
+    apply(input, { undoable = true } = {}) {
+        const { state, from, migrated } = DesignFormat.migrate(input);   // throws on a non-design or a newer format
+        // loading already drops what it cannot use and fixes nextId; duplicate ids it cannot repair, so say so
+        const notes = DesignFormat.validate(state).filter(p => p.startsWith("duplicate")).map(p => `file problem: ${p}`);
+        this.lastMigration = migrated ? { from } : null;
         // subcircuits the design uses travel with it
         if (Array.isArray(state.subckts)) SubcktLibrary.register(state.subckts, { persist: false });
 

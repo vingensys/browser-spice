@@ -653,6 +653,17 @@ window.uiTests = async function () {
         editor.titleBlock = SchematicEditor.defaultTitleBlock();
     }
 
+    // ---- file format: saved in the current version; an old (v0) file opens and is upgraded ----
+    reset();
+    ok("saved designs carry the current format", doc.serialize().format === `browser-spice/${DesignFormat.VERSION}`, doc.serialize().format);
+    const old = { components: [{ id: 1, type: "R", x: 100, y: 100, rotation: 0, name: "R1", value: "1k" }], nextId: 2, panX: 5, panY: 6 };
+    const r0 = doc.apply(old, { undoable: false });
+    ok("a v0 file (no format field) opens", r0.parts === 1 && !r0.notes.length && doc.lastMigration && doc.lastMigration.from === 0, JSON.stringify(r0));
+    ok("a v0 file keeps its pan", editor.panX === 5 && editor.panY === 6, [editor.panX, editor.panY]);
+    let msg = ""; try { doc.apply({ format: "browser-spice/99", components: [] }); } catch (e) { msg = e.message; }
+    ok("a file from a newer app is refused", /newer Browser SPICE/.test(msg), msg);
+    ok("the refused file left the design alone", editor.components.length === 1, editor.components.length);
+
     reset();
     const failed = results.filter(x => !x.pass);
     return { total: results.length, failed: failed.length, failures: failed };

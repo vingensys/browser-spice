@@ -52,7 +52,7 @@ against Proteus / ngspice, **P3** polish.
 | Gap | Pri | Notes |
 | --- | --- | --- |
 | No KiCad, Eagle, Altium import / export; no PDF schematic export, KiCad schematic (`.kicad_sch`) and netlist (`.net`) import is done for simulatable parts (R C L D Q M V I, power symbols, labels); Eagle / Altium import is not (BOM CSV, PNG, SVG, KiCad netlist and an HTML report that prints to PDF are done) | P2 | Roadmap section 2. |
-| File format is undocumented JSON with no migration path | P2 | `browser-spice/1`. |
+| ~~File format is undocumented JSON with no migration path~~ | P2 | **Done**: `browser-spice/2`, documented in `docs/FILE-FORMAT.md`; `DesignFormat` (js/ui/format.js) migrates v0 / v1 files, refuses newer ones and validates structure; fixtures and `tests/format.test.js`. |
 | ~~No PCB layout~~ | P2 | **MVP done**: View > PCB Layout. Footprints (through-hole axial / radial / TO-92 / TO-220 / DIP / headers and SMD 0603 / 0805 / 1206 / SOD-123 / SOT-23 / SOIC, with package pin order, back-side placement) from the netlist, auto-place, ratsnest, manual and automatic routing on F.Cu / B.Cu with vias, DRC (clearance, shorts, edge, width, unrouted), Gerber RS-274X (copper, silkscreen, mask, paste, edge) + Excellon in a ZIP. User footprints (text editor, KiCad `.kicad_mod` import) and copper pours (0.1 mm grid fill, thermal relief, island removal, Gerber regions) are in. Push-and-shove routing (tracks and vias of other nets pushed aside, cascading, validated by the rule check, invariants fuzzed) is in. Dragging a track vertex shoves too. Walk-around routing (A*, 0/45/90°) is in as a route mode. The PCB is also available to assistants through seven MCP tools. Missing: shoving while moving a part, 45° shoved geometry, 3D, back-annotation. Gerbers were read back with two independent parsers (gerbonara in Python, tracespace in JavaScript) and match the board exactly, and a fab-rule check (typical prototype-service limits: track, drill, annular ring, hole spacing, mask webs, board size) runs on the design; not tried in a commercial CAM package or sent to a fab. |
 
 ## 5. UI
@@ -66,8 +66,7 @@ against Proteus / ngspice, **P3** polish.
 ## 6. Engineering
 - ~~Tests are run by hand; there is no CI.~~ **Done**: GitHub Actions runs the node and the headless-Chrome suites on every push.
 - ~~The ngspice WebAssembly engine cannot be interrupted.~~ **Done**: it runs in a module worker; Cancel (or Esc) terminates it and the next run starts a fresh one. (When the page is not served over http(s) it falls back to the main thread.)
-- Large circuits: the sparse solver is fast (about 2 ms per step at 1,100 unknowns), but the editor's router and
-  redraw have not been profiled beyond a few hundred parts. (P3)
+- Large circuits: the sparse solver is fast (about 2 ms per step at 1,100 unknowns). The editor was profiled with `npm run perf` (RC ladders of 300 to 9,000 parts): opening a deck with 900 parts took 35 s and a redraw 64 ms because every part added re-routed every wire, every wire rebuilt the whole routing picture, and junction detection compared every wire with every other. Fixed (import 0.8 s, redraw 20 ms at 2,700 parts, linear). Left: netlist extraction grows faster than linearly (0.3 s at 2,700 parts, 2.6 s at 5,400), and the router's per-wire search still scans all parts. (P3)
 
 ## Suggested order
 1. ~~Autosave and an unsaved-changes prompt (P1)~~ done.

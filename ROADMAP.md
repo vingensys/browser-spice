@@ -49,7 +49,5 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 - **Engine split.** Keep the built-in engine for the interactive loop and ngspice-WASM for
   accuracy / vendor models. If the interactive engine ever diverges from ngspice on a
   supported circuit, that is a bug: `tests/ngspice.test.js` is the guard.
-- **File format.** Today: JSON (`browser-spice/1`, now with sheets, parameters, measurements and embedded subcircuits). Needs a documented, versioned schema and
-  migration before sharing becomes a feature.
-- **Build tooling.** Plain scripts keep it hackable. A bundler becomes worth it once there
-  are many modules / third-party libs (KiCad parsers, PDF export).
+- **File format.** Done: versioned JSON (`browser-spice/2`), documented in `docs/FILE-FORMAT.md`, with migrations from older files. Sharing and cloud save can build on it.
+- **Build tooling.** Decided: stay with plain scripts; bundle only a heavy new dependency, lazily, when one arrives. Triggers and method in `docs/DECISIONS.md`.

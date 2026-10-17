@@ -460,6 +460,7 @@
                 const r = doc.apply(state);
                 afterLoad();
                 doc.markSaved(file.name);
+                if (doc.lastMigration) runner.toast(`"${file.name}" was in an older file format (${doc.lastMigration.from}); it is saved in the current one next time.`, "info");
                 if (r.notes.length) runner.toast(`Opened "${file.name}" with ${r.notes.length} problem(s): ${r.notes.slice(0, 2).join("; ")}${r.notes.length > 2 ? " …" : ""}`, "warn");
             } catch (err) {
                 runner.toast("Invalid design file: " + err.message, "error");

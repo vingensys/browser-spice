@@ -2,6 +2,10 @@
 
 ## 1.0 (current)
 
+Foundations
+- Design files are versioned (`browser-spice/2`) and documented (`docs/FILE-FORMAT.md`); older files are upgraded on open and files from a newer app are refused with a message.
+- Large designs: opening a 900-part deck went from 35 s to under 1 s, and a 2,700-part redraw from 310 ms to 20 ms (`npm run perf`). Causes: a re-route of every wire for every part added, a full routing-context rebuild per wire, and a pairwise junction search.
+
 Editor and instruments
 - Probes list and placement, a real oscilloscope (triggers, cursors, FFT, saved traces, CSV / PNG), a logic analyser, spectrum tab.
 - Multi-sheet hierarchical designs, subcircuits from SPICE files as parts, design parameters, command palette, accessible dialogs.

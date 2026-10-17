@@ -723,8 +723,7 @@ class SchematicEditor {
         }
 
         this.components.push(component);
-        this.refreshWires();
-        this.draw();
+        if (!this.deferRefresh) { this.refreshWires(); this.draw(); }
         return component;
     }
 

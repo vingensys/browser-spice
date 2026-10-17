@@ -21,7 +21,13 @@ class SchematicImporter {
         B: ["O+", "O-", "A", "B", "C", "D"]
     };
 
+    // addComponent re-routes every wire and redraws; with hundreds of parts that is quadratic, so do it once at the end
     static import(editor, text) {
+        editor.deferRefresh = true;
+        try { return SchematicImporter.importDeck(editor, text); } finally { editor.deferRefresh = false; }
+    }
+
+    static importDeck(editor, text) {
         const deck = SpiceParser.parse(text);
         const warnings = [...deck.warnings];
         const els = SchematicImporter.coupleInductors(SpiceParser.flatten(deck, deck.elements, "", null, warnings), warnings);

@@ -37,19 +37,20 @@ class SchematicRouter {
             for (const t of this.getTerminals(c)) pins.push(this.getTerminalPosition(c, t));
         }
 
-        const edgeUse = new Set();
-        const nodeUse = new Map();
-        const markNode = (x, y, kind) => {
-            const k = `${x},${y}`;
-            const prev = nodeUse.get(k);
-            nodeUse.set(k, prev && prev !== kind ? "C" : kind);
+        // Which grid edges / nodes other wires already use. Counted, so a wire can be taken out and put back
+        // (refreshWires does that per wire instead of rebuilding the whole picture for every wire).
+        const edges = new Map(), nodes = new Map();
+        const node = (k, kind, d) => {
+            let e = nodes.get(k);
+            if (!e) { e = { H: 0, V: 0, C: 0 }; nodes.set(k, e); }
+            e[kind] += d;
+            if (!e.H && !e.V && !e.C) nodes.delete(k);
         };
-
-        for (const w of this.wires) {
-            if (w === excludeWire || !w.route || w.route.length < 2) continue;
-            for (let i = 0; i < w.route.length - 1; i++) {
-                const a = w.route[i];
-                const b = w.route[i + 1];
+        const addRoute = (route, d) => {
+            if (!route || route.length < 2) return;
+            for (let i = 0; i < route.length - 1; i++) {
+                const a = route[i];
+                const b = route[i + 1];
                 if (a.x !== b.x && a.y !== b.y) continue;
 
                 const horizontal = a.y === b.y;
@@ -60,13 +61,20 @@ class SchematicRouter {
                 for (let s = 0; s <= steps; s++) {
                     const x = a.x + sx * s * g;
                     const y = a.y + sy * s * g;
-                    markNode(x, y, s === 0 || s === steps ? "C" : (horizontal ? "H" : "V"));
-                    if (s < steps) edgeUse.add(this.edgeKey(x, y, x + sx * g, y + sy * g));
+                    node(`${x},${y}`, s === 0 || s === steps ? "C" : (horizontal ? "H" : "V"), d);
+                    if (s < steps) {
+                        const k = this.edgeKey(x, y, x + sx * g, y + sy * g);
+                        const v = (edges.get(k) || 0) + d;
+                        if (v > 0) edges.set(k, v); else edges.delete(k);
+                    }
                 }
             }
-        }
+        };
+        const edgeUse = { has: (k) => edges.has(k) };
+        const nodeUse = { get: (k) => { const e = nodes.get(k); return !e ? undefined : (e.C || (e.H && e.V) ? "C" : (e.H ? "H" : "V")); } };
+        for (const w of this.wires) if (w !== excludeWire) addRoute(w.route, 1);
 
-        return { boxes, pins, edgeUse, nodeUse };
+        return { boxes, pins, edgeUse, nodeUse, addRoute };
     }
 
     pointInsideBox(x, y, b) {
@@ -489,8 +497,11 @@ class SchematicRouter {
         const direct = list.filter(w => w.start.type !== "wire" && w.end.type !== "wire");
         const junctions = list.filter(w => w.start.type === "wire" || w.end.type === "wire");
 
+        const ctx = this.buildRouteContext(null);
         for (const wire of [...direct, ...junctions]) {
-            this.updateWire(wire, this.buildRouteContext(wire));
+            ctx.addRoute(wire.route, -1);        // route it as if it were not there ...
+            this.updateWire(wire, ctx);
+            ctx.addRoute(wire.route, 1);         // ... then count its new path for the wires after it
         }
         if (this.syncProbes) this.syncProbes();
     }
@@ -584,19 +595,43 @@ class SchematicRouter {
                 if (i === 0 || i === last) { bump(k, 1); endKeys.add(k); }
             }
         }
-        // a wire end that lands on another wire's run adds that run's two directions
+        // a wire end that lands on another wire's run adds that run's two directions.
+        // Ends are indexed by x (sorted by y) and by y (sorted by x): a straight run binary-searches the ends on its own line.
+        const byX = new Map(), byY = new Map();
+        const index = (m, k, e) => { const l = m.get(k); if (l) l.push(e); else m.set(k, [e]); };
         for (const w of this.wires) {
             if (!w.route || w.route.length < 2) continue;
-            for (const other of this.wires) {
-                if (other === w || !other.route || other.route.length < 2) continue;
-                for (let j = 0; j < other.route.length - 1; j++) {
-                    const a = other.route[j], b = other.route[j + 1];
-                    for (const pt of [w.route[0], w.route[w.route.length - 1]]) {
-                        const onEnd = (pt.x === a.x && pt.y === a.y) || (pt.x === b.x && pt.y === b.y);
-                        if (!onEnd && this.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) {
-                            bump(key(pt), 2);
-                        }
+            for (const pt of [w.route[0], w.route[w.route.length - 1]]) {
+                const e = { w, pt };
+                index(byX, Math.round(pt.x), e); index(byY, Math.round(pt.y), e);
+            }
+        }
+        for (const l of byX.values()) l.sort((p, q) => p.pt.y - q.pt.y);
+        for (const l of byY.values()) l.sort((p, q) => p.pt.x - q.pt.x);
+        const lower = (l, f, v) => { let lo = 0, hi = l.length; while (lo < hi) { const m = (lo + hi) >> 1; if (f(l[m]) < v) lo = m + 1; else hi = m; } return lo; };
+        for (const other of this.wires) {
+            if (!other.route || other.route.length < 2) continue;
+            for (let j = 0; j < other.route.length - 1; j++) {
+                const a = other.route[j], b = other.route[j + 1];
+                const near = new Set();
+                if (Math.abs(a.x - b.x) < 2) {
+                    const lo = Math.min(a.y, b.y) - 2, hi = Math.max(a.y, b.y) + 2;
+                    for (let k = Math.round(a.x) - 2; k <= Math.round(a.x) + 2; k++) {
+                        const l = byX.get(k); if (!l) continue;
+                        for (let i = lower(l, e => e.pt.y, lo); i < l.length && l[i].pt.y <= hi; i++) near.add(l[i]);
                     }
+                }
+                if (Math.abs(a.y - b.y) < 2) {
+                    const lo = Math.min(a.x, b.x) - 2, hi = Math.max(a.x, b.x) + 2;
+                    for (let k = Math.round(a.y) - 2; k <= Math.round(a.y) + 2; k++) {
+                        const l = byY.get(k); if (!l) continue;
+                        for (let i = lower(l, e => e.pt.x, lo); i < l.length && l[i].pt.x <= hi; i++) near.add(l[i]);
+                    }
+                }
+                for (const { w, pt } of near) {
+                    if (w === other) continue;
+                    const onEnd = (pt.x === a.x && pt.y === a.y) || (pt.x === b.x && pt.y === b.y);
+                    if (!onEnd && this.isPointOnSegment(pt.x, pt.y, a.x, a.y, b.x, b.y)) bump(key(pt), 2);
                 }
             }
         }
