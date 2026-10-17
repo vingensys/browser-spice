@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- View > Placement Snap (parts snap to every dot, every 2 or every 5; remembered).
 - Help > Customize Shortcuts…: rebind the global shortcuts (conflicts refused, kept in this browser, Reset all). The schematic's own editing keys stay fixed.
 - View > Describe Sheet (Ctrl+Shift+D): the parts, what each net joins and any unconnected pins as plain text, announced through a live region for screen readers.
 - Graphs that mix voltage and current traces put the currents on their own scale on the right (Graph > Separate Current Axis turns it off).
