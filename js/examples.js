@@ -454,6 +454,103 @@ const EXAMPLES = [
         }
     },
     {
+        id: "pic-chaser",
+        name: "PIC16F84A LED chaser (assembly program)",
+        note: "A PIC16F84A runs the assembly program in its properties (double-click the chip; Debug > Microcontroller… steps through it with breakpoints). One LED on RB0-RB3 lights at a time and the light moves every ~2 ms; the switch on RA0 reverses the direction (double-click it). Increase the delay constant to slow it down.",
+        settings: { tStop: "40m", tStep: "20u" },
+        build(b) {
+            const src = [
+                "        __config _WDT_OFF",
+                "        cblock 0x0C",
+                "          pat, d1, d2",
+                "        endc",
+                "        org 0",
+                "        bsf STATUS,RP0      ; bank 1",
+                "        movlw 0xF0          ; RB0-RB3 outputs",
+                "        movwf TRISB",
+                "        movlw 0x01          ; RA0 input (the switch)",
+                "        movwf TRISA",
+                "        bcf STATUS,RP0      ; bank 0",
+                "        movlw 0x01",
+                "        movwf pat",
+                "loop    movf pat,W",
+                "        movwf PORTB",
+                "        call delay",
+                "        btfss PORTA,0       ; switch closed pulls RA0 low",
+                "        goto goleft",
+                "goright bcf STATUS,C",
+                "        rrf pat,F",
+                "        movf pat,F",
+                "        btfss STATUS,Z",
+                "        goto loop",
+                "        movlw 0x08          ; wrapped around",
+                "        movwf pat",
+                "        goto loop",
+                "goleft  bcf STATUS,C",
+                "        rlf pat,F",
+                "        btfss pat,4",
+                "        goto loop",
+                "        movlw 0x01",
+                "        movwf pat",
+                "        goto loop",
+                "delay   movlw .200         ; ~2 ms at 4 MHz",
+                "        movwf d1",
+                "d1loop  movlw .3",
+                "        movwf d2",
+                "d2loop  decfsz d2,F",
+                "        goto d2loop",
+                "        decfsz d1,F",
+                "        goto d1loop",
+                "        return"
+            ].join("\n");
+            const pic = b.part("PIC16F84A", 620, 420, { clock: "4M", src });
+            const vcc = b.part("POWER", 300, 240, { net: "VCC", volts: "5" });
+            const rpu = b.part("R", 300, 340, { rot: 90, value: "10 kΩ" });
+            const sw = b.part("SW", 300, 480, { rot: 90, closed: false, value: "open" });
+            const g0 = b.part("GND", 300, 600);
+            b.wire(vcc, "1", rpu, "1"); b.wire(rpu, "2", pic, "RA0"); b.wire(sw, "1", pic, "RA0"); b.wire(sw, "2", g0, "1");
+            const g1 = b.part("GND", 1100, 640);
+            for (let i = 0; i < 4; i++) {
+                const r = b.part("R", 900, 300 + 90 * i, { value: "330 Ω" });
+                const d = b.part("LED", 1040, 300 + 90 * i, { rot: 90, model: "RED", value: "RED" });
+                b.wire(pic, `RB${i}`, r, "1"); b.wire(r, "2", d, "1"); b.wire(d, "2", g1, "1");
+                b.vprobe(pic, `RB${i}`, `RB${i}`);
+            }
+        }
+    },
+    {
+        id: "pic-timer",
+        name: "PIC16F84A Timer0 interrupt blinker",
+        note: "The program sets Timer0 to overflow every 16.4 ms (prescaler 1:64) and the interrupt handler toggles RB0, so the LED blinks at about 30 Hz while the main loop does nothing. Debug > Microcontroller… shows the registers and lets you step through the handler.",
+        settings: { tStop: "100m", tStep: "50u" },
+        build(b) {
+            const src = [
+                "        __config _WDT_OFF",
+                "        org 0",
+                "        goto main",
+                "        org 4               ; interrupt vector",
+                "        movlw 0x01",
+                "        xorwf PORTB,F       ; toggle RB0",
+                "        bcf INTCON,T0IF",
+                "        retfie",
+                "main    bsf STATUS,RP0",
+                "        bcf TRISB,0         ; RB0 output",
+                "        movlw b'11000101'   ; prescaler 1:64 on Timer0",
+                "        movwf OPTION_REG",
+                "        bcf STATUS,RP0",
+                "        movlw b'10100000'   ; GIE + T0IE",
+                "        movwf INTCON",
+                "idle    goto idle"
+            ].join("\n");
+            const pic = b.part("PIC16F84A", 600, 420, { clock: "4M", src });
+            const r = b.part("R", 860, 330, { value: "330 Ω" });
+            const d = b.part("LED", 1000, 330, { rot: 90, model: "RED", value: "RED" });
+            const g = b.part("GND", 1000, 500);
+            b.wire(pic, "RB0", r, "1"); b.wire(r, "2", d, "1"); b.wire(d, "2", g, "1");
+            b.vprobe(pic, "RB0", "RB0");
+        }
+    },
+    {
         id: "shift-register",
         name: "Shift register (74164 serial in, parallel out)",
         note: "A single 1 is clocked into a 74164 and marches along its eight outputs. Press Play and watch the LIVE graph, or run a transient.",

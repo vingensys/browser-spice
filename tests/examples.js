@@ -36,6 +36,35 @@ window.exampleTests = function () {
         if (hi < 4.8 || lo > 0.1) throw new Error(`swing ${lo.toFixed(2)} .. ${hi.toFixed(2)} V`);
     });
 
+    check("pic-chaser: the light walks around RB0-RB3 (right, then left when the switch closes)", () => {
+        const { info, sim } = load("pic-chaser");
+        const r = sim.transient({ tStop: 0.025, tStep: 20e-6, uic: true });
+        const pic = editor.components.find(c => c.type === "PIC16F84A");
+        const nibble = (t) => { const i = r.timePoints.findIndex(x => x >= t); let v = 0; for (let k = 0; k < 4; k++) if (r.nodeHistories[info.getTerminalNodeName(pic, "RB" + k)][i] > 2.5) v |= 1 << k; return v; };
+        const seq = []; for (let t = 0.0003; t < 0.024; t += 0.0002) { const n = nibble(t); if (seq[seq.length - 1] !== n) seq.push(n); }
+        if (seq.slice(0, 7).join() !== "1,8,4,2,1,8,4") throw new Error("sequence " + seq.join());
+    });
+
+    check("pic-chaser: with the switch closed the light walks the other way", () => {
+        loadExampleById(editor, "pic-chaser");
+        editor.components.find(c => c.type === "SW").closed = true;
+        const info = NetlistExtractor.extract(editor), sim = new SimEngine(info.circuit);
+        const r = sim.transient({ tStop: 0.025, tStep: 20e-6, uic: true });
+        const pic = editor.components.find(c => c.type === "PIC16F84A");
+        const nibble = (t) => { const i = r.timePoints.findIndex(x => x >= t); let v = 0; for (let k = 0; k < 4; k++) if (r.nodeHistories[info.getTerminalNodeName(pic, "RB" + k)][i] > 2.5) v |= 1 << k; return v; };
+        const seq = []; for (let t = 0.0003; t < 0.024; t += 0.0002) { const n = nibble(t); if (seq[seq.length - 1] !== n) seq.push(n); }
+        if (seq.slice(0, 7).join() !== "1,2,4,8,1,2,4") throw new Error("sequence " + seq.join());
+    });
+
+    check("pic-timer: the Timer0 interrupt toggles RB0 every 16.384 ms", () => {
+        const { info, sim } = load("pic-timer");
+        const r = sim.transient({ tStop: 0.1, tStep: 50e-6, uic: true });
+        const pic = editor.components.find(c => c.type === "PIC16F84A"), v = r.nodeHistories[info.getTerminalNodeName(pic, "RB0")];
+        const e = []; for (let i = 1; i < v.length; i++) if ((v[i - 1] > 2.5) !== (v[i] > 2.5)) e.push(r.timePoints[i]);
+        if (e.length < 5) throw new Error(`${e.length} edges`);
+        for (let i = 1; i < e.length; i++) near(e[i] - e[i - 1], 16.384e-3, 0.1e-3, "interval");
+    });
+
     check("rc-ladder: series capacitors settle to a charge-sharing divider", () => {
         const { info, sim } = load("rc-ladder");
         const r = sim.transient({ tStop: 0.2, tStep: 2e-4, uic: true });

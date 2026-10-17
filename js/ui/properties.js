@@ -280,9 +280,29 @@ class PropertiesPanel {
     // buttons inside the panel (a memory chip's Load file / Clear)
     onClick(e) {
         const b = e.target.closest && e.target.closest("button");
-        if (!b || (b.dataset.memload === undefined && b.dataset.memclear === undefined && b.dataset.memview === undefined)) return;
+        if (!b || ["memload", "memclear", "memview", "mcuload", "mcuclear", "mcuview"].every(k => b.dataset[k] === undefined)) return;
         const comp = this.editor.selection[0];
         if (!comp) return;
+        if (b.dataset.mcuview !== undefined) { McuWindow.open(this.editor, window.live, comp); return; }
+        if (b.dataset.mcuclear !== undefined) { this.editor.saveState(); comp.src = ""; comp.hex = ""; comp.bps = []; this.editor.draw(); this.render(); this.before = this.editor.snapshot(); return; }
+        if (b.dataset.mcuload !== undefined) {
+            const inp = document.createElement("input");
+            inp.type = "file"; inp.accept = ".asm,.inc,.s,.txt,.hex,.ihx";
+            inp.onchange = () => {
+                const file = inp.files[0];
+                if (!file) return;
+                const rd = new FileReader();
+                rd.onload = () => {
+                    const text = String(rd.result);
+                    this.editor.saveState();
+                    if (/\.(hex|ihx)$/i.test(file.name) || /^\s*:[0-9a-fA-F]{8}/.test(text)) { comp.hex = text.trim(); comp.src = ""; } else { comp.src = text; comp.hex = ""; }
+                    comp.bps = []; this.editor.draw(); this.render(); this.before = this.editor.snapshot();
+                };
+                rd.readAsText(file);
+            };
+            inp.click();
+            return;
+        }
         if (b.dataset.memview !== undefined) { MemoryWindow.open(this.editor, window.live, comp); return; }
         const set = (text) => { this.editor.saveState(); comp.mem = text; this.refreshLabel(comp); this.editor.draw(); this.render(); this.before = this.editor.snapshot(); };
         if (b.dataset.memclear !== undefined) { set(""); return; }

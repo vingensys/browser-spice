@@ -795,9 +795,9 @@ function logicICGeometry(spec) {
 }
 
 // "1CLR_N" -> { text: "1CLR", bar: true }; "SH_LD_N" -> "SH/LD" barred
-function logicPinLabel(name) {
+function logicPinLabel(name, labels = null) {
     const bar = /_N$/.test(name);
-    return { text: name.replace(/_N$/, "").replace(/_/g, "/"), bar };
+    return { text: labels && labels[name] ? labels[name] : name.replace(/_N$/, "").replace(/_/g, "/"), bar };
 }
 
 // the chip's pins as drawn: with "vector pins as buses" each run D0..D7 is one pin named D[0..7]
@@ -828,6 +828,32 @@ PartLib.memoryRows = (p, c, spec) => {
         <div class="prop-note">${m.size.toLocaleString()} words of ${m.bits} bits; ${used.toLocaleString()} non-zero in the image. ${m.kind === "ram" ? "The running contents show in Debug > Memory…" : ""}</div></div>`;
 };
 
+function drawLogicChip(r, c, sp, key) {
+    const g = logicICGeometry(sp);
+    const ctx = r.ctx, col = "#f1fa8c";
+    ctx.strokeStyle = r.col(col); ctx.fillStyle = r.col("#171b23"); ctx.lineWidth = r.lw(3);
+    ctx.beginPath(); ctx.rect(-60, g.top, 120, g.bottom - g.top); ctx.fill(); ctx.stroke();
+    r.partText(key, 0, g.top + 9, { size: 11, bold: true, color: col });
+    const side = (names, sign) => names.forEach((name, i) => {
+        const y = g.top + 20 + 20 * i, { text, bar } = logicPinLabel(name, sp.labels);
+        const x0 = sign * 60, x1 = sign * 80, bus = !!BusUtil.parse(name);
+        // lead (with a bubble where the pin is active low; a bus pin is drawn thick and blue)
+        r.partLine([[x1, y], [x0 + sign * (bar ? 6 : 0), y]], bus ? "#2f55d4" : col, bus ? 5 : 2);
+        if (bar) { ctx.beginPath(); ctx.arc(x0 + sign * 3, y, 3, 0, Math.PI * 2); ctx.fillStyle = r.col("#171b23"); ctx.fill(); ctx.strokeStyle = r.col(col); ctx.lineWidth = r.lw(1.5); ctx.stroke(); }
+        if (sign < 0 && sp.clocks.includes(name)) r.partLine([[-60, y - 5], [-52, y], [-60, y + 5]], col, 1.5);
+        const tx = sign * (clockPad(sign, name) ? 50 : 54), align = sign < 0 ? "left" : "right";
+        r.partText(text, tx, y, { size: 9, color: "#c8d0dc", align });
+        if (bar) {
+            const w = ctx.measureText(text).width;
+            r.partLine([[sign < 0 ? tx : tx - w, y - 6], [sign < 0 ? tx + w : tx, y - 6]], "#c8d0dc", 1);
+        }
+    });
+    const clockPad = (sign, name) => sign < 0 && sp.clocks.includes(name);
+    side(sp.left, -1);
+    side(sp.right, 1);
+    r.drawLabel(c);
+}
+
 for (const [key, spec] of Object.entries(LOGIC_ICS)) {
     const g = logicICGeometry(spec);
     const hasVectors = LogicIC.vectors(spec).length > 0;
@@ -835,31 +861,7 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
         prefix: "U", value: key, props: { vcc: "5" }, quietPins: true,
         symbol: { ...g.symbol, dynamic: (c) => { const sp = logicSpecFor(spec, c); return sp === spec ? g.symbol : logicICGeometry(sp).symbol; } },
         label: () => key,
-        draw(r, c) {
-            const sp = logicSpecFor(spec, c), g = logicICGeometry(sp);
-            const ctx = r.ctx, col = "#f1fa8c";
-            ctx.strokeStyle = r.col(col); ctx.fillStyle = r.col("#171b23"); ctx.lineWidth = r.lw(3);
-            ctx.beginPath(); ctx.rect(-60, g.top, 120, g.bottom - g.top); ctx.fill(); ctx.stroke();
-            r.partText(key, 0, g.top + 9, { size: 11, bold: true, color: col });
-            const side = (names, sign) => names.forEach((name, i) => {
-                const y = g.top + 20 + 20 * i, { text, bar } = logicPinLabel(name);
-                const x0 = sign * 60, x1 = sign * 80, bus = !!BusUtil.parse(name);
-                // lead (with a bubble where the pin is active low; a bus pin is drawn thick and blue)
-                r.partLine([[x1, y], [x0 + sign * (bar ? 6 : 0), y]], bus ? "#2f55d4" : col, bus ? 5 : 2);
-                if (bar) { ctx.beginPath(); ctx.arc(x0 + sign * 3, y, 3, 0, Math.PI * 2); ctx.fillStyle = r.col("#171b23"); ctx.fill(); ctx.strokeStyle = r.col(col); ctx.lineWidth = r.lw(1.5); ctx.stroke(); }
-                if (sign < 0 && sp.clocks.includes(name)) r.partLine([[-60, y - 5], [-52, y], [-60, y + 5]], col, 1.5);
-                const tx = sign * (clockPad(sign, name) ? 50 : 54), align = sign < 0 ? "left" : "right";
-                r.partText(text, tx, y, { size: 9, color: "#c8d0dc", align });
-                if (bar) {
-                    const w = ctx.measureText(text).width;
-                    r.partLine([[sign < 0 ? tx : tx - w, y - 6], [sign < 0 ? tx + w : tx, y - 6]], "#c8d0dc", 1);
-                }
-            });
-            const clockPad = (sign, name) => sign < 0 && sp.clocks.includes(name);
-            side(sp.left, -1);
-            side(sp.right, 1);
-            r.drawLabel(c);
-        },
+        draw(r, c) { drawLogicChip(r, c, logicSpecFor(spec, c), key); },
         rows: (p, c) => p.text("Supply / logic high (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5") +
             p.text("Propagation delay (s)", "tpd", c.tpd === undefined ? "" : c.tpd, "0 = ideal (not in SPICE export)") +
             (spec.memory ? PartLib.memoryRows(p, c, spec) : "") +
@@ -877,6 +879,46 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
     });
 }
 
+
+// ------------------------------------------------------------- microcontroller: PIC16F84A
+
+// the Program section of the chip's properties: clock, assembly source, Intel HEX, a status line and the load / clear / view buttons
+PartLib.mcuRows = (p, c) => {
+    const esc = PropertiesPanel.esc;
+    let status = "No program: the chip runs erased memory (all NOPs-ish). Type assembly below or load a .asm / .hex file.", bad = false;
+    try {
+        const prog = PicMcu.program({ src: c.src, hex: c.hex });
+        if (prog.from === "asm") { const a = PicAsm.assemble(c.src); status = `Assembled ${a.used} word${a.used === 1 ? "" : "s"} (${a.warnings.length} warning${a.warnings.length === 1 ? "" : "s"}); config: watchdog ${prog.config & 4 ? "ON" : "off"}.`; }
+        else if (prog.from === "hex") { const used = prog.words.reduce((n, w) => n + (w !== 0x3FFF ? 1 : 0), 0); status = `Loaded ${used} program word${used === 1 ? "" : "s"} from Intel HEX; config: watchdog ${prog.config & 4 ? "ON" : "off"}.`; }
+    } catch (e) { status = e.message; bad = true; }
+    return p.text("Clock (Hz)", "clock", c.clock === undefined ? "4M" : c.clock, "4M (one instruction per microsecond)") +
+        `<div class="property"><label>Program: assembly source (MPASM style; blank = use the HEX box)</label>
+            <textarea data-prop="src" rows="14" spellcheck="false" style="font-family:monospace;font-size:11px;white-space:pre" placeholder="        bsf STATUS,RP0&#10;        bcf TRISB,0&#10;        bcf STATUS,RP0&#10;loop    bsf PORTB,0&#10;        goto loop">${esc(c.src || "")}</textarea></div>` +
+        `<div class="property"><label>or Intel HEX</label>
+            <textarea data-prop="hex" rows="3" spellcheck="false" style="font-family:monospace;font-size:10px" placeholder=":020000040000FA">${esc(c.hex || "")}</textarea>
+            <div style="display:flex;gap:6px;margin-top:4px"><button class="pane-btn" data-mcuload type="button" title="Load a .asm / .inc source or a .hex file">Load file…</button>
+            <button class="pane-btn" data-mcuclear type="button">Clear</button>
+            <button class="pane-btn" data-mcuview type="button" title="Open the debugger: registers, program, ports, memory; step and breakpoints">Debug…</button></div>
+            <div class="prop-note" style="${bad ? "color:#ff8080" : ""}">${esc(status)}</div></div>`;
+};
+
+(() => {
+    const labels = { MCLR_N: "MCLR", RA4: "RA4/T0CKI", RB0: "RB0/INT" };
+    const spec = { left: ["MCLR_N", "RA0", "RA1", "RA2", "RA3", "RA4"], right: PicMcu.PINS.slice(6), clocks: [], labels };
+    const g = logicICGeometry(spec);
+    PartLib.add("PIC16F84A", {
+        prefix: "U", value: "PIC16F84A", props: { vcc: "5", clock: "4M" }, quietPins: true,
+        symbol: g.symbol,
+        label: () => "PIC16F84A",
+        draw(r, c) { drawLogicChip(r, c, spec, "PIC16F84A"); },
+        rows: (p, c) => p.text("Supply / logic high (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5") + PartLib.mcuRows(p, c) +
+            `<div class="prop-note">An 8-bit PIC with 1K words of program memory, 68 bytes of RAM, 64 bytes of EEPROM, Timer0, interrupts and the watchdog. No power or oscillator pins are needed; the clock is the property above. RA4 is open-drain (it needs a pull-up to go high); PORTB has optional weak pull-ups; MCLR low resets it. SPICE export is not available for it.</div>`,
+        netlist(c, k) {
+            return [{ ...k.base, kind: "MCU", chip: "PIC16F84A", nodes: PicMcu.PINS.map(n => k.pin(n)), params: { vcc: k.num(c.vcc, 5), clock: k.num(c.clock, 4e6), src: c.src || "", hex: c.hex || "", bps: Array.isArray(c.bps) ? c.bps : [] } }];
+        },
+        catalog: [{ name: "PIC16F84A", category: "Microcontrollers", desc: "8-bit PIC microcontroller: program it in assembly (or load a .hex), simulate it with the circuit, debug it", props: { vcc: "5", clock: "4M", value: "PIC16F84A" } }]
+    });
+})();
 
 // ------------------------------------------------------------- behavioural source (SPICE "B")
 

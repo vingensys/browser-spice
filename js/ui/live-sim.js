@@ -35,7 +35,7 @@ class LiveSim {
     // everything that changes the circuit's equations (switch / wiper settings excluded)
     circuitSignature() {
         const comps = this.editor.components.map(c => {
-            const { closed, position, live, scopeTrace, scopeScale, logTrace, logan, glow, seg, energized, blown, on, scope, ...rest } = c;
+            const { closed, position, live, scopeTrace, scopeScale, logTrace, logan, glow, seg, energized, blown, on, scope, bps, ...rest } = c;
             const part = PartLib.defs[c.type];
             for (const k of (part && part.tweak) || []) delete rest[k];   // knobs you can turn during a run
             if (part && part.tweak) delete rest.value;                     // its label shows the knob
@@ -108,6 +108,7 @@ class LiveSim {
         }
         if (this.editor.probeScope) this.attachProbeScope();
         this.buildConditions();
+        this.mcus = this.engine.c.elements.filter(e => e instanceof PicMcu);
         this.logans = new Map();
         for (const la of info.instruments.filter(i => i.type === "LOGAN")) {
             la.comp.logan = LogicCore.merge(la.comp.logan);
@@ -230,6 +231,27 @@ class LiveSim {
         return null;
     }
 
+    // Debugger step: run `n` instructions of the named microcontroller (the circuit advances with it), starting the run paused if needed
+    stepMcu(name, n = 1) {
+        if (this.state === "running") this.pause();
+        if (this.state === "stopped") {
+            try { this.build(); } catch (e) { this.runner.toast(e.message, "error"); return; }
+            this.state = "paused";
+        }
+        const m = (this.mcus || []).find(e => e.name === name);
+        if (!m) return;
+        const saved = m.window;
+        m.window = 1; m.passBp = m.core.pc; m.makePlan();
+        for (let i = 0; i < n; i++) {
+            const t0 = m.cpuT; let guard = 0;
+            while (m.cpuT <= t0 + 1e-15 && guard++ < 200 && !this.run.done) this.run.step();
+            m.passBp = m.core.pc;
+            if (this.scopes.size || this.logans.size) this.feedScopes();
+        }
+        m.window = saved; m.passBp = -1; m.breakHit = false; m.makePlan();
+        this.readout(); this.paint(true); this.emit();
+    }
+
     // a channel's source was changed in the scope window
     refreshSources(key) {
         const e = this.scopes.get(key);
@@ -326,6 +348,7 @@ class LiveSim {
             run.step();
             if (this.scopes.size || this.logans.size) this.feedScopes();
             if (this.condSrc && this.condSrc.length) { const why = this.checkConditions(); if (why) this.pauseReason = why; }
+            if (this.mcus && this.mcus.length) for (const m of this.mcus) if (m.breakHit) { m.breakHit = false; m.passBp = m.core.pc; this.pauseReason = `${m.name} stopped at the breakpoint at 0x${m.core.pc.toString(16).toUpperCase().padStart(3, "0")}`; }
             if (run.t >= this.nextSample) {
                 this.times.push(run.t);
                 this.channels.forEach((ch, i) => this.values[i].push(ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element)));

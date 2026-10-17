@@ -419,6 +419,48 @@ window.scopeTests = async function () {
     editor.components = editor.components.filter(c => c !== rom);
     ok("with no memory chip on the sheet there is nothing to open", MemoryWindow.open(editor, live) === null);
 
+    // ======================================================== microcontroller: part, debugger, steps, breakpoints
+    clear(); loadExampleById(editor, "pic-chaser");
+    const pic16 = editor.components.find(c => c.type === "PIC16F84A");
+    ok("Pick Devices lists the PIC under Microcontrollers", DeviceCatalog.categories.includes("Microcontrollers") && DeviceCatalog.all().some(d => d.name === "PIC16F84A" && d.category === "Microcontrollers"));
+    const prow = PartLib.defs["PIC16F84A"].rows(new PropertiesPanel(editor, document.createElement("div")), pic16);
+    ok("the chip's properties show the program, an assembly status, Load / Clear / Debug", /data-prop="src"/.test(prow) && /Assembled \d+ words/.test(prow) && /data-mcuload/.test(prow) && /data-mcuview/.test(prow) && /data-prop="clock"/.test(prow), prow.match(/Assembled[^<]*/));
+    const hexOnly = { ...pic16, src: "", hex: PicHex.format(PicAsm.assemble("movlw 1\n goto 0\n").words) };
+    ok("with only Intel HEX it says so", /from Intel HEX/.test(PartLib.mcuRows(new PropertiesPanel(editor, document.createElement("div")), hexOnly)));
+    ok("an assembly error is shown in the properties", /assembly error, line 1/.test(PartLib.mcuRows(new PropertiesPanel(editor, document.createElement("div")), { ...pic16, src: "  frob 1" })));
+    const dbg = McuWindow.open(editor, live, pic16);
+    ok("Debug > Microcontroller opens the debugger with the program listing", !!document.querySelector(".mcu-win") && document.querySelectorAll(".mcu-win .mcu-table tr").length > 30 && /bsf/.test(document.querySelector(".mcu-win .mcu-table").textContent) && /not running/.test(document.querySelector(".mcu-win .mem-status").textContent));
+    live.stepMcu("U1", 1);
+    const mcu = live.mcus.find(m => m.name === "U1");
+    ok("Step starts the run paused and executes exactly one instruction", live.state === "paused" && mcu.core.pc === 1 && mcu.core.cycles === 1, [live.state, mcu.core.pc, mcu.core.cycles]);
+    live.stepMcu("U1", 10);
+    ok("Step x10 runs ten more (movlw / movwf / bcf ... with 2-cycle gotos and calls counted)", mcu.core.cycles >= 11 && mcu.core.cycles <= 21 && mcu.core.pc > 8, [mcu.core.cycles, mcu.core.pc]);
+    dbg.render();
+    ok("the debugger highlights the instruction about to run and shows the registers", dbg.root.querySelectorAll("tr.pc").length === 1 && Number(dbg.root.querySelector("tr.pc").dataset.addr) === mcu.core.pc && /PAUSED/.test(dbg.root.querySelector(".mem-status").textContent) && /STATUS/.test(dbg.root.querySelector(".mcu-side").textContent), dbg.root.querySelector(".mem-status").textContent);
+        ok("the ports table shows RB0-RB3 as outputs after the setup code", mcu.core.sfr.trisB === 0xF0 && dbg.root.querySelectorAll(".mcu-ports td.out").length >= 4, mcu.core.sfr.trisB);
+    // a breakpoint at the label `loop`
+    const loopAddr = PicAsm.assemble(pic16.src).symbols.get("LOOP");
+    dbg.toggleBreakpoint(loopAddr);
+    ok("clicking an address sets a breakpoint (stored on the part, shown in the listing)", pic16.bps.join() === String(loopAddr) && !!dbg.root.querySelector(`tr[data-addr="${loopAddr}"] td.bp.on`), pic16.bps);
+    document.getElementById("liveSpeed").value = "0.05";
+    dbg.act("go");
+    for (let i = 0; i < 60 && live.state === "running"; i++) await wait(50);
+    ok("Run stops at the breakpoint with the PC on it", live.state === "paused" && mcu.core.pc === loopAddr, [live.state, mcu.core.pc, loopAddr]);
+    const c1 = mcu.core.cycles;
+    dbg.act("go");
+    for (let i = 0; i < 80 && live.state === "running"; i++) await wait(50);
+    ok("Run again goes round the loop once and stops at the same breakpoint (the pattern advanced)", live.state === "paused" && mcu.core.pc === loopAddr && mcu.core.cycles > c1 + 1500, [mcu.core.cycles, c1]);
+    dbg.toggleBreakpoint(loopAddr);
+    ok("clicking it again clears it", pic16.bps.length === 0 && !dbg.root.querySelector("td.bp.on"));
+    live.stop(); McuWindow.close();
+    ok("closing the debugger removes it", !document.querySelector(".mcu-win"));
+    // an assembly error stops the run with a message
+    const toasts = []; const realToast = live.runner.toast; live.runner.toast = (m, k) => toasts.push(m);
+    pic16.src = "  movlw 1\n  frob 2\n";
+    live.start(); live.runner.toast = realToast;
+    ok("a program with an assembly error does not run, and says where", live.state === "stopped" && toasts.some(t => /assembly error, line 2/.test(t)), [live.state, toasts]);
+    ok("with no microcontroller the debugger will not open", (editor.components = editor.components.filter(c => c !== pic16), McuWindow.open(editor, live) === null));
+
     // ======================================================== pause conditions and live values under the pointer
     clear(); loadExampleById(editor, "scope-clamp");
     const pr1 = editor.components.find(c => c.name === "R1"), pc1 = editor.components.find(c => c.name === "C1");

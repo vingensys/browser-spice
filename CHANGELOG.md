@@ -2,6 +2,9 @@
 
 ## 1.0 (current)
 
+Microcontroller
+- PIC16F84A: the whole instruction set, Timer0, interrupts, SLEEP, watchdog, EEPROM and the ports, simulated together with the circuit; an MPASM-style assembler and Intel HEX loader in the app; a debugger (Debug > Microcontroller…) with step, breakpoints, registers, pins, RAM and EEPROM. Examples: LED chaser, Timer0 interrupt blinker. See docs/PIC.md.
+
 Memories
 - ROM / EPROM (27C16, 27C64, 27C256, 74188) and RAM (6116, 6264, 62256 with a bidirectional data bus, 7489) chips; contents from hex text, Intel HEX or a loaded file, saved with the design; live hex view with Export .hex (Debug > Memory…). New example: ROM waveform generator.
 

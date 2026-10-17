@@ -540,6 +540,7 @@ class NetlistExtractor {
                 case "REG": c.add(new Regulator(e.name, e.nodes, p)); break;
                 case "FF": c.add(new FlipFlop(e.name, e.nodes, e.ff, p)); break;
                 case "DIGITAL": c.add(new DigitalIC(e.name, e.nodes, LOGIC_ICS[e.ic], p)); break;
+                case "MCU": { const m = new PicMcu(e.name, e.nodes, p); if (Array.isArray(p.bps)) p.bps.forEach(a => m.bps.add(a)); c.add(m); break; }
                 case "SUBCKT": SpiceParser.addSubckt(c, e.def, e.nodes, e.name); break;
                 case "BSRC": c.add(new BSource(e.name, e.nodes, { mode: e.params.mode, expr: e.params.expr })); break;
                 case "CCCS": c.add(new CCCS(e.name, e.nodes, { ctrl: e.ctrl, gain: p.gain, vsat: p.vsat })); break;
@@ -899,6 +900,9 @@ class NetlistExtractor {
                     lines.push(`X${String(e.name).replace(/[^A-Za-z0-9_]/g, "_").replace(/^X/i, "")} ${n.join(" ")} ${id}`);
                     break;
                 }
+                case "MCU":
+                    lines.push(`* ${e.name}: the ${e.chip} microcontroller has no SPICE model in this export (built-in simulator only)`);
+                    break;
                 case "555":
                     uses555 = true;
                     // pins: GND TRIG OUT RESET VCC DISCH THRES CTRL

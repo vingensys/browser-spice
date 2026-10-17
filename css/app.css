@@ -697,3 +697,29 @@ body.nosidebar #leftpane { display: none; }
 .mem-table td.nz { color: #d8dee9; }
 .mem-table td.chg { background: #5b4a00; color: #ffe08a; }
 .mem-table td.mem-ascii { text-align: left; color: #8fbf9a; letter-spacing: 1px; padding-left: 10px; }
+
+/* microcontroller debugger */
+.mcu-win { position: fixed; z-index: 1000; width: 760px; height: 520px; display: flex; flex-direction: column; background: #20252b; color: #d8dee9; border: 1px solid #0b0d10; border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55); font-size: 12px; }
+.mcu-title { display: flex; align-items: center; gap: 10px; padding: 5px 8px; background: #11151a; border-radius: 6px 6px 0 0; cursor: move; font-size: 11px; letter-spacing: 0.04em; }
+.mcu-title select, .mcu-bar button { background: #2d343c; color: #d8dee9; border: 1px solid #0b0d10; border-radius: 3px; padding: 2px 8px; cursor: pointer; }
+.mcu-bar { display: flex; gap: 6px; align-items: center; padding: 6px 8px; border-bottom: 1px solid #39424c; }
+.mcu-bar .u { margin-left: auto; color: #8c98a8; font-size: 11px; }
+.mcu-main { display: flex; flex: 1 1 0; min-height: 0; }
+.mcu-prog { flex: 1 1 0; overflow: auto; border-right: 1px solid #39424c; }
+.mcu-side { width: 330px; overflow: auto; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; }
+.mcu-table { border-collapse: collapse; font-family: Consolas, monospace; font-size: 11px; width: 100%; }
+.mcu-table td { padding: 1px 6px; white-space: pre; }
+.mcu-table td.bp { width: 14px; color: #ff5c5c; cursor: pointer; text-align: center; }
+.mcu-table td.bp:hover { background: #3a2a2a; }
+.mcu-table td.ad { color: #8c98a8; } .mcu-table td.wd { color: #6b7684; } .mcu-table td.ds { color: #d8dee9; } .mcu-table td.sr { color: #7a8794; }
+.mcu-table tr.pc { background: #264b2a; } .mcu-table tr.pc td.ds { color: #fff; }
+.mcu-regs { border-collapse: collapse; font-family: Consolas, monospace; font-size: 11px; }
+.mcu-regs th { color: #8c98a8; font-weight: normal; padding: 1px 4px; text-align: right; } .mcu-regs td { padding: 1px 6px 1px 2px; color: #ffe08a; }
+.mcu-flags { font-family: Consolas, monospace; font-size: 11px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.mcu-flags b { color: #8c98a8; font-weight: normal; width: 52px; } .mcu-flags span { color: #5b6573; } .mcu-flags span.on { color: #7cf08a; font-weight: bold; }
+.mcu-ports { border-collapse: collapse; font-family: Consolas, monospace; font-size: 11px; }
+.mcu-ports th { color: #8c98a8; font-weight: normal; text-align: right; padding-right: 6px; } .mcu-ports td { width: 22px; text-align: center; border: 1px solid #39424c; }
+.mcu-ports td.hi { background: #5b4a00; color: #ffe08a; } .mcu-ports td.lo { color: #6b7684; } .mcu-ports td.out { outline: 1px solid #4a90e2; }
+.mcu-ram b { color: #8c98a8; font-weight: normal; font-size: 11px; }
+.mcu-grid { display: grid; grid-template-columns: repeat(16, 1fr); font-family: Consolas, monospace; font-size: 10px; gap: 1px; }
+.mcu-grid span { color: #5b6573; text-align: center; } .mcu-grid span.nz { color: #d8dee9; } .mcu-grid span.chg { background: #5b4a00; color: #ffe08a; }

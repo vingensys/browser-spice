@@ -554,7 +554,7 @@ class TransientRun {
         this.breaks = [...new Set(c.elements.flatMap(e => e.breakpoints(tStop)))]
             .filter(t => t > 0 && t <= tStop).sort((a, b) => a - b);
         this.evEls = c.elements.filter(e => e.hasEvents);
-        this.delayEls = this.evEls.filter(e => e.tpd > 0);     // outputs that change some time after the clock edge
+        this.delayEls = this.evEls.filter(e => e.tpd > 0 || e.schedules);     // outputs that change some time after the clock edge
         this.bi = 0;
         this.tEps = tStop * 1e-12;
         this.hMin = tStep * 1e-8;
