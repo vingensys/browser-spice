@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- Graphs that mix voltage and current traces put the currents on their own scale on the right (Graph > Separate Current Axis turns it off).
 - Measurements can be expressions of other measurements (`.meas tran gain param='vout/vin'`), in the dialog, in decks and in the MCP server.
 - File > Open Recent (the last 8 saved or opened designs, kept in this browser).
 - Eagle schematic import (`.sch` XML: R C L, diodes / LEDs, BJTs, MOSFETs, supplies); Ctrl+K also places parts ("Place resistor"). Altium is not supported (closed binary format).

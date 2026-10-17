@@ -219,6 +219,7 @@
     C("graph.noise", "Noise Analysis", { run: () => graph.show("noise") });
     C("graph.sweep", "DC Sweep", { run: () => graph.show("sweep") });
     C("graph.dc", "Operating Point", { run: () => graph.show("dc") });
+    C("graph.dualaxis", "Separate Current Axis", { checked: () => plotter.dualAxis !== false, run() { plotter.dualAxis = plotter.dualAxis === false; plotter.draw(); } });
     C("graph.simulate", "Simulate Graph", { icon: "graph", run: () => graph.simulate() });
 
     C("sim.play", "Run Simulation", { icon: "play", cls: "play", keys: "F12", global: true, enabled: () => live.state !== "running", run: () => live.start() });
@@ -300,7 +301,7 @@
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
         { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "design.sensitivity", "-", "design.erc", "design.ercnext", "design.annotate", "-", "net.highlight", "net.clear"] },
-        { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.probescope", "graph.simulate"] },
+        { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.dualaxis", "graph.probescope", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop", "-", "sim.conditions", "sim.memory", "sim.mcu"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
         { title: "Help", items: ["help.start", "palette.open", "help.keys", "help.about"] }

@@ -102,6 +102,8 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 
 **Eagle import**: File > Import SPICE Netlist… also takes an Eagle schematic (`.sch`, XML): connectivity comes from the net lists; R C L, diodes / LEDs, BJTs, MOSFETs and supplies (as grounds and ideal sources) are simulated, the rest is reported. Altium is not supported (closed binary format): export from Altium to KiCad or Eagle first.
 
+**Two axes**: a transient or sweep graph that mixes voltage and current probes draws the currents against a second scale on the right edge (Graph > Separate Current Axis switches it off).
+
 **Open Recent**: File > Open Recent lists the last eight designs you saved or opened (a copy is kept in this browser, since a web page cannot reopen a disk file by name).
 
 **Place by name**: Ctrl+K lists every part as "Place <name>"; Enter arms the placement tool.

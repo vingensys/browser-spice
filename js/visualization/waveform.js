@@ -159,6 +159,7 @@ class WaveformPlotter {
                 series.push({
                     name: item.label,
                     color: item.color || this.colors[colorIdx % this.colors.length],
+                    unit: "V",
                     values: transientResult.nodeHistories[item.node]
                 });
                 colorIdx++;
@@ -166,6 +167,7 @@ class WaveformPlotter {
                 series.push({
                     name: item.label,
                     color: item.color || this.colors[colorIdx % this.colors.length],
+                    unit: "A",
                     values: transientResult.currentHistories[item.targetName]
                 });
                 colorIdx++;
@@ -205,7 +207,7 @@ class WaveformPlotter {
         for (const item of this.buildProbeSeriesMap(probes, netlistInfo)) {
             const values = item.type === "V" ? sweepResult.nodeHistories[item.node] : sweepResult.currentHistories[item.targetName];
             if (!values) continue;
-            series.push({ name: item.label, color: item.color || this.colors[colorIdx++ % this.colors.length], values });
+            series.push({ name: item.label, color: item.color || this.colors[colorIdx++ % this.colors.length], unit: item.type === "V" ? "V" : "A", values });
         }
         if (!series.length) {
             this.data = null;
@@ -409,7 +411,13 @@ class WaveformPlotter {
     }
 
     plotLeft() { return WaveformPlotter.PAD_LEFT; }
-    plotWidth() { return this.width - WaveformPlotter.PAD_LEFT - WaveformPlotter.PAD_RIGHT; }
+    // Currents get their own scale on the right when a plot mixes volts and amps (Graph > Separate Current Axis)
+    static PAD_RIGHT_DUAL = 64;
+    isDual(data = this.data) {
+        return this.dualAxis !== false && !!data && !data.panels && !data.bars && !!data.series && data.series.some(s => s.unit === "A") && data.series.some(s => s.unit === "V");
+    }
+    padRight(data = this.data) { return this.isDual(data) ? WaveformPlotter.PAD_RIGHT_DUAL : WaveformPlotter.PAD_RIGHT; }
+    plotWidth() { return this.width - WaveformPlotter.PAD_LEFT - this.padRight(); }
 
     // pixel -> data x (clamped to the data range)
     xAtPixel(px) {
@@ -507,25 +515,32 @@ class WaveformPlotter {
         const i0 = Math.max(0, PlotMath.lowerBound(xs, view.inv(view.vmin)) - 1);
         const i1 = Math.min(n - 1, PlotMath.lowerBound(xs, view.inv(view.vmax)) + 1);
 
-        let yMin = Infinity, yMax = -Infinity;
-        for (const s of data.series) {
-            for (let i = i0; i <= i1; i++) {
-                const v = s.values[i];
-                if (v < yMin) yMin = v;
-                if (v > yMax) yMax = v;
+        // y scale of a group of series (volts and amps on separate scales when the plot is dual)
+        const dual = this.isDual(data);
+        const scaleOf = (group) => {
+            let yMin = Infinity, yMax = -Infinity;
+            for (const s of group) {
+                for (let i = i0; i <= i1; i++) {
+                    const v = s.values[i];
+                    if (v < yMin) yMin = v;
+                    if (v > yMax) yMax = v;
+                }
             }
-        }
-        if (!isFinite(yMin) || !isFinite(yMax)) { yMin = -1; yMax = 1; }
-        if (data.bars) yMin = Math.min(yMin, 0);                       // histograms stand on zero
-        if (yMin === yMax) { yMin -= 1; yMax += 1; }
-        const yMargin = (yMax - yMin) * 0.1;
-        yMin -= yMargin; yMax += yMargin;
-
-        const yCenter = (yMin + yMax) / 2 + (this.panY * (yMax - yMin));
-        const yHalfSpan = ((yMax - yMin) / 2) / this.zoomY;
-        const finalYMin = yCenter - yHalfSpan;
-        const finalYMax = yCenter + yHalfSpan;
-        const mapY = (val) => paddingTop + graphHeight - ((val - finalYMin) / (finalYMax - finalYMin)) * graphHeight;
+            if (!isFinite(yMin) || !isFinite(yMax)) { yMin = -1; yMax = 1; }
+            if (data.bars) yMin = Math.min(yMin, 0);                       // histograms stand on zero
+            if (yMin === yMax) { yMin -= 1; yMax += 1; }
+            const yMargin = (yMax - yMin) * 0.1;
+            yMin -= yMargin; yMax += yMargin;
+            const yCenter = (yMin + yMax) / 2 + (this.panY * (yMax - yMin));
+            const yHalfSpan = ((yMax - yMin) / 2) / this.zoomY;
+            const lo = yCenter - yHalfSpan, hi = yCenter + yHalfSpan;
+            return { lo, hi, map: (val) => paddingTop + graphHeight - ((val - lo) / (hi - lo)) * graphHeight };
+        };
+        const amps = dual ? data.series.filter(s => s.unit === "A") : [];
+        const left = scaleOf(dual ? data.series.filter(s => s.unit !== "A") : data.series), right = dual ? scaleOf(amps) : null;
+        const finalYMin = left.lo, finalYMax = left.hi, mapLeft = left.map;
+        const scaleFor = (s) => (right && s.unit === "A" ? right : left);
+        const mapY = mapLeft;
 
         // grid + y labels
         ctx.strokeStyle = "#252b37";
@@ -537,6 +552,15 @@ class WaveformPlotter {
             ctx.beginPath(); ctx.moveTo(paddingLeft, yPos); ctx.lineTo(paddingLeft + graphWidth, yPos); ctx.stroke();
             ctx.textAlign = "right"; ctx.textBaseline = "middle";
             ctx.fillText(data.tickDigits !== undefined ? yVal.toFixed(data.tickDigits) : Units.formatSI(yVal, ""), paddingLeft - 8, yPos);
+        }
+
+        if (right) {
+            ctx.fillStyle = amps[0].color; ctx.textAlign = "left"; ctx.textBaseline = "middle";
+            for (const v of WaveformPlotter.niceTicks(right.lo, right.hi, 5)) {
+                const yPos = right.map(v);
+                ctx.beginPath(); ctx.moveTo(paddingLeft + graphWidth, yPos); ctx.lineTo(paddingLeft + graphWidth + 4, yPos); ctx.stroke();
+                ctx.fillText(Units.formatSI(v, "A"), paddingLeft + graphWidth + 7, yPos);
+            }
         }
 
         // x grid + labels: decades on a log axis, nice values otherwise
@@ -578,13 +602,14 @@ class WaveformPlotter {
         ctx.clip();
         const dense = (i1 - i0 + 1) > graphWidth * 3;
         for (const s of data.series) {
+            const sMap = scaleFor(s).map;
             ctx.strokeStyle = s.color;
             ctx.lineWidth = 2;
             if (data.bars) {                                           // histogram: filled bars one bin wide
                 const w = n > 1 ? Math.abs(xOf(xs[1]) - xOf(xs[0])) : 20;
                 ctx.fillStyle = s.color; ctx.globalAlpha = 0.75;
                 for (let i = i0; i <= i1; i++) {
-                    const px = xOf(xs[i]), top = mapY(s.values[i]), base = mapY(0);
+                    const px = xOf(xs[i]), top = scaleFor(s).map(s.values[i]), base = scaleFor(s).map(0);
                     ctx.fillRect(px - w / 2 + 1, Math.min(top, base), Math.max(w - 2, 1), Math.abs(base - top));
                 }
                 ctx.globalAlpha = 1;
@@ -593,7 +618,7 @@ class WaveformPlotter {
             ctx.beginPath();
             if (!dense) {
                 for (let i = i0; i <= i1; i++) {
-                    const px = xOf(xs[i]), py = mapY(s.values[i]);
+                    const px = xOf(xs[i]), py = sMap(s.values[i]);
                     if (i === i0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
                 }
             } else {
@@ -601,7 +626,7 @@ class WaveformPlotter {
                 const flush = () => {
                     if (col === null) return;
                     const a = loI < hiI ? [lo, hi] : [hi, lo];
-                    for (const v of a) { const py = mapY(v); if (!started) { ctx.moveTo(col + 0.5, py); started = true; } else ctx.lineTo(col + 0.5, py); }
+                    for (const v of a) { const py = sMap(v); if (!started) { ctx.moveTo(col + 0.5, py); started = true; } else ctx.lineTo(col + 0.5, py); }
                 };
                 for (let i = i0; i <= i1; i++) {
                     const c = Math.floor(xOf(xs[i])), v = s.values[i];
@@ -628,7 +653,7 @@ class WaveformPlotter {
             for (const s of data.series) {
                 const v = PlotMath.valueAt(xs, s.values, cx, view.log);
                 ctx.fillStyle = s.color;
-                ctx.beginPath(); ctx.arc(px, Math.max(paddingTop, Math.min(paddingTop + graphHeight, mapY(v))), 4, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(px, Math.max(paddingTop, Math.min(paddingTop + graphHeight, scaleFor(s).map(v))), 4, 0, Math.PI * 2); ctx.fill();
             }
         }
         ctx.restore();
@@ -683,13 +708,13 @@ class WaveformPlotter {
                 tooltipY += 15;
                 for (const s of data.series) {
                     const val = PlotMath.valueAt(xs, s.values, this.hoverX, view.log);
-                    const hY = mapY(val);
+                    const hY = scaleFor(s).map(val);
                     ctx.fillStyle = s.color;
                     ctx.beginPath();
                     ctx.arc(hX, Math.max(paddingTop, Math.min(paddingTop + graphHeight, hY)), 4, 0, Math.PI * 2);
                     ctx.fill();
                     ctx.textAlign = "right";
-                    ctx.fillText(`${s.name}: ${Units.formatSI(val, data.valueUnit || "")}`, paddingLeft + graphWidth - 10, tooltipY);
+                    ctx.fillText(`${s.name}: ${Units.formatSI(val, data.valueUnit || s.unit || "")}`, paddingLeft + graphWidth - 10, tooltipY);
                     tooltipY += 15;
                 }
             }

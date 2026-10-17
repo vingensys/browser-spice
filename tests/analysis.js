@@ -333,6 +333,21 @@ window.analysisTests = async function () {
     }
     editor.measures = [];
 
+    {
+        const keep = plotter.data, xs = [0, 1, 2, 3, 4];
+        plotter.data = { mode: "transient", xLabel: "Time", xValues: xs, series: [{ name: "V(a)", color: "#f00", unit: "V", values: [0, 5, 0, 5, 0] }, { name: "I(R1)", color: "#0f0", unit: "A", values: [0, 0.005, 0, 0.005, 0] }] };
+        const w1 = plotter.plotWidth();
+        ok("a plot of volts and amps gets a second scale on the right", plotter.isDual() && plotter.padRight() > WaveformPlotter.PAD_RIGHT);
+        let threw = null; try { plotter.draw(); } catch (e) { threw = e; }
+        ok("and draws", !threw, threw && threw.message);
+        Commands.run("graph.dualaxis");
+        ok("Graph > Separate Current Axis turns it off", !plotter.isDual() && plotter.plotWidth() > w1);
+        Commands.run("graph.dualaxis");
+        plotter.data = { mode: "transient", xLabel: "Time", xValues: xs, series: [{ name: "V(a)", color: "#f00", unit: "V", values: [0, 5, 0, 5, 0] }] };
+        ok("a plot with one kind of signal keeps one scale", !plotter.isDual());
+        plotter.data = keep; plotter.draw();
+    }
+
     const tfInfo = NetlistExtractor.extract(editor);
     Commands.run("graph.tf");
     ok("Graph > Transfer Function opens its dialog", !!document.querySelector(".dialog .tf #tfOut"));
