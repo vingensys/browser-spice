@@ -490,7 +490,7 @@
                 if (pairs.length > 1 && pairs.some(([n, t]) => KicadImporter.isKicad(t))) { const rootName = KicadImporter.pickRoot(files); text = files[rootName]; extra = files; }
                 else if (pairs.length > 1) { text = files[SpiceParser.pickRoot(files)]; extra = files; }   // a deck and the library files it includes
                 else text = pairs[0][1];
-                const r = KicadImporter.isKicad(text) ? KicadImporter.import(editor, text, extra) : SchematicImporter.import(editor, text, extra);
+                const r = KicadImporter.isKicad(text) ? KicadImporter.import(editor, text, extra) : (EagleImporter.isEagle(text) ? EagleImporter.import(editor, text) : SchematicImporter.import(editor, text, extra));
                 if (r.models || r.subckts) {
                     pane.render();
                     runner.toast(`Added ${[r.models ? `${r.models} model(s)` : "", r.subckts ? `${r.subckts} subcircuit(s)` : ""].filter(Boolean).join(" and ")}. Press P to pick them.${r.warnings.length ? " " + r.warnings[0] : ""}`, r.warnings.length ? "warn" : "info");

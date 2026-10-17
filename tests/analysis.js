@@ -1375,6 +1375,33 @@ window.analysisTests = async function () {
         clear();
     }
 
+    // Eagle import: the connectivity comes straight from the <net> lists
+    {
+        clear();
+        const xml = await (await fetch("tests/fixtures/eagle-sample.sch", { cache: "reload" })).text();
+        ok("an Eagle file is recognised by its <eagle> root (not a SPICE deck or a KiCad file)", EagleImporter.isEagle(xml) && !EagleImporter.isEagle("* deck\nR1 1 0 1k") && !KicadImporter.isKicad(xml));
+        const r = EagleImporter.import(editor, xml);
+        const kinds = {}; for (const c of editor.components) kinds[c.type] = (kinds[c.type] || 0) + 1;
+        ok("the parts are mapped: 3 resistors, a capacitor, an LED, an NPN transistor and a 5 V supply", kinds.R === 3 && kinds.C === 1 && kinds.LED === 1 && kinds.BJT_NPN === 1 && kinds.V === 1, kinds);
+        ok("the supply symbol became an ideal 5 V source on the +5V net, GND is ground", editor.components.some(c => c.type === "V" && Number(Units.parseSI(c.dcVoltage !== undefined ? c.dcVoltage : c.value)) === 5) && editor.components.some(c => c.type === "GND"), editor.components.filter(c => c.type === "V").map(c => [c.dcVoltage, c.value]));
+        ok("a model name that is in the library (RED) keeps the part an LED with that model", editor.components.find(c => c.type === "LED").model === "RED", editor.components.find(c => c.type === "LED").model);
+        // the circuit: the divider R1 / R2 (10k / 4.7k) sets the base at 5 * 4.7 / 14.7 = 1.6 V (loaded a little by the transistor); the LED branch conducts
+        const info = NetlistExtractor.extract(editor), op = new SimEngine(info.circuit).operatingPoint();
+        const find = (name) => editor.components.find(c => c.name === name) || editor.components.find(c => (name === "Q1" ? c.type === "BJT_NPN" : c.name.endsWith(name)));
+        const nodeOf = (name, pinName) => info.getTerminalNodeName(find(name), pinName);
+        const vb = op.nodeVoltages[nodeOf("Q1", "B")];
+        ok("the divider biases the base near 1.6 V minus a little (the 4k7 to ground is shared with the base current)", vb > 0.6 && vb < 1.7, vb);
+        ok("the base net joins R1.2, R2.1, C1.1 and Q1's base", new Set([nodeOf("R1", "2"), nodeOf("R2", "1"), nodeOf("C1", "1"), nodeOf("Q1", "B")]).size === 1);
+        ok("both GND segments are one ground: R2 and Q1's emitter are at 0 V", op.nodeVoltages[nodeOf("Q1", "E")] === 0 || nodeOf("Q1", "E") === "0");
+        ok("the +5V net has 5 V, and the LED carries current when the transistor is on", Math.abs(op.nodeVoltages[nodeOf("R3", "1")] - 5) < 1e-6 && Math.abs(op.currents[find("R3").name]) > 0.001, [op.nodeVoltages[nodeOf("R3", "1")], op.currents[find("R3").name]]);
+        ok("nothing is lost silently: the warnings list what was skipped (none here)", !r.warnings.some(w => /skipped/.test(w)), r.warnings);
+        let threw = ""; try { EagleImporter.toSpice("<eagle><drawing><schematic><parts/><sheets/></schematic></drawing></eagle>"); } catch (e) { threw = e.message; }
+        ok("a schematic with no simulatable parts says so", /No simulatable parts/.test(threw), threw);
+        let bad = ""; try { EagleImporter.toSpice("<eagle><oops"); } catch (e) { bad = e.message; }
+        ok("a broken file is reported, not half-loaded", /valid Eagle XML/.test(bad), bad);
+        clear();
+    }
+
     clear();
     return { total: results.length, failed: results.filter(r => !r.pass).length, failures: results.filter(r => !r.pass) };
 };
