@@ -74,6 +74,17 @@ class PcbView {
                             <button class="tb-btn txt" data-fp="new">New</button>
                             <button class="tb-btn txt" data-fp="import">Import .kicad_mod…</button>
                             <input type="file" id="fpFile" accept=".kicad_mod,.mod,.txt" class="hidden">
+                            <div class="pcb-fplib">
+                                <b>Library (this browser)</b>
+                                <input id="fpLibFilter" placeholder="Search, e.g. 0805 or SOIC-8" autocomplete="off">
+                                <select id="fpLib" size="7"></select>
+                                <div class="pcb-note" id="fpLibInfo"></div>
+                                <button class="tb-btn txt" data-fp="libfolder" title="Pick a KiCad .pretty folder">Import folder…</button>
+                                <button class="tb-btn txt" data-fp="libfiles" title="Pick .kicad_mod files">Import files…</button>
+                                <button class="tb-btn txt" data-fp="libdelete" title="Remove the selected footprint from the library">Remove</button>
+                                <input type="file" id="fpLibFiles" accept=".kicad_mod,.mod" multiple class="hidden">
+                                <input type="file" id="fpLibFolder" webkitdirectory multiple class="hidden">
+                            </div>
                             <label>Template <select id="fpTpl"><option value="">(choose)</option><option value="smd2">2-pad SMD</option><option value="th3">3-pin through-hole</option><option value="dual">Dual row, 8 pins</option></select></label>
                         </div>
                         <div class="pcb-fped-mid">
@@ -549,6 +560,19 @@ class PcbView {
             ed.querySelector("#fpList").onchange = (e) => this.fpLoad(e.target.value);
             ed.querySelector("#fpText").oninput = () => this.fpPreview();
             ed.querySelector("#fpTpl").onchange = (e) => { if (e.target.value) { ed.querySelector("#fpText").value = PcbView.TEMPLATES[e.target.value]; e.target.value = ""; this.fpPreview(); } };
+            const libImport = async (e) => {
+                const files = e.target.files; if (!files || !files.length) return;
+                const r = await FootprintLibrary.importFiles(files); e.target.value = "";
+                this.fpLibList();
+                if (!r.found) return this.fpError("No .kicad_mod files in that selection.");
+                if (!r.stored) return this.fpError("The browser would not store the library (storage full?). Use fewer footprints.");
+                this.fpError("");
+                this.say(`Library: ${r.added} added, ${r.replaced} replaced${r.errors.length ? `, ${r.errors.length} skipped (${r.errors.slice(0, 2).map(x => `${x.name.split("/").pop()}: ${x.error}`).join("; ")}${r.errors.length > 2 ? " …" : ""})` : ""}.`);
+            };
+            ed.querySelector("#fpLibFiles").onchange = libImport;
+            ed.querySelector("#fpLibFolder").onchange = libImport;
+            ed.querySelector("#fpLibFilter").oninput = () => this.fpLibList();
+            ed.querySelector("#fpLib").onchange = (e) => { const d = FootprintLibrary.get(e.target.value); if (d) { ed.querySelector("#fpList").value = ""; ed.querySelector("#fpText").value = Pcb.footprintText(d); this.fpPreview(); } };
             ed.querySelector("#fpFile").onchange = (e) => {
                 const f = e.target.files[0]; if (!f) return;
                 const r = new FileReader();
@@ -557,6 +581,7 @@ class PcbView {
             };
         }
         this.fpList(name);
+        this.fpLibList();
         if (!name && !ed.querySelector("#fpText").value) ed.querySelector("#fpText").value = PcbView.TEMPLATES.smd2;
         this.fpPreview();
     }
@@ -567,6 +592,14 @@ class PcbView {
         const el = this.root.querySelector("#fpList"), names = Object.keys(this.pcb.footprints || {}).sort();
         el.innerHTML = names.map(n => `<option>${n}</option>`).join("");
         if (select && names.includes(select)) { el.value = select; this.fpLoad(select); }
+    }
+
+    // the browser-wide library, narrowed by the search box (at most 400 shown)
+    fpLibList() {
+        const ed = this.root.querySelector("#pcbFpEd"), el = ed.querySelector("#fpLib"), names = FootprintLibrary.names(ed.querySelector("#fpLibFilter").value);
+        el.innerHTML = names.slice(0, 400).map(n => `<option>${PropertiesPanel.esc(n)}</option>`).join("");
+        const total = Object.keys(FootprintLibrary.all()).length;
+        ed.querySelector("#fpLibInfo").textContent = total ? `${names.length} of ${total}${names.length > 400 ? " (first 400 shown: narrow the search)" : ""}. Pick one, then Use on selected part.` : "Empty. Import a KiCad .pretty folder to fill it.";
     }
 
     fpLoad(name) { const d = this.pcb.footprints[name]; if (d) { this.root.querySelector("#fpText").value = Pcb.footprintText(d); this.fpPreview(); } }
@@ -595,6 +628,9 @@ class PcbView {
         if (a === "close") return this.closeFootprints();
         if (a === "new") { text.value = PcbView.TEMPLATES.smd2; ed.querySelector("#fpList").value = ""; return this.fpPreview(); }
         if (a === "import") return ed.querySelector("#fpFile").click();
+        if (a === "libfolder") return ed.querySelector("#fpLibFolder").click();
+        if (a === "libfiles") return ed.querySelector("#fpLibFiles").click();
+        if (a === "libdelete") { const n = ed.querySelector("#fpLib").value; if (n) { FootprintLibrary.remove(n); this.fpLibList(); } return; }
         if (a === "delete") {
             const name = ed.querySelector("#fpList").value;
             if (!name) return this.fpError("Pick a footprint in the list to delete.");

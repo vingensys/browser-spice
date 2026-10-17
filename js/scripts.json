@@ -75,6 +75,7 @@
  "js/ui/share.js",
  "js/ui/palette.js",
  "js/ui/recent.js",
+ "js/ui/fp-library.js",
  "js/ui/describe.js",
  "js/ui/shortcuts.js",
  "js/ui/report.js",

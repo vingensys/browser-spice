@@ -727,3 +727,6 @@ body.nosidebar #leftpane { display: none; }
 /* screen-reader only text and the sheet description */
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .sheet-description { max-height: 50vh; overflow: auto; white-space: pre-wrap; font-size: 12px; margin: 0; }
+
+.pcb-fplib { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; padding-top: 6px; border-top: 1px solid var(--ui-border, #333); }
+.pcb-fplib select { width: 100%; }

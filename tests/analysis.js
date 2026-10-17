@@ -1299,6 +1299,30 @@ window.analysisTests = async function () {
         const pkgSel2 = pcbView.root.querySelector("#pcbPkg");
         ok("the Footprint list now offers it for resistors", [...pkgSel2.options].some(o => o.value === "user:MY_R") && pkgSel2.value === "user:MY_R");
         ok("it is saved with the design", doc.serialize().pcb.footprints.MY_R.pads.length === 2);
+        {
+            FootprintLibrary.clear();
+            pcbView.act("footprints");
+            const mk = (n, name) => new File([`(footprint "L:${name}" (fp_line (start -1 -1) (end 1 -1) (layer "F.SilkS")) (pad "1" smd rect (at -0.9 0) (size 0.8 0.9) (layers "F.Cu")) (pad "2" smd rect (at 0.9 0) (size 0.8 0.9) (layers "F.Cu")))`], n);
+            const dt = new DataTransfer();
+            ["R_0402.kicad_mod", "R_0603.kicad_mod", "C_0603.kicad_mod"].forEach(n => dt.items.add(mk(n, n.replace(".kicad_mod", ""))));
+            dt.items.add(new File(["not a footprint"], "bad.kicad_mod")); dt.items.add(new File(["x"], "readme.txt"));
+            const inp = pcbView.root.querySelector("#fpLibFiles"); inp.files = dt.files; inp.dispatchEvent(new Event("change")); await wait(300);
+            ok("a library import stores the good footprints in the browser", FootprintLibrary.names().join() === "C_0603,R_0402,R_0603", FootprintLibrary.names());
+            ok("and the library list shows them", pcbView.root.querySelector("#fpLib").options.length === 3 && /3 of 3/.test(pcbView.root.querySelector("#fpLibInfo").textContent));
+            const flt = pcbView.root.querySelector("#fpLibFilter"); flt.value = "r 06"; flt.dispatchEvent(new Event("input"));
+            ok("the search narrows it (every word must match)", [...pcbView.root.querySelector("#fpLib").options].map(o => o.value).join() === "R_0603");
+            const lib = pcbView.root.querySelector("#fpLib"); lib.value = "R_0603"; lib.dispatchEvent(new Event("change"));
+            ok("picking one loads it into the editor", /footprint R_0603/.test(pcbView.root.querySelector("#fpText").value));
+            pcbView.sel = { kind: "part", ref: rp2 };
+            pcbView.root.querySelector('[data-fp="use"]').click();
+            ok("Use on selected part copies it into the design and applies it", editor.pcb.footprints.R_0603 && rp2.pkg === "user:R_0603", rp2.pkg);
+            flt.value = ""; flt.dispatchEvent(new Event("input"));
+            lib.value = "C_0603"; pcbView.root.querySelector('[data-fp="libdelete"]').click();
+            ok("Remove takes one out of the library", FootprintLibrary.names().join() === "R_0402,R_0603");
+            FootprintLibrary.clear();
+            pcbView.root.querySelector('[data-fp="close"]').click();
+            rp2.pkg = "user:MY_R"; Pcb.setPackage(rp2, "user:MY_R", editor.pcb.footprints); delete editor.pcb.footprints.R_0603;
+        }
         pcbView.root.querySelector("#pcbZoneNet").value = "0";
         pcbView.layer = "B"; pcbView.act("pourboard");
         ok("Pour board adds a pour on the active layer and net", editor.pcb.zones.length === 1 && editor.pcb.zones[0].layer === "B" && editor.pcb.zones[0].net === "0", editor.pcb.zones);

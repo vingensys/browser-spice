@@ -164,6 +164,19 @@ for (const seed of [5, 9]) {
     check("a KiCad .kicad_mod imports: name, pads sorted by number, SMD vs through-hole, silk layer only", kf.name === "R_0805" && kf.pads.map(p => p.n).join() === "1,2,3" && kf.pads[0].smd && !kf.pads[2].smd && kf.pads[2].drill === 1 && kf.silk.length === 2, JSON.stringify(kf.pads.map(p => [p.n, p.w, p.h, p.smd])));
     check("a pad rotated 90° swaps its size", kf.pads[1].w === 1.45 && kf.pads[1].h === 1.0);
     check("a non-footprint file is refused", (() => { try { P2.importKicadFootprint("(kicad_sch)"); return false; } catch (e) { return /not a KiCad footprint/.test(e.message); } })());
+    // arcs and polygons on the silkscreen, and whole libraries
+    const arcMod = `(footprint "Mix:ARCY" (fp_arc (start 1 0) (mid 0 1) (end -1 0) (layer "F.SilkS") (width 0.12))
+      (fp_arc (start 0 0) (end 2 0) (angle 90) (layer "F.SilkS"))
+      (fp_poly (pts (xy 0 0) (xy 1 0) (xy 1 1)) (layer "F.SilkS") (width 0.1))
+      (fp_arc (start 5 5) (mid 6 6) (end 7 5) (layer "F.Fab"))
+      (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu")))`;
+    const af = P2.importKicadFootprint(arcMod);
+    check("silk arcs are traced (three-point and centre-angle forms), polygons closed, other layers left out", af.silk.length === 3, af.silk.length);
+    const arc3 = af.silk[0];
+    check("a three-point arc passes through its middle point and keeps its radius", arc3.every(q => Math.abs(Math.hypot(q[0], q[1]) - 1) < 1e-9) && arc3.some(q => Math.abs(q[0]) < 1e-9 && Math.abs(q[1] - 1) < 1e-9), arc3);
+    check("a centre-angle arc sweeps 90° from its start point", Math.abs(af.silk[1][0][0] - 2) < 1e-9 && Math.abs(af.silk[1][af.silk[1].length - 1][1] - 2) < 1e-9, af.silk[1]);
+    const lib = P2.importKicadLibrary([{ name: "a.kicad_mod", text: mod }, { name: "b.kicad_mod", text: mod }, { name: "bad.kicad_mod", text: "(kicad_sch)" }, { name: "empty.kicad_mod", text: "(footprint \"X\")" }]);
+    check("a library import keeps the good files, makes clashing names unique and reports the bad ones", lib.defs.map(d => d.name).join() === "R_0805,R_0805_2" && lib.errors.length === 2 && lib.errors.some(e => e.name === "bad.kicad_mod" && /not a KiCad/.test(e.error)) && lib.errors.some(e => e.name === "empty.kicad_mod" && /no pads/.test(e.error)), JSON.stringify(lib.errors));
 }
 // ---- copper pours
 {

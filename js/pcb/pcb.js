@@ -186,11 +186,61 @@ class Pcb {
                 if (layer && !/SilkS/.test(layer)) continue;
                 const c = xy(e, "center"), en = xy(e, "end");
                 if (c && en) { const r = Math.hypot(en[0] - c[0], en[1] - c[1]); silk.push(Array.from({ length: 25 }, (_, i) => [c[0] + Math.cos((i / 24) * 2 * Math.PI) * r, c[1] + Math.sin((i / 24) * 2 * Math.PI) * r])); }
+            } else if (hd === "fp_arc") {
+                const layer = K.kid(e, "layer") && K.str(K.kid(e, "layer")[1]);
+                if (layer && !/SilkS/.test(layer)) continue;
+                const pts = Pcb.arcPoints(xy(e, "start"), xy(e, "mid"), xy(e, "end"), K.kid(e, "angle") ? K.num(K.kid(e, "angle")[1]) : null);
+                if (pts) silk.push(pts);
+            } else if (hd === "fp_poly") {
+                const layer = K.kid(e, "layer") && K.str(K.kid(e, "layer")[1]);
+                if (layer && !/SilkS/.test(layer)) continue;
+                const pts = K.kid(e, "pts");
+                if (pts) { const q = pts.filter(x => Array.isArray(x) && K.head(x) === "xy").map(x => [K.num(x[1]), K.num(x[2])]); if (q.length > 1) silk.push([...q, q[0]]); }
             }
         }
         if (!pads.length) throw new Error("that footprint has no pads");
         pads.sort((a, b) => { const x = Number(a.n), y = Number(b.n); return (Number.isFinite(x) ? x : 1e9) - (Number.isFinite(y) ? y : 1e9); });
         return { name: nm, pads, silk, pinMap: null };
+    }
+
+    // points along an arc: KiCad 6+ gives start, mid and end (a circle through three points); KiCad 5 gives the centre,
+    // the start point and an angle in degrees
+    static arcPoints(a, m, b, angle) {
+        if (!a || !b) return null;
+        let cx, cy, r, a0, sweep;
+        if (m) {
+            const d = 2 * (a[0] * (m[1] - b[1]) + m[0] * (b[1] - a[1]) + b[0] * (a[1] - m[1]));
+            if (Math.abs(d) < 1e-12) return [a, b];
+            const sa = a[0] ** 2 + a[1] ** 2, sm = m[0] ** 2 + m[1] ** 2, sb = b[0] ** 2 + b[1] ** 2;
+            cx = (sa * (m[1] - b[1]) + sm * (b[1] - a[1]) + sb * (a[1] - m[1])) / d;
+            cy = (sa * (b[0] - m[0]) + sm * (a[0] - b[0]) + sb * (m[0] - a[0])) / d;
+            r = Math.hypot(a[0] - cx, a[1] - cy);
+            a0 = Math.atan2(a[1] - cy, a[0] - cx);
+            const am = Math.atan2(m[1] - cy, m[0] - cx), a1 = Math.atan2(b[1] - cy, b[0] - cx);
+            const norm = (x) => ((x % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+            const toM = norm(am - a0), toB = norm(a1 - a0);
+            sweep = toM <= toB ? toB : toB - 2 * Math.PI;           // the mid point lies on the arc: go the way that passes it
+        } else if (angle !== null) {
+            cx = a[0]; cy = a[1]; r = Math.hypot(b[0] - cx, b[1] - cy); a0 = Math.atan2(b[1] - cy, b[0] - cx); sweep = (angle * Math.PI) / 180;
+        } else return [a, b];
+        const n = Math.max(4, Math.ceil(Math.abs(sweep) / (Math.PI / 12)));
+        return Array.from({ length: n + 1 }, (_, i) => [cx + Math.cos(a0 + (sweep * i) / n) * r, cy + Math.sin(a0 + (sweep * i) / n) * r]);
+    }
+
+    // a whole library at once: files = [{ name, text }] of .kicad_mod (or .mod) files. Returns the footprints, in file
+    // order with clashing names made unique, and the files that were skipped with the reason.
+    static importKicadLibrary(files) {
+        const defs = [], errors = [], seen = new Set();
+        for (const f of files) {
+            try {
+                const def = Pcb.importKicadFootprint(f.text);
+                let name = def.name, k = 2;
+                while (seen.has(name)) name = `${def.name}_${k++}`;
+                seen.add(name); def.name = name;
+                defs.push(def);
+            } catch (e) { errors.push({ name: f.name, error: e.message }); }
+        }
+        return { defs, errors };
     }
 
     // ---------------------------------------------------------------- schematic -> board
