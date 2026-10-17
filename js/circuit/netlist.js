@@ -645,7 +645,7 @@ class NetlistExtractor {
     // functions) returns null and the export says so instead of guessing.
     static digitalSubckt(id, key, params, f) {
         const spec = LOGIC_ICS[key];
-        if (!spec) return null;
+        if (!spec || spec.memory) return null;        // memories (ROM / RAM images) have no SPICE model here
         const vcc = params.vcc === undefined ? 5 : params.vcc, ro = params.ro || 50;
         const L = spec.left, R = spec.right;
         // ports are positional: pin names differ only by case on some chips (A / a), which SPICE cannot tell apart

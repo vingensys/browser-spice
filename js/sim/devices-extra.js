@@ -401,9 +401,11 @@ class CCCS extends NonlinearElement {
 class DigitalIC extends Element {
     // tpd: propagation delay (s). The chip's state changes at the clock edge as before, but its outputs follow tpd later;
     // a change that is undone before then never reaches the pins (inertial delay, so glitches shorter than tpd vanish).
-    constructor(name, nodes, spec, { vcc = 5, ro = 50, tpd = 0 } = {}) {
+    constructor(name, nodes, spec, { vcc = 5, ro = 50, tpd = 0, mem = "" } = {}) {
         super(name, nodes);
         this.spec = spec;
+        // a memory chip's contents (its ROM image or RAM's initial contents) belong to the instance, not to the chip type
+        this.inst = spec.memory ? { words: LogicIC.parseMemory(mem, spec.memory.size, spec.memory.bits) } : null;
         this.tpd = tpd > 0 ? tpd : 0;
         this.pending = null;                // { t, out }: the outputs that appear at time t
         this.pins = LogicIC.pins(spec);
@@ -417,7 +419,7 @@ class DigitalIC extends Element {
         // power-up outputs (inputs at their open-circuit levels) so the operating point already drives them
         const open = {};
         spec.left.forEach(pin => { open[pin] = LogicIC.pullsUp(spec, pin) ? 1 : 0; });
-        const r = spec.step(spec.init(), open, open);
+        const r = spec.step(spec.init(), open, open, this.inst);
         this.st = r.st;
         this.out = r.out;
         this.prev = open;
@@ -426,6 +428,8 @@ class DigitalIC extends Element {
     levels(ctx) {
         const v = {};
         this.spec.left.forEach((pin, i) => { v[pin] = ctx.v(this.n[i]) > this.vcc / 2 ? 1 : 0; });
+        // a bidirectional pin (a RAM's data bus) is also read as an input: it sits on the right, among the outputs
+        if (this.spec.bidir) for (const pin of this.spec.bidir) v[pin] = ctx.v(this.n[this.spec.left.length + this.spec.right.indexOf(pin)]) > this.vcc / 2 ? 1 : 0;
         return v;
     }
 
@@ -440,7 +444,7 @@ class DigitalIC extends Element {
         let out = this.out;
         if (ctx.mode !== "tran") {
             const v = this.levels(ctx);
-            out = this.spec.step(this.st, v, v).out;
+            out = this.spec.step(this.st, v, v, this.inst).out;
             if (this.dcOut && JSON.stringify(out) !== JSON.stringify(this.dcOut)) ctx.noncon = true;   // keep iterating until it settles
             this.dcOut = out;
         }
@@ -461,14 +465,24 @@ class DigitalIC extends Element {
         this.spec.right.forEach((pin, i) => { if (this.out[pin] !== "Z") ac.addY(this.n[nl + i], -1, 1 / this.ro, 0); });
     }
 
-    evaluate(ctx) { return this.spec.step(this.st, this.levels(ctx), this.prev); }
+    // a memory chip's words as they are now (its image, with everything written since power-up on top)
+    memoryImage() {
+        const m = this.spec.memory;
+        if (!m) return null;
+        const img = Uint16Array.from(this.inst.words);
+        if (this.st && this.st.w) for (const [a, v] of Object.entries(this.st.w)) img[a] = v;
+        return img;
+    }
+
+    evaluate(ctx) { return this.spec.step(this.st, this.levels(ctx), this.prev, this.inst); }
 
     // the outputs the chip is heading for: the pending ones while a delay is running, else the ones on the pins
     get target() { return this.pending ? this.pending.out : this.out; }
 
     wouldFlip(ctx) {
         const r = this.evaluate(ctx);
-        return JSON.stringify(r.out) !== JSON.stringify(this.target) || JSON.stringify(r.st) !== JSON.stringify(this.st);
+        // (a memory's state can be large, and step() returns the very same object when nothing was written)
+        return JSON.stringify(r.out) !== JSON.stringify(this.target) || (r.st !== this.st && JSON.stringify(r.st) !== JSON.stringify(this.st));
     }
 
     nextEvent() { return this.pending ? this.pending.t : Infinity; }
@@ -477,7 +491,7 @@ class DigitalIC extends Element {
         this.st = this.spec.init();
         const v = this.levels(ctx);
         this.prev = v;                                   // no edges at power-up
-        const r = this.spec.step(this.st, v, v);
+        const r = this.spec.step(this.st, v, v, this.inst);
         this.st = r.st; this.out = r.out;
         this.pending = null;
     }

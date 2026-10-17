@@ -394,6 +394,31 @@ window.scopeTests = async function () {
     ok("a blocked pop-up leaves the scope where it is", zw.popped === false && document.body.contains(zw.root));
     frame.remove(); ScopeWindow.closeAll(); live.stop();
 
+    // ======================================================== memory window
+    clear(); loadExampleById(editor, "rom-sine");
+    const rom = editor.components.find(c => c.type === "27C16");
+    ok("the ROM example places an EPROM with its image", rom && /80 B0 DA/.test(rom.mem), rom && rom.mem);
+    ok("Pick Devices lists the memories", DeviceCatalog.categories.includes("Memory") && DeviceCatalog.all().filter(d => d.category === "Memory").map(d => d.name).sort().join() === "27C16,27C256,27C64,6116,62256,6264,74188,7489", DeviceCatalog.all().filter(d => d.category === "Memory").map(d => d.name));
+    const rows = PartLib.defs["27C16"].rows(new PropertiesPanel(editor, document.createElement("div")), rom);
+    ok("a memory chip's properties have the contents box with Load / Clear / View", /data-prop="mem"/.test(rows) && /data-memload/.test(rows) && /data-memclear/.test(rows) && /data-memview/.test(rows) && /2,048 words of 8 bits/.test(rows), rows.slice(0, 80));
+    const mw = MemoryWindow.open(editor, live, rom);
+    ok("Debug > Memory opens a hex view of the chip", !!mw && !!document.querySelector(".mem-win") && mw.chip === rom.name);
+    const cell = (a) => document.querySelector(`.mem-win td[data-a="${a}"]`);
+    ok("it shows the image: 80 B0 DA F5 FF ... and zeros after the table", cell(0).textContent === "80" && cell(1).textContent === "B0" && cell(4).textContent === "FF" && cell(16).textContent === "00" && document.querySelector(".mem-win .mem-status").textContent.includes("image"), [cell(0).textContent, cell(1).textContent, cell(4).textContent]);
+    ok("the ASCII column is there", document.querySelectorAll(".mem-win td.mem-ascii").length === 128);
+    let hexSaved = null; const realDownload = ScopeWindow.download; ScopeWindow.download = (name, blob) => { hexSaved = { name, blob }; };
+    mw.exportHex(); ScopeWindow.download = realDownload;
+    const hexText = await hexSaved.blob.text();
+    const back = Array.from(LogicIC.parseMemory(hexText, 2048));
+    ok("Export .hex writes Intel HEX that parses back to the same image", hexSaved.name === `${rom.name}.hex` && /^:10000000/.test(hexText) && /:00000001FF\s*$/.test(hexText) && back.slice(0, 16).join() === Array.from(LogicIC.parseMemory(rom.mem, 2048)).slice(0, 16).join(), hexText.slice(0, 60));
+    document.getElementById("liveSpeed").value = "0.05";
+    live.start(); await wait(200); mw.render();
+    ok("while the simulation runs the window says LIVE", /LIVE|PAUSED/.test(document.querySelector(".mem-win .mem-status").textContent), document.querySelector(".mem-win .mem-status").textContent);
+    live.stop(); MemoryWindow.close();
+    ok("closing removes the window", !document.querySelector(".mem-win") && !MemoryWindow.current);
+    editor.components = editor.components.filter(c => c !== rom);
+    ok("with no memory chip on the sheet there is nothing to open", MemoryWindow.open(editor, live) === null);
+
     // ======================================================== pause conditions and live values under the pointer
     clear(); loadExampleById(editor, "scope-clamp");
     const pr1 = editor.components.find(c => c.name === "R1"), pc1 = editor.components.find(c => c.name === "C1");

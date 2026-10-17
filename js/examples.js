@@ -421,6 +421,39 @@ const EXAMPLES = [
         }
     },
     {
+        id: "rom-sine",
+        name: "ROM waveform generator (counter, EPROM, R-2R DAC)",
+        note: "A 74161 counts 0-15 on a 1 kHz clock and addresses a 27C16 EPROM holding one cycle of a sine wave (double-click the ROM to edit or load its contents; Debug > Memory… shows them). An R-2R ladder turns the ROM's 8 data bits into the voltage on V(out). Press Play, or run a transient.",
+        settings: { tStop: "40m", tStep: "20u" },
+        build(b) {
+            const table = Array.from({ length: 16 }, (_, k) => Math.round(127.5 + 127.5 * Math.sin(2 * Math.PI * k / 16)));
+            const ck = b.part("V", 120, 420, { rot: 270, sourceType: "SQUARE", gen: { low: 0, high: 5, freq: 1000, duty: 50 } });
+            const g0 = b.part("GND", 120, 520);
+            const cnt = b.part("74161", 380, 440, {});
+            const rom = b.part("27C16", 720, 440, { mem: table.map(v => v.toString(16).toUpperCase().padStart(2, "0")).join(" ") });
+            b.wire(ck, "2", cnt, "CLK"); b.wire(ck, "1", g0, "1");
+            ["QA", "QB", "QC", "QD"].forEach((q, i) => b.wire(cnt, q, rom, `A${i}`));
+            // R-2R ladder: bit i through 2R to node i, R between neighbouring nodes, 2R from node 0 to ground
+            const bits = [];
+            for (let i = 0; i < 8; i++) {
+                const r2 = b.part("R", 1000, 300 + 90 * i, { value: "20 kΩ" });
+                bits.push(r2);
+                b.wire(rom, `D${i}`, r2, "1");
+            }
+            const series = [];
+            for (let i = 0; i < 7; i++) {
+                const rs = b.part("R", 1160, 345 + 90 * i, { rot: 90, value: "10 kΩ" });
+                series.push(rs);
+                b.wire(bits[i], "2", rs, "1"); b.wire(rs, "2", bits[i + 1], "2");
+            }
+            const term = b.part("R", 1280, 440, { rot: 90, value: "20 kΩ" });
+            const g1 = b.part("GND", 1280, 560);
+            b.wire(bits[0], "2", term, "1"); b.wire(term, "2", g1, "1");
+            b.vprobe(bits[7], "2", "V(out)");
+            b.vprobe(cnt, "QA", "QA");
+        }
+    },
+    {
         id: "shift-register",
         name: "Shift register (74164 serial in, parallel out)",
         note: "A single 1 is clocked into a 74164 and marches along its eight outputs. Press Play and watch the LIVE graph, or run a transient.",

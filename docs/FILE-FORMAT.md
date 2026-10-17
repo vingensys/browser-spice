@@ -51,6 +51,7 @@ it migrates older files and checks structure, and `tests/format.test.js` pins it
   (`resistor`, `vsource`, ...) or `SUB:<name>` for a subcircuit. Positions are in canvas units (20 = 0.1 in).
   Run-time fields (`live`, `scopeTrace`, `glow`, `on`, ...) are never saved.
 - **Wire**: `{ id, start, end, route }`. An end is `{ type: "terminal", component, terminal }` or a free point / junction.
+- **Memory chip** (a `Memory` part such as `27C16` or `6116`): `mem` holds its image as text (hex bytes or Intel HEX); for a RAM it is the initial contents.
 - **Probe**: `{ id, type: "V" | "I", x, y, label, ... }`.
 - **Oscilloscope** (`SCOPE` part) settings live in the part's `scope` field (same shape as `probeScope` above). A channel's `src` assigns a probe to it; without one, channels A-D read the scope's pins.
 - **Current clamp** (`CLAMP` part): `{ target: <component id>, sens: "0.1" (V per A), ... }`; its `O` pin carries volts = amps x sens, and a scope channel wired to it shows amps.

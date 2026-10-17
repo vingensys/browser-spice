@@ -9,7 +9,8 @@ class PropertiesPanel {
         this.handlers = {
             focusin: () => { this.before = editor.snapshot(); },
             input: (e) => this.onInput(e),
-            change: (e) => this.onChange(e)
+            change: (e) => this.onChange(e),
+            click: (e) => this.onClick(e)
         };
         this.attach(container);
     }
@@ -274,6 +275,33 @@ class PropertiesPanel {
             this.commit();
         }
         this.editor.draw();
+    }
+
+    // buttons inside the panel (a memory chip's Load file / Clear)
+    onClick(e) {
+        const b = e.target.closest && e.target.closest("button");
+        if (!b || (b.dataset.memload === undefined && b.dataset.memclear === undefined && b.dataset.memview === undefined)) return;
+        const comp = this.editor.selection[0];
+        if (!comp) return;
+        if (b.dataset.memview !== undefined) { MemoryWindow.open(this.editor, window.live, comp); return; }
+        const set = (text) => { this.editor.saveState(); comp.mem = text; this.refreshLabel(comp); this.editor.draw(); this.render(); this.before = this.editor.snapshot(); };
+        if (b.dataset.memclear !== undefined) { set(""); return; }
+        const input = document.createElement("input");
+        input.type = "file"; input.accept = ".hex,.ihx,.bin,.rom,.txt,.mem";
+        input.onchange = () => {
+            const file = input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                const bytes = new Uint8Array(reader.result);
+                const asText = new TextDecoder().decode(bytes);
+                // Intel HEX and plain hex text stay as text; anything else is a raw binary image
+                const textual = /^\s*(:[0-9a-fA-F]{8}|[0-9a-fA-FxX$ ,;#\r\n:]*$)/.test(asText.slice(0, 200)) && !/\.(bin|rom)$/i.test(file.name);
+                set(textual ? asText.trim() : Array.from(bytes, (v, i) => v.toString(16).padStart(2, "0") + ((i & 15) === 15 ? "\n" : " ")).join("").trim());
+            };
+            reader.readAsArrayBuffer(file);
+        };
+        input.click();
     }
 
     refreshLabel(comp) {

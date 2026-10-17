@@ -25,6 +25,17 @@ window.exampleTests = function () {
         return out;
     };
 
+    check("rom-sine: the counter addresses the ROM and the R-2R ladder makes a stepped sine", () => {
+        const { info, sim } = load("rom-sine");
+        const r = sim.transient({ tStop: 0.034, tStep: 20e-6, uic: true });
+        const out = info.getTerminalNodeName(editor.components.find(c => c.name === "R8"), "2");
+        const v = (t) => r.nodeHistories[out][r.timePoints.findIndex(x => x >= t)];
+        const table = Array.from({ length: 16 }, (_, k) => Math.round(127.5 + 127.5 * Math.sin(2 * Math.PI * k / 16)));
+        for (const n of [1, 3, 4, 5, 9, 12, 16, 18, 20, 28]) near(v((n + 0.5) * 1e-3), 5 * table[(n + 1) % 16] / 256, 0.06, `V(out) at ${n + 0.5} ms (the counter counts the clock's first edge at t = 0, so the address is ${n + 1} mod 16)`);
+        const hi = Math.max(...r.nodeHistories[out].slice(r.nodeHistories[out].length >> 1)), lo = Math.min(...r.nodeHistories[out].slice(r.nodeHistories[out].length >> 1));
+        if (hi < 4.8 || lo > 0.1) throw new Error(`swing ${lo.toFixed(2)} .. ${hi.toFixed(2)} V`);
+    });
+
     check("rc-ladder: series capacitors settle to a charge-sharing divider", () => {
         const { info, sim } = load("rc-ladder");
         const r = sim.transient({ tStop: 0.2, tStep: 2e-4, uic: true });

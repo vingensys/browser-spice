@@ -439,6 +439,81 @@ const LOGIC_ICS = {};
         }
     });
 
+    // ---------------------------------------------------------------- memories
+    // A memory's words belong to the instance (inst.words, from LogicIC.parseMemory); a RAM keeps only the words written
+    // since power-up in its state ({ w: { address: word } }), so a step that writes nothing returns the very same state object.
+    const addrOf = (v, abits) => { let a = 0; for (let i = 0; i < abits; i++) if (v[`A${i}`]) a |= 1 << i; return a; };
+    const wordOf = (v, names) => names.reduce((a, n, i) => a | ((v[n] ? 1 : 0) << i), 0);
+    const baseWord = (inst, a) => (inst && inst.words && inst.words[a]) || 0;
+    const dbus = (n) => Array.from({ length: n }, (_, i) => `D${i}`);
+
+    // EPROM / ROM: 27C16 (2K x 8), 27C64 (8K x 8), 27C256 (32K x 8). Outputs float unless CE and OE are both active.
+    const rom = (key, abits, desc) => add(key, {
+        title: key, desc, category: "Memory", memory: { size: 1 << abits, bits: 8, kind: "rom" },
+        left: [...Array.from({ length: abits }, (_, i) => `A${i}`), "CE_N", "OE_N"], right: dbus(8), pulldown: ["CE_N", "OE_N"],
+        init: () => null,
+        step(st, v, p, inst) {
+            const out = {}, on = !v.CE_N && !v.OE_N, w = on ? baseWord(inst, addrOf(v, abits)) : 0;
+            dbus(8).forEach((n, i) => { out[n] = on ? (w >> i) & 1 : "Z"; });
+            return { st: null, out };
+        }
+    });
+    rom("27C16", 11, "2K x 8 EPROM (set its contents in the properties)");
+    rom("27C64", 13, "8K x 8 EPROM (set its contents in the properties)");
+    rom("27C256", 15, "32K x 8 EPROM (set its contents in the properties)");
+
+    // 32 x 8 PROM (74188 style): address A0-A4, output enable G_N
+    add("74188", {
+        title: "74188", desc: "32 x 8 PROM (set its contents in the properties); outputs float while G is inactive", category: "Memory", memory: { size: 32, bits: 8, kind: "rom" },
+        left: [...Array.from({ length: 5 }, (_, i) => `A${i}`), "G_N"], right: dbus(8), pulldown: ["G_N"],
+        init: () => null,
+        step(st, v, p, inst) {
+            const out = {}, on = !v.G_N, w = on ? baseWord(inst, addrOf(v, 5)) : 0;
+            dbus(8).forEach((n, i) => { out[n] = on ? (w >> i) & 1 : "Z"; });
+            return { st: null, out };
+        }
+    });
+
+    // static RAM: 6116 (2K x 8), 6264 (8K x 8), 62256 (32K x 8). D0-D7 is one bidirectional bus. A write completes when WE rises
+    // while the chip is selected (or when CS rises with WE low), using the address and data that were on the pins just before;
+    // the bus is driven only in a read cycle (CS and OE active, WE high). Contents start as the instance's initial contents.
+    const ram = (key, abits, desc) => add(key, {
+        title: key, desc, category: "Memory", memory: { size: 1 << abits, bits: 8, kind: "ram" },
+        left: [...Array.from({ length: abits }, (_, i) => `A${i}`), "CS_N", "OE_N", "WE_N"], right: dbus(8), bidir: dbus(8), pulldown: ["CS_N", "OE_N"],
+        init: () => ({ w: {} }),
+        step(st, v, p, inst) {
+            let w = st.w;
+            if ((rise(v, p, "WE_N") && !p.CS_N) || (rise(v, p, "CS_N") && !p.WE_N)) {
+                const a = addrOf(p, abits), d = wordOf(p, dbus(8));
+                if (!(a in w ? w[a] === d : baseWord(inst, a) === d)) w = Object.assign({}, w, { [a]: d });
+            }
+            const out = {}, on = !v.CS_N && !v.OE_N && !!v.WE_N, a = addrOf(v, abits), word = a in w ? w[a] : baseWord(inst, a);
+            dbus(8).forEach((n, i) => { out[n] = on ? (word >> i) & 1 : "Z"; });
+            return { st: w === st.w ? st : { w }, out };
+        }
+    });
+    ram("6116", 11, "2K x 8 static RAM, bidirectional data bus");
+    ram("6264", 13, "8K x 8 static RAM, bidirectional data bus");
+    ram("62256", 15, "32K x 8 static RAM, bidirectional data bus");
+
+    // 7489: 16 x 4 RAM with complemented outputs. While ME is low and WE low the word is written (follows the data inputs) and the
+    // outputs show the complement of the inputs; with WE high they show the complement of the addressed word; with ME high they are high.
+    add("7489", {
+        title: "7489", desc: "16 x 4 RAM, outputs are the complement of the stored word", category: "Memory", memory: { size: 16, bits: 4, kind: "ram" },
+        left: ["A0", "A1", "A2", "A3", "DI1", "DI2", "DI3", "DI4", "ME_N", "WE_N"], right: ["DO1", "DO2", "DO3", "DO4"], pulldown: ["ME_N"],
+        init: () => ({ w: {} }),
+        step(st, v, p, inst) {
+            const a = addrOf(v, 4), di = wordOf(v, ["DI1", "DI2", "DI3", "DI4"]);
+            let w = st.w;
+            const writing = !v.ME_N && !v.WE_N;
+            if (writing && (a in w ? w[a] : baseWord(inst, a)) !== di) w = Object.assign({}, w, { [a]: di });
+            const word = writing ? di : (a in w ? w[a] : baseWord(inst, a));
+            const out = {};
+            ["DO1", "DO2", "DO3", "DO4"].forEach((n, i) => { out[n] = v.ME_N ? 1 : 1 - ((word >> i) & 1); });
+            return { st: w === st.w ? st : { w }, out };
+        }
+    });
+
     // ---------------------------------------------------------------- gate packages
 
     const gates = (key, desc, count, fn, label) => add(key, {
@@ -478,17 +553,48 @@ const LogicIC = {
         }
         return out;
     },
+    // A memory image from text: Intel HEX, or hex bytes separated by spaces / commas / newlines ("0x" and "$" prefixes, "addr:" at the
+    // start of a line and ";" or "#" comments are allowed). Returns a Uint8Array (or Uint16Array for 9..16 bit words) of `size` words.
+    parseMemory(text, size, bits = 8) {
+        const words = (bits > 8 ? new Uint16Array(size) : new Uint8Array(size)), max = (1 << bits) - 1;
+        const src = String(text || "").replace(/\r/g, "");
+        if (!src.trim()) return words;
+        const lines = src.split("\n").map(l => l.trim()).filter(l => l && !l.startsWith(";") && !l.startsWith("#"));
+        if (lines.some(l => l.startsWith(":")) && lines.every(l => l.startsWith(":"))) {          // Intel HEX
+            let base = 0;
+            for (const l of lines) {
+                const n = parseInt(l.slice(1, 3), 16), addr = parseInt(l.slice(3, 7), 16), type = parseInt(l.slice(7, 9), 16);
+                if (type === 0) for (let i = 0; i < n; i++) { const a = base + addr + i; if (a < size) words[a] = parseInt(l.slice(9 + 2 * i, 11 + 2 * i), 16) & max; }
+                else if (type === 2) base = parseInt(l.slice(9, 13), 16) * 16;
+                else if (type === 4) base = parseInt(l.slice(9, 13), 16) * 65536;
+                else if (type === 1) break;
+            }
+            return words;
+        }
+        let at = 0;
+        for (let l of lines) {
+            const m = /^([0-9a-fA-F]+)\s*:(.*)$/.exec(l);
+            if (m) { at = parseInt(m[1], 16); l = m[2]; }
+            for (const t of l.split(/[\s,]+/)) {
+                if (!t) continue;
+                const v = parseInt(t.replace(/^0x|^\$/i, ""), 16);
+                if (Number.isFinite(v)) { if (at < size) words[at] = v & max; at++; }
+            }
+        }
+        return words;
+    },
     pullsUp(spec, name) { return !spec.pulldown.includes(name) && (/_N$/.test(name) || spec.pullup.includes(name)); },
     // run a chip through a list of input vectors (a test / documentation helper); returns the output after each
-    run(key, vectors) {
+    run(key, vectors, mem = "") {
         const spec = LOGIC_ICS[key];
+        const inst = spec.memory ? { words: LogicIC.parseMemory(mem, spec.memory.size, spec.memory.bits) } : null;
         let st = spec.init(), prev = {}, outs = [];
         const defaults = {};
         for (const n of spec.left) defaults[n] = LogicIC.pullsUp(spec, n) ? 1 : 0;
         prev = Object.assign({}, defaults);
         for (const vec of vectors) {
             const v = Object.assign({}, defaults, vec);
-            const r = spec.step(st, v, prev);
+            const r = spec.step(st, v, prev, inst);
             st = r.st; prev = v; outs.push(r.out);
         }
         return outs;

@@ -816,6 +816,18 @@ function logicSpecFor(spec, c) {
     return { ...spec, left: fold(spec.left), right: fold(spec.right) };
 }
 
+// the Contents section of a memory chip's properties: the hex text, load / clear buttons and a count
+PartLib.memoryRows = (p, c, spec) => {
+    const m = spec.memory, words = LogicIC.parseMemory(c.mem || "", m.size, m.bits);
+    const used = words.reduce((n, w) => n + (w ? 1 : 0), 0), esc = PropertiesPanel.esc;
+    return `<div class="property"><label>${m.kind === "rom" ? "Contents" : "Initial contents (blank = zeros)"}: hex bytes from address 0, or Intel HEX</label>
+        <textarea data-prop="mem" rows="6" spellcheck="false" style="font-family:monospace;font-size:11px" placeholder="00 01 02 03 ...">${esc(c.mem || "")}</textarea>
+        <div style="display:flex;gap:6px;margin-top:4px"><button class="pane-btn" data-memload type="button" title="Load a .hex (Intel HEX), .bin or .txt file">Load file…</button>
+        <button class="pane-btn" data-memclear type="button">Clear</button>
+        <button class="pane-btn" data-memview type="button" title="Open the memory window: a hex view that updates while the simulation runs">View…</button></div>
+        <div class="prop-note">${m.size.toLocaleString()} words of ${m.bits} bits; ${used.toLocaleString()} non-zero in the image. ${m.kind === "ram" ? "The running contents show in Debug > Memory…" : ""}</div></div>`;
+};
+
 for (const [key, spec] of Object.entries(LOGIC_ICS)) {
     const g = logicICGeometry(spec);
     const hasVectors = LogicIC.vectors(spec).length > 0;
@@ -850,6 +862,7 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
         },
         rows: (p, c) => p.text("Supply / logic high (V)", "vcc", c.vcc === undefined ? "5" : c.vcc, "5") +
             p.text("Propagation delay (s)", "tpd", c.tpd === undefined ? "" : c.tpd, "0 = ideal (not in SPICE export)") +
+            (spec.memory ? PartLib.memoryRows(p, c, spec) : "") +
             (hasVectors ? p.check("Vector pins as buses (" + LogicIC.vectors(spec).map(v => v.name).join(", ") + ")", "busPins", !!c.busPins) : "") +
             `<div class="prop-note">${PropertiesPanel.esc(spec.desc)}. No power pins are needed. Inputs left open read high when active-low (barred), and enables read active, so an unwired chip works; unused outputs may stay open.${hasVectors ? " With vector pins as buses, attach a bus wire to the thick pin: the first pin of the run meets the first member of the bus, and so on. Switching this on or off removes the wires on the pins that change." : ""}</div>`,
         netlist(c, k) {
@@ -858,7 +871,7 @@ for (const [key, spec] of Object.entries(LOGIC_ICS)) {
                 const v = vecs.find(x => x.pins.includes(n));
                 return v ? k.bus(v.name, v.pins.indexOf(n)) : k.pin(n);
             });
-            return [{ ...k.base, kind: "DIGITAL", ic: key, nodes, params: { vcc: k.num(c.vcc, 5), tpd: k.num(c.tpd, 0) } }];
+            return [{ ...k.base, kind: "DIGITAL", ic: key, nodes, params: { vcc: k.num(c.vcc, 5), tpd: k.num(c.tpd, 0), ...(spec.memory ? { mem: c.mem || "" } : {}) } }];
         },
         catalog: [{ name: key, category: spec.category, desc: `${spec.desc}`, props: { vcc: "5", value: key } }]
     });

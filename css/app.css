@@ -683,3 +683,17 @@ body.nosidebar #leftpane { display: none; }
 .scope-ch.sel { background: rgba(255, 255, 255, 0.07); outline: 1px solid var(--ch); border-radius: 3px; }
 .scope-all { display: flex; align-items: center; gap: 4px; width: 100%; flex-wrap: wrap; }
 .scope-all select { max-width: 96px; }
+
+/* memory window */
+.mem-win { position: fixed; z-index: 1000; width: 640px; max-height: 70vh; display: flex; flex-direction: column; background: #20252b; color: #d8dee9; border: 1px solid #0b0d10; border-radius: 6px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55); font-size: 12px; }
+.mem-title { display: flex; align-items: center; gap: 10px; padding: 5px 8px; background: #11151a; border-radius: 6px 6px 0 0; cursor: move; font-size: 11px; letter-spacing: 0.04em; }
+.mem-title select, .mem-title button { background: #2d343c; color: #d8dee9; border: 1px solid #0b0d10; border-radius: 3px; padding: 2px 6px; }
+.mem-status { margin-left: auto; font-family: Consolas, monospace; color: #7cf08a; }
+.mem-close { background: none !important; border: none !important; font-size: 14px; cursor: pointer; }
+.mem-body { overflow: auto; padding: 6px; }
+.mem-table { border-collapse: collapse; font-family: Consolas, monospace; font-size: 11px; }
+.mem-table th { color: #8c98a8; font-weight: normal; padding: 1px 4px; text-align: right; }
+.mem-table td { padding: 1px 4px; color: #6b7684; text-align: center; }
+.mem-table td.nz { color: #d8dee9; }
+.mem-table td.chg { background: #5b4a00; color: #ffe08a; }
+.mem-table td.mem-ascii { text-align: left; color: #8fbf9a; letter-spacing: 1px; padding-left: 10px; }
