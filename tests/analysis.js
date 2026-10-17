@@ -94,6 +94,30 @@ window.analysisTests = async function () {
     graph.hide();
 
 
+    // ======================================================== spectrum of a live run
+    {
+        clear(); loadExampleById(editor, "ce-amp");
+        byName("V2").acMagnitude = 0.02;
+        document.getElementById("simTstop").value = "50m"; document.getElementById("simTstep").value = "5u"; document.getElementById("liveSpeed").value = "0";
+        live.start();
+        for (let i = 0; i < 60 && live.run.t < 0.0125; i++) live.advance(50, true);
+        live.pause(); live.readout(); live.paint(true);
+        graph.show("live"); live.paint(true);
+        const setSel2 = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event("change", { bubbles: true })); };
+        setSel2("fftWindow", "rect");
+        graph.show("fft"); await wait(100);
+        const lsp = plotter.data && plotter.data.spectra && plotter.data.spectra[0];
+        ok("the live SPECTRUM is taken from the full-rate record", /full-rate live record/.test(document.getElementById("plotTitle").textContent), document.getElementById("plotTitle").textContent);
+        ok("it covers a whole number of periods of the 1 kHz input", lsp && lsp.cycles >= 5 && Math.abs((lsp.t1 - lsp.t0) * 1000 - Math.round((lsp.t1 - lsp.t0) * 1000)) < 0.01, lsp && [lsp.cycles, lsp.t0, lsp.t1]);
+        ok("so even a rectangular window reads the 20 mV tone exactly", lsp && near(lsp.fundamental.f, 1000, 3) && near(lsp.fundamental.mag, 0.02, 0.0003), lsp && lsp.fundamental);
+        document.getElementById("fftWhole").checked = false; setSel2("fftWhole", false);
+        const raw = plotter.data.spectra[0];
+        ok("with Whole cycles off the whole record is analysed", raw.cycles === undefined && raw.t1 > lsp.t1 - 1e-12 && raw.t1 - raw.t0 >= lsp.t1 - lsp.t0 - 1e-12, [raw.t0, raw.t1]);
+        document.getElementById("fftWhole").checked = true;
+        setSel2("fftWindow", "hann");
+        live.stop(); graph.show("tran");
+    }
+
     // ======================================================== parametric sweep and Monte Carlo
     clear(); loadExampleById(editor, "rc-ladder");
     document.getElementById("simTstop").value = "50m"; document.getElementById("simTstep").value = "100u";

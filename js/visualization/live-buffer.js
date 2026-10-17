@@ -94,3 +94,39 @@ class LiveBuffer {
         if (k > 0) { this.times.splice(0, k); for (const v of this.values) v.splice(0, k); }
     }
 }
+
+// Every accepted step of a run, newest `cap` of them, at full resolution: what the SPECTRUM tab analyses
+// (the picture above is peak-detected, which is right to look at but wrong to take a Fourier transform of).
+class FastRing {
+    constructor(channels, cap = 1 << 17) {
+        this.n = channels; this.cap = cap;
+        this.t = new Float64Array(cap);
+        this.v = Array.from({ length: channels }, () => new Float64Array(cap));
+        this.head = 0; this.count = 0;
+    }
+
+    push(t, vals) {
+        const i = this.head;
+        this.t[i] = t;
+        for (let k = 0; k < this.n; k++) this.v[k][i] = vals[k];
+        this.head = (i + 1) % this.cap;
+        if (this.count < this.cap) this.count++;
+    }
+
+    // chronological copy of the samples with time >= since (default: all held)
+    snapshot(since = -Infinity) {
+        const m = this.count, start = (this.head - m + this.cap) % this.cap;
+        let skip = 0;
+        // times only grow, so the first wanted sample can be found by bisection over the ring order
+        let lo = 0, hi = m;
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (this.t[(start + mid) % this.cap] < since) lo = mid + 1; else hi = mid; }
+        skip = lo;
+        const len = m - skip, xs = new Float64Array(len), ys = this.v.map(() => new Float64Array(len));
+        for (let i = 0; i < len; i++) {
+            const j = (start + skip + i) % this.cap;
+            xs[i] = this.t[j];
+            for (let k = 0; k < this.n; k++) ys[k][i] = this.v[k][j];
+        }
+        return { xs, ys };
+    }
+}

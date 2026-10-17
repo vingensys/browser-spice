@@ -109,6 +109,7 @@ class LiveSim {
         this.times = this.buf.times;
         this.values = this.buf.values;
         this.sampleRow = new Array(this.channels.length);
+        this.fast = new FastRing(this.channels.length);
 
         // oscilloscopes keep their own full-resolution buffers (and their settings live on the part)
         this.scopes = new Map();
@@ -363,6 +364,7 @@ class LiveSim {
             if (this.mcus && this.mcus.length) for (const m of this.mcus) if (m.breakHit) { m.breakHit = false; m.passBp = m.core.pc; this.pauseReason = `${m.name} stopped at the breakpoint at 0x${m.core.pc.toString(16).toUpperCase().padStart(3, "0")}`; }
             for (let i = 0; i < this.channels.length; i++) { const ch = this.channels[i]; this.sampleRow[i] = ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element); }
             this.buf.push(run.t, this.sampleRow);
+            this.fast.push(run.t, this.sampleRow);
             if (this.pauseReason) break;
         }
         this.buf.settle();       // peak-detected history, the open bucket included, only the visible window kept

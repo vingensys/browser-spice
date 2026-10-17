@@ -1,6 +1,6 @@
 // The LIVE graph's rolling buffer:  node tests/livebuffer.test.js
 const fs = require("fs"), path = require("path");
-const { LiveBuffer } = new Function(fs.readFileSync(path.join(__dirname, "..", "js/visualization/live-buffer.js"), "utf8") + "\nreturn { LiveBuffer };")();
+const { LiveBuffer, FastRing } = new Function(fs.readFileSync(path.join(__dirname, "..", "js/visualization/live-buffer.js"), "utf8") + "\nreturn { LiveBuffer, FastRing };")();
 let pass = 0, fail = 0;
 const ok = (name, cond, info) => { if (cond) { pass++; console.log("  ok  ", name); } else { fail++; console.log("  FAIL", name, info === undefined ? "" : JSON.stringify(info)); } };
 const span = (a) => Math.max(...a) - Math.min(...a);
@@ -57,6 +57,17 @@ const span = (a) => Math.max(...a) - Math.min(...a);
     for (let t = 1; t < 1.2; t += 1e-3) b.push(t, [t]);
     b.settle();
     ok("widening the window keeps what was recorded and goes on from there", b.times[0] > 0.89 && b.times[b.times.length - 1] > 1.19, [b.times[0], b.times[b.times.length - 1]]);
+}
+
+// the full-rate ring
+{
+    const r = new FastRing(2, 1000);
+    for (let i = 0; i < 2500; i++) r.push(i * 1e-3, [i, -i]);
+    ok("the ring holds the newest cap samples", r.count === 1000);
+    const all = r.snapshot();
+    ok("a snapshot is chronological and unwrapped", all.xs.length === 1000 && all.xs.every((t, i) => i === 0 || t > all.xs[i - 1]) && all.ys[0][0] === 1500 && all.ys[1][999] === -2499, [all.ys[0][0], all.ys[1][999]]);
+    const part = r.snapshot(2.0);
+    ok("a snapshot can start at a time", part.xs[0] >= 2.0 && part.xs.length === 500 && part.ys[0][0] === 2000, [part.xs[0], part.xs.length]);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

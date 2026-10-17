@@ -58,5 +58,23 @@ test("too little data returns null instead of nonsense", () => {
     if (Spectrum.analyse([0, 1, 2], [0, 1, 0]) !== null) throw new Error("short data");
     if (Spectrum.analyse([0, 0, 0, 0, 0, 0, 0, 0, 0], [1, 1, 1, 1, 1, 1, 1, 1, 1]) !== null) throw new Error("zero span");
 });
+test("whole cycles: a rectangular window on 1234.5 Hz reads 1.5 V (without it the tone leaks)", () => {
+    const { xs, ys } = sample(t => 1.5 * Math.sin(2 * Math.PI * 1234.5 * t), 0.0205);
+    const plain = Spectrum.analyse(xs, ys, { window: "rect" }), whole = Spectrum.analyse(xs, ys, { window: "rect", wholeCycles: true });
+    near(whole.fundamental.mag, 1.5, 0.02, "whole cycles");
+    if (!(Math.abs(plain.fundamental.mag - 1.5) > 0.05)) throw new Error("expected leakage without whole cycles, got " + plain.fundamental.mag);
+    if (!(whole.cycles >= 20)) throw new Error("cycles " + whole.cycles);
+    near((whole.t1 - whole.t0) * 1234.5, whole.cycles, 0.01, "the span is a whole number of periods");
+});
+test("whole cycles leaves a span shorter than one period alone", () => {
+    const { xs, ys } = sample(t => Math.sin(2 * Math.PI * 100 * t), 0.004, 1e-5);
+    const sp = Spectrum.analyse(xs, ys, { window: "hann", wholeCycles: true });
+    if (sp && sp.cycles) throw new Error("cycles reported for less than a period: " + sp.cycles);
+});
+test("THD of a distorted tone is accurate with whole cycles and a rectangular window", () => {
+    const { xs, ys } = sample(t => Math.sin(2 * Math.PI * 1000 * t) + 0.05 * Math.sin(2 * Math.PI * 3000 * t), 0.0215);
+    const sp = Spectrum.analyse(xs, ys, { window: "rect", wholeCycles: true });
+    near(sp.thd, 0.05, 0.004, "THD");
+});
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

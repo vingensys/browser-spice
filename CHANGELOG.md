@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- SPECTRUM: a new "whole cycles" option analyses a whole number of periods of a repeating signal (no leakage, even with the rectangular window; a span marked with cursors is used as marked). After a live run the spectrum is taken from a full-rate record of the run, not from the peak-detected picture. Cursors left over from another tab no longer carry into LIVE.
 - LIVE tab: "Show last" (also under Simulation Settings > Live graph shows last) sets how much history is shown, separately from the Stop time, so a fast signal can be viewed in detail over a long run. Saved with the design.
 - The LIVE graph keeps the lowest and highest value of every time bucket (peak detect) instead of skipping samples, so a fast signal in a long window no longer aliases to a wrong shape or a flat line.
 - Opening, creating or importing a design now clears the graph window (old traces, cursors, spectrum, operating point).

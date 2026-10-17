@@ -53,8 +53,23 @@ class Spectrum {
         return out;
     }
 
-    // options: t0, t1 (the span analysed; default all), n (points, power of two; default from the data), window, maxHarmonics
+    // options: t0, t1 (the span analysed; default all), n (points, power of two; default from the data), window, maxHarmonics,
+    // wholeCycles (shorten the span to a whole number of periods of the signal, so a tone does not leak between bins)
     static analyse(xs, ys, opts = {}) {
+        const r = Spectrum.analyseSpan(xs, ys, opts);
+        if (!r || !opts.wholeCycles) return r;
+        const per = PlotMath.frequency(xs, ys, r.t0, r.t1);
+        // only a signal that visibly repeats (several rising crossings of its mid level) is trimmed; a start-up
+        // transient or noise is analysed as it is, since its "period" would be a guess
+        const period = per && per.cycles >= 3 && per.period > 0 ? per.period : 0;
+        const cycles = period > 0 ? Math.floor((r.t1 - r.t0) / period + 1e-9) : 0;
+        if (cycles < 2 || cycles * period > (r.t1 - r.t0) * 0.9999) { r.cycles = cycles >= 2 ? cycles : 0; return r; }
+        const trimmed = Spectrum.analyseSpan(xs, ys, Object.assign({}, opts, { t0: r.t0, t1: r.t0 + cycles * period }));
+        if (trimmed) trimmed.cycles = cycles;
+        return trimmed || r;
+    }
+
+    static analyseSpan(xs, ys, opts = {}) {
         const t0 = opts.t0 !== undefined ? Math.max(opts.t0, xs[0]) : xs[0];
         const t1 = opts.t1 !== undefined ? Math.min(opts.t1, xs[xs.length - 1]) : xs[xs.length - 1];
         if (!(t1 > t0) || xs.length < 8) return null;

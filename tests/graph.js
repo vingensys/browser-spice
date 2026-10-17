@@ -138,6 +138,11 @@ window.graphTests = async function () {
     graph.show("live");
     live.paint(true);
     ok("the live graph can be exported too", (P.csv("all") || "").split("\r\n").length > 5, (P.csv("all") || "").length);
+    {
+        graph.show("fft"); await wait(100);
+        ok("SPECTRUM after a live run analyses the full-rate record", P.data && P.data.mode === "spectrum" && /full-rate live record/.test(document.getElementById("plotTitle").textContent), JSON.stringify({ t: document.getElementById("plotTitle").textContent, span: graph.lastSpan, fast: live.fast && live.fast.count, tk: graph.timeKind, ll: !!graph.lastLive, fs: (graph.fastSource() || {}).xValues && graph.fastSource().xValues.length, now: live.run && live.run.t }));
+        graph.show("live");
+    }
     live.stop();
 
     // operating point has nothing to measure or export

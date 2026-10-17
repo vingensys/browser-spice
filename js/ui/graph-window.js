@@ -30,6 +30,7 @@ class GraphWindow {
                     <select id="fftWindow" title="Window function">${Object.entries(Spectrum.WINDOWS).map(([k, w]) => `<option value="${k}" ${k === "hann" ? "selected" : ""}>${w.label}</option>`).join("")}</select>
                     <select id="fftScale" title="Amplitude scale"><option value="db">dBV</option><option value="lin">Volts</option></select>
                     <select id="fftSpan" title="Frequency range"><option value="40">To 40× f₁</option><option value="10">To 10× f₁</option><option value="200">To 200× f₁</option><option value="0">Full</option></select>
+                    <label style="font-size:11px" title="Analyse a whole number of periods of the signal, so the tone does not leak into neighbouring bins (a span marked with cursors is used exactly as marked)"><input type="checkbox" id="fftWhole" checked style="width:auto"> whole cycles</label>
                     <select id="fftAxis" title="Frequency axis"><option value="lin">Linear</option><option value="log">Log</option></select>
                 </span>
                 <span id="plotTitle">No simulation run yet</span>
@@ -69,7 +70,7 @@ class GraphWindow {
             if (window.live) window.live.setWindow();
             if (this.kind === "live") this.show("live");
         };
-        for (const id of ["fftWindow", "fftScale", "fftSpan", "fftAxis"]) root.querySelector("#" + id).onchange = () => { if (this.kind === "fft") this.showSpectrum(); };
+        for (const id of ["fftWindow", "fftScale", "fftSpan", "fftAxis", "fftWhole"]) root.querySelector("#" + id).onchange = () => { if (this.kind === "fft") this.showSpectrum(); };
 
         // remember the data of each tab, so switching tabs shows each one's last result; note what the spectrum can use
         plotter.cache = {};
@@ -346,6 +347,7 @@ class GraphWindow {
     get visible() { return !this.root.classList.contains("hidden"); }
 
     show(kind = this.kind) {
+        const was = this.kind;
         this.kind = kind;
         this.root.classList.remove("hidden");
         this.tabsEl.querySelectorAll(".graph-tab").forEach(t => t.classList.toggle("active", t.dataset.id === kind));
@@ -360,6 +362,7 @@ class GraphWindow {
         this.plotter.resize();
         if (kind === "fft") { this.showSpectrum(); return; }
         const cached = this.plotter.cache && this.plotter.cache[kind];
+        if (kind === "live" && was !== "live") this.plotter.clearCursors();      // cursors of another tab (an AC sweep's, in hertz) mean nothing here
         if (kind === "live") this.plotter.data = this.plotter.cache.live || (this.plotter.data && this.plotter.data.live ? this.plotter.data : null);
         else if (cached && kind !== "dc" && this.plotter.data !== cached) { this.plotter.clearCursors(); this.plotter.data = cached; }
         this.plotter.draw();
@@ -385,7 +388,10 @@ class GraphWindow {
 
     showSpectrum() {
         const p = this.plotter;
-        const src = p.cache[this.timeKind] || p.cache.tran || p.cache.live;
+        const base = p.cache[this.timeKind] || p.cache.tran || p.cache.live;
+        // a live run is analysed from its full-rate record, not from the peak-detected picture
+        const fast = this.timeKind === "live" ? this.fastSource() : null;
+        const src = fast || base;
         const title = this.root.querySelector("#plotTitle");
         if (!src || !src.series || !src.series.length) {
             p.clearCursors(); p.data = null; p.draw();
@@ -394,13 +400,15 @@ class GraphWindow {
         }
         // the span: between the cursors if the time plot had two, else everything
         let t0, t1;
-        if (p.data === src && p.cursors.a !== null && p.cursors.b !== null) { t0 = Math.min(p.cursors.a, p.cursors.b); t1 = Math.max(p.cursors.a, p.cursors.b); }
-        if (p.data !== src && this.lastSpan) ({ t0, t1 } = this.lastSpan);
+        let cursorSpan = false;            // a span the user marked is analysed exactly as marked
+        if (p.data === base && p.cursors.a !== null && p.cursors.b !== null) { cursorSpan = true; t0 = Math.min(p.cursors.a, p.cursors.b); t1 = Math.max(p.cursors.a, p.cursors.b); }
+        if (p.data !== base && p.data && p.data.mode === "spectrum" && this.lastSpan) ({ t0, t1 } = this.lastSpan);   // re-analysing after a control changed
+        if (t0 !== undefined) cursorSpan = true;
         this.lastSpan = t0 !== undefined ? { t0, t1 } : null;
 
         const q = (id) => this.root.querySelector("#" + id).value;
         const db = q("fftScale") === "db", log = q("fftAxis") === "log", span = Number(q("fftSpan"));
-        const spectra = src.series.map(s => Spectrum.analyse(src.xValues, s.values, { t0, t1, window: q("fftWindow") }));
+        const spectra = src.series.map(s => Spectrum.analyse(src.xValues, s.values, { t0, t1, window: q("fftWindow"), wholeCycles: !cursorSpan && this.root.querySelector("#fftWhole").checked }));
         const ok = spectra.map((sp, i) => (sp ? i : -1)).filter(i => i >= 0);
         if (!ok.length) { p.clearCursors(); p.data = null; p.draw(); title.textContent = "Not enough data for a spectrum"; return; }
         const first = spectra[ok[0]];
@@ -424,7 +432,21 @@ class GraphWindow {
         };
         p.cache.fft = p.data;
         p.draw();
-        title.textContent = `Spectrum, ${Spectrum.WINDOWS[q("fftWindow")].label} window, ${first.n} points over ${Units.formatSI(first.t1 - first.t0, "s")}`;
+        title.textContent = `Spectrum, ${Spectrum.WINDOWS[q("fftWindow")].label} window, ${first.n} points over ${Units.formatSI(first.t1 - first.t0, "s")}${first.cycles ? ` (${first.cycles} whole cycle${first.cycles === 1 ? "" : "s"})` : ""}${fast ? ", full-rate live record" : ""}`;
+    }
+
+    // the running (or just stopped) simulation's full-rate record as a graph source: the last window of it
+    fastSource() {
+        const live = this.lastLive;
+        if (!live || !live.fast || live.fast.count < 64) return null;
+        const snap = live.fast.snapshot(live.run.t - live.span);
+        if (snap.xs.length < 64) return null;
+        const colors = this.plotter.colors, series = [];
+        live.channels.forEach((ch, i) => {
+            if (ch.probe && ch.probe.graph === false) return;
+            series.push({ name: ch.name, color: (ch.probe && ch.probe.color) || colors[i % colors.length], values: snap.ys[i] });
+        });
+        return series.length ? { xValues: snap.xs, series } : null;
     }
 
     simulate() {
@@ -448,6 +470,7 @@ class GraphWindow {
 
     // the LIVE tab: plot the running simulation's buffers
     paintLive(live) {
+        this.lastLive = live;
         if (!this.visible || this.kind !== "live") return;
         const colors = this.plotter.colors;
         const series = live.channels.map((ch, i) => ({ name: ch.name, color: (ch.probe && ch.probe.color) || colors[i % colors.length], values: live.values[i], hidden: ch.probe && ch.probe.graph === false })).filter(s => !s.hidden);
