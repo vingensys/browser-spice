@@ -33,14 +33,7 @@ const MeasureDialog = {
             if (!editor.measures.some(m => m.kind === kind)) continue;
             if (fresh || !MeasureDialog.signals(kind)) await (kind === "tran" ? runner.runTransient() : runner.runAC());
         }
-        for (const m of editor.measures) {
-            try {
-                const get = MeasureDialog.signals(m.kind);
-                if (!get) throw new Error(`run the ${m.kind === "tran" ? "transient" : "AC"} analysis first`);
-                out.push({ value: Measure.compute(m, get) });
-            } catch (e) { out.push({ error: e.message }); }
-        }
-        return out;
+        return Measure.computeAll(editor.measures, { tran: MeasureDialog.signals("tran"), ac: MeasureDialog.signals("ac") });
     },
 
     describe(m) {
@@ -64,7 +57,7 @@ const MeasureDialog = {
             const rows = editor.measures.map((m, i) => {
                 const r = results[i];
                 const val = !r ? "" : r.error ? `<span class="err" title="${MeasureDialog.esc(r.error)}">${MeasureDialog.esc(r.error)}</span>` : `<b>${MeasureDialog.esc(Units.formatSI(r.value, Measure.unit(m)))}</b>`;
-                return `<tr><td>${MeasureDialog.esc(m.name)}</td><td>${m.kind === "tran" ? "Transient" : "AC"}</td><td>${MeasureDialog.esc(Measure.FUNCS[m.kind][m.fn] || m.fn)}</td><td>${MeasureDialog.esc(m.sig)}</td><td class="dim">${MeasureDialog.esc(MeasureDialog.describe(m))}</td><td class="val">${val}</td><td><button data-del="${i}" title="Delete">✕</button></td></tr>`;
+                return `<tr><td>${MeasureDialog.esc(m.name)}</td><td>${m.kind === "tran" ? "Transient" : "AC"}</td><td>${MeasureDialog.esc(Measure.FUNCS[m.kind][m.fn] || m.fn)}</td><td>${MeasureDialog.esc(m.fn === "param" ? m.expr : m.sig)}</td><td class="dim">${MeasureDialog.esc(MeasureDialog.describe(m))}</td><td class="val">${val}</td><td><button data-del="${i}" title="Delete">✕</button></td></tr>`;
             }).join("");
             wrap.querySelector(".meas-list").innerHTML = editor.measures.length
                 ? `<table class="results-table"><thead><tr><th>Name</th><th>Analysis</th><th>Measurement</th><th>Signal</th><th></th><th>Value</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
@@ -89,6 +82,7 @@ const MeasureDialog = {
             const edge = (id, label) => `<label>${label}</label><select id="${id}"><option value="rise">rising</option><option value="fall">falling</option><option value="either">either</option></select>`;
             let h = "";
             if (Measure.RANGED.includes(fn)) h += inp("mFrom", `From ${time}`, "start") + inp("mTo", `To ${time}`, "end");
+            if (need.includes("expr")) h += inp("mExpr", "Expression", "e.g. vpk_out / vpk_in  (measurement names)");
             if (need.includes("at")) h += inp("mAt", `At ${time}`);
             if (need.includes("level")) h += inp("mLevel", fn === "delay" ? "Trigger level" : kind === "ac" ? "Level (dB)" : "Level") + edge("mEdge", "Edge") + inp("mNth", "Occurrence", "1");
             if (need.includes("sig2")) h += `<label>Target signal</label><select id="mSig2">${probeOpts}</select>` + inp("mLevel2", "Target level", "same") + edge("mEdge2", "Target edge") + inp("mNth2", "Target occurrence", "1");
@@ -106,6 +100,7 @@ const MeasureDialog = {
             if (q("mEdge")) spec.edge = q("mEdge").value;
             if (q("mEdge2")) spec.edge2 = q("mEdge2").value;
             set("nth", n("mNth")); set("nth2", n("mNth2"));
+            if (q("mExpr")) { spec.expr = q("mExpr").value.trim(); delete spec.sig; }
             if (q("mSig2")) spec.sig2 = q("mSig2").value;
             if (Number.isFinite(n("mLo"))) spec.lo = n("mLo") / 100;
             if (Number.isFinite(n("mHi"))) spec.hi = n("mHi") / 100;
@@ -113,9 +108,13 @@ const MeasureDialog = {
         };
         const msg = (t) => { wrap.querySelector(".meas-msg").textContent = t; };
         const add = () => {
-            if (!probes.length) { msg("Add a voltage or current probe first: measurements read the probed signals."); return false; }
+            if (!probes.length && q("mFn").value !== "param") { msg("Add a voltage or current probe first: measurements read the probed signals."); return false; }
             const spec = read();
             const need = Measure.PARAMS[`${spec.kind}:${spec.fn}`] || [];
+            if (need.includes("expr")) {
+                if (!spec.expr) { msg("Enter the expression."); return false; }
+                try { const e = Expr.compile(spec.expr, Object.fromEntries(editor.measures.map(m => [m.name.toLowerCase(), 1]))); if (e.vars.length) throw new Error("use measurement names and numbers only"); } catch (err) { msg(err.message); return false; }
+            }
             if (need.includes("at") && !Number.isFinite(spec.at)) { msg("Enter the position (At)."); return false; }
             if (need.includes("level") && !Number.isFinite(spec.level)) { msg("Enter the level."); return false; }
             if (editor.measures.some(m => m.name === spec.name)) { msg(`There is already a measurement called ${spec.name}.`); return false; }

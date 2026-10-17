@@ -12,6 +12,8 @@ R3 y 0 10k
 .meas tran vmin min v(out)
 .meas tran vpp pp v(out) from=1m to=10m
 .meas tran vavg avg v(out) from=2m to=9m
+.meas tran vspan param='vmax-vmin'
+.meas tran vratio param='vpp/(vmax-vmin)'
 .meas tran vrms rms v(out) from=2m to=9m
 .meas tran vint integ v(out) from=1m to=6m
 .meas tran vat find v(out) at=3m

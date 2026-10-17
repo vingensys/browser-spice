@@ -63,7 +63,7 @@ function simulate(args) {
     const opSpecs = [], measures = [];
     for (const m of args.measures || []) { const o = parseOpMeas(m); if (o) opSpecs.push(o); else { const sp = Measure.parse(m); if (!sp) throw new Error(`cannot read measurement: ${m}`); measures.push(sp); } }
     for (const line of String(args.netlist).split("\n")) { const o = parseOpMeas(line); if (o) opSpecs.push(o); }
-    const measure = (specs, getSignal) => specs.map(sp => { try { return { name: sp.name, value: round(Measure.compute(sp, getSignal), 8), spec: Measure.toSpice(sp) }; } catch (e) { return { name: sp.name, error: e.message }; } });
+    const measure = (specs, getSignal) => { const r = Measure.computeAll(specs, getSignal); return specs.map((sp, i) => (r[i].error ? { name: sp.name, error: r[i].error } : { name: sp.name, value: round(r[i].value, 8), spec: Measure.toSpice(sp) })); };
 
     if (type === "op") {
         const op = engine.operatingPoint({ nodeset: deck.nodeset });

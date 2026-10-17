@@ -322,6 +322,15 @@ window.analysisTests = async function () {
     const snap = editor.snapshot(); editor.measures = []; editor.restore(snap);
     ok("and survive undo / redo snapshots", editor.measures.length === 6);
     ok("they can be written as SPICE .meas lines", Measure.toSpice(editor.measures.find(m => m.name === "vmax")) === ".meas tran vmax max V(in)" && /^\.meas ac g10 find V\(c1\) at=10$/.test(Measure.toSpice(editor.measures.find(m => m.name === "g10"))), Measure.toSpice(editor.measures[3]));
+    {
+        const base = editor.measures.slice();
+        editor.measures = [...base, { name: "swing", kind: "tran", fn: "param", expr: "vmax - 2" }, { name: "loop1", kind: "tran", fn: "param", expr: "loop2 + 1" }, { name: "loop2", kind: "tran", fn: "param", expr: "loop1 + 1" }];
+        const pr = await MeasureDialog.evaluate(editor, runner, false);
+        const vm = pr[base.findIndex(m => m.name === "vmax")];
+        ok("a param measurement is an expression of other measurements", pr[base.length].value !== undefined && Math.abs(pr[base.length].value - (vm.value - 2)) < 1e-9, pr[base.length]);
+        ok("expressions that depend on each other are an error, not a hang", /could not be measured|depends on itself/.test(pr[base.length + 1].error || ""), pr[base.length + 1]);
+        ok("a param writes and reads as SPICE", Measure.toSpice(editor.measures[base.length]) === ".meas tran swing param='vmax - 2'" && Measure.parse(".meas tran r param='a/b'").expr === "a/b");
+    }
     editor.measures = [];
 
     const tfInfo = NetlistExtractor.extract(editor);

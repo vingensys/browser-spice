@@ -4,8 +4,12 @@
 //     spec        { name, kind: "tran" | "ac", fn, sig, from, to, td, at, level, edge, nth, ... see FUNCS }
 //     getSignal   (name) -> tran: { xs, ys }   ac: { xs (Hz), db, ph (degrees, unwrapped), mag }
 //
+//   Measure.computeAll(specs, getSignal | {tran, ac})                      ->  [{ value } | { error }]   (also resolves "param" expressions of other measurements)
+//
 //   Measure.parse(".meas tran vpk max v(out) from=1m to=5m")  ->  spec | null      (SPICE syntax)
 //   Measure.toSpice(spec)                                       ->  ".meas ..." line
+//
+// A "param" measurement is an expression of other measurements by name: .meas tran gain param='vpk_out/vpk_in'
 //
 // Functions (tran): max min pp avg rms integ maxat minat find when delay rise fall period freq duty
 //           (ac):   max min maxat minat find findph when bw unity pm
@@ -15,23 +19,26 @@ class Measure {
         tran: {
             max: "Maximum", min: "Minimum", pp: "Peak-to-peak", avg: "Average", rms: "RMS", integ: "Integral",
             maxat: "Time of maximum", minat: "Time of minimum", find: "Value at a time", when: "Time when it crosses a level",
-            delay: "Delay to another signal", rise: "Rise time", fall: "Fall time", period: "Period", freq: "Frequency", duty: "Duty cycle"
+            delay: "Delay to another signal", rise: "Rise time", fall: "Fall time", period: "Period", freq: "Frequency", duty: "Duty cycle",
+            param: "Expression of other measurements"
         },
         ac: {
             max: "Peak gain (dB)", min: "Minimum gain (dB)", maxat: "Frequency of peak gain", minat: "Frequency of minimum gain", find: "Gain at a frequency (dB)",
-            findph: "Phase at a frequency (°)", when: "Frequency where gain crosses a level (dB)", bw: "−3 dB bandwidth", unity: "Unity-gain frequency", pm: "Phase margin (°)"
+            findph: "Phase at a frequency (°)", when: "Frequency where gain crosses a level (dB)", bw: "−3 dB bandwidth", unity: "Unity-gain frequency", pm: "Phase margin (°)",
+            param: "Expression of other measurements"
         }
     };
 
     // which parameters each function reads (for the dialog)
     static PARAMS = {
-        "tran:find": ["at"], "tran:when": ["level", "edge", "nth"], "tran:delay": ["sig2", "level", "edge", "nth", "level2", "edge2", "nth2"],
+        "tran:param": ["expr"], "ac:param": ["expr"], "tran:find": ["at"], "tran:when": ["level", "edge", "nth"], "tran:delay": ["sig2", "level", "edge", "nth", "level2", "edge2", "nth2"],
         "tran:rise": ["lo", "hi"], "tran:fall": ["lo", "hi"], "ac:find": ["at"], "ac:findph": ["at"], "ac:when": ["level", "edge", "nth"]
     };
     static RANGED = ["max", "min", "pp", "avg", "rms", "integ", "maxat", "minat", "rise", "fall", "period", "freq", "duty", "when"];
 
     static unit(spec) {
         const f = spec.fn;
+        if (f === "param") return "";
         if (spec.kind === "ac") return { max: "dB", min: "dB", find: "dB", findph: "°", pm: "°", maxat: "Hz", minat: "Hz", when: "Hz", bw: "Hz", unity: "Hz" }[f] || "";
         if (["maxat", "minat", "when", "delay", "rise", "fall", "period"].includes(f)) return "s";
         if (f === "freq") return "Hz";
@@ -42,7 +49,38 @@ class Measure {
 
     static edgeDir(e) { return e === "fall" ? -1 : e === "rise" ? 1 : 0; }
 
+    // Every measurement in turn; an expression may use any other measurement's name (a cycle is an error).
+    static computeAll(specs, getSignal) {
+        const byName = new Map(specs.map(s => [String(s.name).toLowerCase(), s])), done = new Map(), busy = new Set();
+        const valueOf = (s) => {
+            const key = String(s.name).toLowerCase();
+            if (done.has(key)) { const r = done.get(key); if (r.error) throw new Error(r.error); return r.value; }
+            if (busy.has(key)) throw new Error(`${s.name} depends on itself`);
+            busy.add(key);
+            try {
+                let v;
+                if (s.fn === "param") {
+                    const consts = {};
+                    for (const [k, o] of byName) if (o !== s) { try { consts[k] = valueOf(o); } catch (e) { consts[k] = NaN; } }
+                    for (const w of String(s.expr || "").toLowerCase().match(/[a-z_][\w.]*/g) || []) if (w in consts && Number.isNaN(consts[w])) throw new Error(`${w} could not be measured (or depends on this one)`);
+                    const e = Expr.compile(String(s.expr || ""), consts);
+                    if (e.vars.length) throw new Error("an expression may only use measurement names and numbers");
+                    v = e.eval([], 0);
+                    if (!Number.isFinite(v)) throw new Error("the expression is not a number (a measurement it uses failed)");
+                } else {
+                    const g = typeof getSignal === "function" ? getSignal : getSignal[s.kind];
+                    if (!g) throw new Error(`run the ${s.kind === "tran" ? "transient" : "AC"} analysis first`);
+                    v = Measure.compute(s, g);
+                }
+                done.set(key, { value: v }); return v;
+            } catch (e) { done.set(key, { error: e.message }); throw e; }
+            finally { busy.delete(key); }
+        };
+        return specs.map(s => { try { return { value: valueOf(s) }; } catch (e) { return { error: e.message }; } });
+    }
+
     static compute(spec, getSignal) {
+        if (spec.fn === "param") return Measure.computeAll([spec], getSignal)[0].value;
         const f = spec.fn, ac = spec.kind === "ac";
         const sg = getSignal(spec.sig);
         if (!sg || !sg.xs || sg.xs.length < 2) throw new Error(`signal ${spec.sig} has no data`);
@@ -123,6 +161,8 @@ class Measure {
         if (!["tran", "ac"].includes(kind) || tok.length < 4) return null;
         const spec = { name: tok[2], kind };
         const word = tok[3];
+        const pm = /^\.meas(?:ure)?\s+(?:tran|ac)\s+(\S+)\s+param=(?:'([^']*)'|"([^"]*)"|\{([^}]*)\}|(\S+))\s*$/.exec(src);
+        if (pm) return { name: pm[1], kind, fn: "param", expr: pm[2] ?? pm[3] ?? pm[4] ?? pm[5] };
         const kv = (arr) => { const o = {}; for (const t of arr) { const i = t.indexOf("="); if (i > 0) o[t.slice(0, i)] = t.slice(i + 1); } return o; };
         const take = (o, s) => {
             if (o.from !== undefined) s.from = N(o.from);
@@ -157,6 +197,7 @@ class Measure {
         const win = `${Number.isFinite(s.from) ? ` from=${f(s.from)}` : ""}${Number.isFinite(s.to) ? ` to=${f(s.to)}` : ""}${Number.isFinite(s.td) ? ` td=${f(s.td)}` : ""}`;
         const edge = (e, n) => (e ? ` ${e === "either" ? "cross" : e}=${n || 1}` : "");
         const head = `.meas ${s.kind} ${s.name}`;
+        if (s.fn === "param") return `${head} param='${s.expr}'`;
         if (["max", "min", "pp", "avg", "rms", "integ"].includes(s.fn)) return `${head} ${s.fn} ${s.sig}${win}`;
         if (s.fn === "find" || s.fn === "findph") return `${head} find ${s.sig} at=${f(s.at)}`;
         if (s.fn === "when") return `${head} when ${s.sig}=${f(s.level)}${edge(s.edge, s.nth)}${win}`;

@@ -7,7 +7,7 @@ const { spawnSync } = require("child_process");
 if (spawnSync("ngspice", ["-v"]).error) { console.log("ngspice not found on PATH: skipping the .measure cross-check"); process.exit(0); }
 const root = path.join(__dirname, "..");
 const files = ["js/utils/complex.js", "js/utils/units.js", "js/sim/linalg.js", "js/sim/devices.js", "js/sim/logic-ics.js", "js/sim/expression.js", "js/sim/devices-extra.js", "js/sim/models.js", "js/sim/models-parts.js", "js/sim/engine.js", "js/visualization/plot-math.js", "js/analysis/measure.js", "js/sim/spice-parser.js"];
-const { SimEngine, SpiceParser, Measure } = new Function(files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n") + "\nreturn { SimEngine, SpiceParser, Measure };")();
+const { SimEngine, SpiceParser, Measure, Expr } = new Function(files.map(f => fs.readFileSync(path.join(root, f), "utf8")).join("\n;\n") + "\nreturn { SimEngine, SpiceParser, Measure, Expr };")();
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "meas-"));
 let failed = 0, total = 0;
 for (const id of ["tran", "ac"]) {
@@ -21,15 +21,17 @@ for (const id of ["tran", "ac"]) {
     // writer is exercised too); its `vp` is in radians, ours in degrees
     const body = text.split("\n").filter(l => !/^\s*\.(meas|measure|end|tran|ac)\b/i.test(l)).join("\n");
     const run = an.type === "tran" ? `tran ${an.tStep} ${an.tStop} uic` : `ac ${an.mode} ${an.points} ${an.fStart} ${an.fStop}`;
-    fs.writeFileSync(`${tmp}/${id}.cir`, `${body}\n.control\nset noaskquit\n${run}\n${deck.measures.map(m => Measure.toSpice(m).slice(1)).join("\n")}\nquit\n.endc\n.end\n`);
+    fs.writeFileSync(`${tmp}/${id}.cir`, `${body}\n.control\nset noaskquit\n${run}\n${deck.measures.filter(m => m.fn !== "param").map(m => Measure.toSpice(m).slice(1)).join("\n")}\nquit\n.endc\n.end\n`);
     const out = spawnSync("ngspice", ["-b", `${tmp}/${id}.cir`], { encoding: "utf8", timeout: 60000 });
     const ng = {};
     for (const m of (out.stdout + out.stderr).matchAll(/^(\w+)\s+=\s+(\S+)/gm)) ng[m[1].toLowerCase()] = parseFloat(m[2]);
-    for (const spec of deck.measures) {
+    const all = Measure.computeAll(deck.measures, get);
+    for (const [k, spec] of deck.measures.entries()) {
         total++;
         let mine, why = "";
-        try { mine = Measure.compute(spec, get); } catch (e) { mine = NaN; why = e.message; }
+        if (all[k].error) { mine = NaN; why = all[k].error; } else mine = all[k].value;
         let ref = ng[spec.name];
+        if (spec.fn === "param") ref = Expr.compile(spec.expr, ng).eval([], 0);   // control-mode meas has no param: evaluate it on ngspice's own numbers
         if (spec.fn === "findph") ref = ref * 180 / Math.PI;
         const span = Math.max(Math.abs(ref), 1e-12);
         const tol = ["integ", "avg", "rms"].includes(spec.fn) ? 0.01 : 0.005;
