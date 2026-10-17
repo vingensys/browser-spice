@@ -71,6 +71,7 @@ class LiveSim {
         const info = loc ? loc.info : NetlistExtractor.extract(ed);
         if (info.warnings.length) this.runner.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}`, "warn");
 
+        if (info.approx && info.approx.length) this.runner.toast(`${info.approx.join(", ")}: model cards above level 1 are only approximated by the built-in engine in the live run; a graph analysis (Graph menu) uses ngspice for them and gives the real model.`, "warn");
         const s = this.runner.settings();
         this.info = info;
         this.engine = new SimEngine(info.circuit, this.runner.engineOptions());

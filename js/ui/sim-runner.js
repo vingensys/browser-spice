@@ -55,8 +55,8 @@ class SimRunner {
         this.rootSheet();
         this.rejectImpossible();
         const info = NetlistExtractor.extract(this.editor);
-        if (info.approx && info.approx.length && this.settings().engine !== "ngspice") {
-            this.toast(`${info.approx.slice(0, 3).join(", ")}${info.approx.length > 3 ? " …" : ""}: higher-level model cards are approximated by the built-in solver. Choose the ngspice solver in Simulation Settings for the exact model.`, "warn");
+        if (info.approx && info.approx.length) {
+            // (wantsNgspice says what happens to each analysis: graph runs go to ngspice, the live run approximates)
         } else if (info.warnings.length) {
             this.toast(`Warning: ${info.warnings.slice(0, 3).join("; ")}${info.warnings.length > 3 ? " …" : ""}`, "warn");
         }
@@ -120,13 +120,18 @@ class SimRunner {
     }
 
     // Use ngspice when asked for and possible; say so when a part forces the fallback.
+    // A MOSFET / BJT / diode model above level 1 (MOS level 2, 3, BSIM ...) is only approximated by the built-in engine, so a graph analysis
+    // uses ngspice for it automatically (the live run cannot, and says so).
     wantsNgspice(info) {
-        if (this.settings().engine !== "ngspice") return false;
+        const chosen = this.settings().engine === "ngspice", approx = info.approx || [];
+        if (!chosen && !approx.length) return false;
         const bad = NgspiceBackend.unsupported(info);
+        const note = (text, kind) => { const now = Date.now(); if (this.lastNote !== text || now - (this.lastNoteAt || 0) > 8000) { this.toast(text, kind); this.lastNote = text; this.lastNoteAt = now; } };
         if (bad.length) {
-            this.toast(`${bad.join(", ")} has no SPICE model in the export, so this run used the built-in engine.`, "warn");
+            note(`${bad.join(", ")} has no SPICE model in the export, so this run used the built-in engine${approx.length ? ` (which only approximates ${approx.join(", ")} with level-1 equations)` : ""}.`, "warn");
             return false;
         }
+        if (!chosen) note(`${approx.join(", ")}: the built-in engine only has the level-1 MOSFET equations, so this run uses ngspice.`, "info");
         return true;
     }
 

@@ -958,8 +958,9 @@ window.analysisTests = async function () {
     const l1 = new SimEngine(l3info.circuit).operatingPoint().nodeVoltages[l3info.getTerminalNodeName(mosC, "D")];
     ok("while the built-in solver's level-1 stand-in differs, as the warning says", Math.abs(l1 - origD) > 1e-3, [l1, origD]);
     document.getElementById("simEngine").value = "builtin";
-    let warned = ""; const rt = runner.toast; runner.toast = (m, k) => { if (k === "warn") warned = m; }; runner.prepare(); runner.toast = rt;
-    ok("running with the built-in solver says so", /approximated by the built-in solver/.test(warned), warned);
+    let said = ""; const rt = runner.toast; runner.toast = (m, k) => { said = m; };
+    const auto = runner.wantsNgspice(l3info); runner.toast = rt;
+    ok("with the built-in solver chosen, a graph analysis switches to ngspice by itself for the level 3 card and says so", auto === true && /LEVEL 1|level-1|uses ngspice/.test(said), [auto, said]);
     editor.resetSheets();
 
 

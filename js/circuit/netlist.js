@@ -419,7 +419,7 @@ class NetlistExtractor {
             const lv = e.params && e.params.raw ? e.params.raw.level : 0;
             if ((e.kind === "M" && lv >= 2) || ((e.kind === "Q" || e.kind === "D") && lv >= 2)) {
                 approx.push(e.name);
-                warnings.push(`${e.name}: model ${e.model} is level ${lv}; the built-in solver approximates it (choose the ngspice solver in Simulation Settings for the exact model)`);
+                warnings.push(`${e.name}: model ${e.model} is level ${lv}; the built-in solver approximates it with level 1 (graph analyses use ngspice for it automatically)`);
             }
         }
         els.approx = approx;

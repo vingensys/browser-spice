@@ -497,6 +497,7 @@ class SpiceParser {
                 case "M": {
                     const m = model(e.model, e.name, ["NMOS", "PMOS"]);
                     const pol = m && m.type === "pmos" ? -1 : 1;
+                    if (m && !m.library && Number(m.params.level) >= 2) warnings.push(`${e.name}: model ${e.model} is LEVEL ${Number(m.params.level)}; the built-in engine approximates it with the level-1 equations (use the ngspice engine for the real model)`);
                     // e.nodes is [g, d, s]; a library device (2N7000, IRF540 ...) is a packaged part: its numbers are already per device, W / L do not scale them
                     circuit.add(new MOSFET(nm, e.nodes, pol, m && m.library ? { ...m.params } : SpiceParser.mosParams(m, e.w, e.l, e)));
                     break;

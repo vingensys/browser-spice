@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Parts
+- A MOSFET (or BJT / diode) card above level 1 (MOS level 2, 3, BSIM...) makes a graph analysis run in ngspice automatically, with a note; the live run says it only approximates the model.
 - Voltage regulators now current-limit at their rated current (a short gives ilim, an overload follows the load line), also in the SPICE export.
 - Controlled sources (E, G) and the optocoupler have an optional bandwidth (one-pole filter), in both engines and in the export; the relay export follows |coil current|.
 

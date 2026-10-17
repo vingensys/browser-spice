@@ -25,7 +25,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 ## Next, in order
 
 ### 1. Simulation depth
-- MOSFET levels 2 / 3 and BSIM. (`.sens` is done for resistors and source levels, checked against ngspice; sensitivity to device model parameters is not.) (`.include` / `.lib`, `.nodeset` and `.options` parsing are done.)
+- MOSFET levels 2 / 3 and BSIM: **run by ngspice automatically** (a graph analysis switches to it for any model card above level 1; the live run keeps the level-1 stand-in and says so). Not written into the built-in engine: those equations only mean something if they match ngspice sample for sample, and without its source they cannot be proven. (`.sens` is done for resistors and source levels, checked against ngspice; sensitivity to device model parameters is not.) (`.include` / `.lib`, `.nodeset` and `.options` parsing are done.)
 - Digital: more microcontrollers (a PIC16F84A with assembler and debugger is done; ROM / RAM chips too), mixed-signal timing (propagation delay on flip-flops and logic ICs is done; per-pin and rise / fall delays are not); export of the three chips with more than 8 inputs (74151, 7483, 7485) to SPICE. (Counters, shift registers, registers, latches and SCR / TRIAC already export.)
 - Faster: compile the circuit to typed arrays, WebAssembly sparse LU for very large circuits.
 

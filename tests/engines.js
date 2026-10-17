@@ -100,6 +100,21 @@ window.engineTests = async function () {
         b.finish();
     }, { tStop: 3.5e-3, tStep: 10e-6 });
 
+    {   // a LEVEL 3 MOSFET card: the graph analysis uses ngspice by itself (the built-in engine only has level 1), and says so
+        editor.components = []; editor.wires = []; editor.probes = []; editor.nextId = 1; editor.resetView();
+        const deck = "lv3\nVDD vdd 0 DC 5\nRD vdd d 2k\nVG g 0 DC 3\nM1 d g 0 0 NM W=10u L=1u\n.model NM NMOS(LEVEL=3 VTO=1 KP=5e-5 GAMMA=0.4 PHI=0.65 TOX=2e-8 THETA=0.3 VMAX=5e4 ETA=0.1)\n.op\n.end";
+        SchematicImporter.import(editor, deck);
+        const info = NetlistExtractor.extract(editor), nd = info.getTerminalNodeName(editor.components.find(c => c.type === "NMOS"), "D");
+        const toasts = []; const realToast = runner.toast; runner.toast = (m, k) => toasts.push(m);
+        const wasEngine = document.getElementById("simEngine").value;
+        document.getElementById("simEngine").value = "builtin";
+        const picks = runner.wantsNgspice(info);
+        const builtinV = new SimEngine(info.circuit).operatingPoint().nodeVoltages[nd];
+        const ngV = NgspiceBackend.toOperatingPoint(await NgspiceBackend.run(NetlistExtractor.toSpice(info.elements, { analysis: ".op" })), info).nodeVoltages[nd];
+        document.getElementById("simEngine").value = wasEngine; runner.toast = realToast;
+        results.push({ id: "mos-level3-auto-ngspice", pass: picks === true && toasts.some(t => /uses ngspice/.test(t)) && Math.abs(builtinV - ngV) > 0.2 && info.approx.length === 1, op: +Math.abs(builtinV - ngV).toFixed(3), tran: null, error: picks ? undefined : "wantsNgspice was false" });
+    }
+
     // controlled sources and the optocoupler with a bandwidth (a one-pole filter), against ngspice
     const pulseV = (b, x, y) => b.part("V", x, y, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 1, delay: 100e-6, rise: 1e-6, fall: 1e-6, width: 1.5e-3, period: 3e-3 } });
     await compare("vcvs-bandwidth", () => {

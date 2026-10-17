@@ -50,7 +50,7 @@ Parts get standard reference designators (R1, C1, D1, Q1, U1, RV1, ...). **R** r
 - **Graph analyses** (Graph menu or the graph window tabs): analogue transient, frequency (AC), DC sweep, operating point.
   **Design > Simulation Settings** sets stop time, step, UIC, AC range, sweep, temperature, solver and live speed.
 - **Design > Electrical Rule Check** reports unconnected pins, a missing ground and similar problems in the message log.
-- **Engine**: *Built-in* is instant. *ngspice* runs the exported netlist through the real
+- **Engine**: *Built-in* is instant (a model card above level 1, such as a LEVEL 3 or BSIM MOSFET, makes a graph analysis switch to ngspice by itself, because the built-in engine only has the level-1 equations). *ngspice* runs the exported netlist through the real
   ngspice (WebAssembly, loads on first use) for a second opinion or vendor models.
 - **File > Examples** (one list: on an empty sheet an example opens; on a sheet with a design it attaches to the cursor so you can place it beside what you have): rectifier, LED, zener regulator, CE and JFET amplifiers, op-amp, 555 oscillator, boost converter, the current clamp on the scope (charging current and power of an RC), a closed-loop buck converter (type III compensator, probes on Vout and the error amplifier), power supply (transformer + bridge + 7805), relay driver, SCR lamp control, 3-bit ripple counter, a 74161 + 7447 counter driving a 7-segment display, and a 74164 shift register.
 
