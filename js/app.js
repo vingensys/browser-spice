@@ -241,6 +241,7 @@
         <li><b>Bring and share</b>: File &gt; Import a SPICE netlist or model library, Export SPICE / BOM / picture / report, or Share as Link.</li></ol>
         <p style="margin-bottom:0">Stuck? Press <kbd>Ctrl+K</kbd> and type what you want to do. File &gt; Examples has ready circuits to open and change.</p></div>` }) });
     C("help.keys", "Keyboard & Mouse", { icon: "help", run: () => ShortcutsDialog.open() });
+    C("help.customkeys", "Customize Shortcuts…", { run: () => Shortcuts.open() });
     C("help.about", "About Browser SPICE", { run: () => AboutDialog.open() });
 
     Commands.bindKeyboard();
@@ -305,7 +306,7 @@
         { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.dualaxis", "graph.probescope", "graph.simulate"] },
         { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop", "-", "sim.conditions", "sim.memory", "sim.mcu"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
-        { title: "Help", items: ["help.start", "palette.open", "help.keys", "help.about"] }
+        { title: "Help", items: ["help.start", "palette.open", "help.keys", "help.customkeys", "help.about"] }
     ]);
 
     new Toolbar($("toolbar"), [
@@ -315,6 +316,7 @@
         "view.zoomin", "view.zoomout", "view.fit", "view.grid", "|",
         "view.graph", "design.settings", "design.erc", "lib.pick"
     ]);
+    Shortcuts.init();
 
     // rotate buttons under the device list, as in ISIS
     new Toolbar($("rotbar"), ["edit.rotate", "edit.rotateccw", "edit.mirrorx", "edit.mirrory"]);

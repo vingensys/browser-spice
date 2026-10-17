@@ -34,6 +34,23 @@ window.uiTests = async function () {
     ok("clicking elsewhere closes it", !menus[0].classList.contains("open"));
     ok("Examples submenu lists every example", document.querySelectorAll("#menubar .menu")[0].querySelectorAll(".has-sub").length === 2 && EXAMPLES.length >= 10);
     {
+        Shortcuts.resetAll();
+        ok("a global command's key can be changed", Shortcuts.set("view.describe", "Ctrl+Shift+Y") === null && Commands.get("view.describe").keys === "Ctrl+Shift+Y");
+        ok("a key another command has is refused", /already used/.test(Shortcuts.set("view.describe", "Ctrl+S") || "") && Commands.get("view.describe").keys === "Ctrl+Shift+Y");
+        ok("an editor key is fixed", /fixed/.test(Shortcuts.set("edit.rotate", "Q") || ""));
+        ok("the choice is kept in this browser", JSON.parse(localStorage.getItem(Shortcuts.KEY))["view.describe"] === "Ctrl+Shift+Y");
+        ok("the menu shows the new key", [...document.querySelectorAll("#menubar .menu-item[data-cmd='view.describe'] .keys")].every(k => k.textContent === "Ctrl+Shift+Y"));
+        ok("a key event decodes to a shortcut string", Shortcuts.describe({ key: "k", ctrlKey: true, shiftKey: true }) === "Ctrl+Shift+K" && Shortcuts.describe({ key: "Shift", shiftKey: true }) === null && Shortcuts.describe({ key: "F12" }) === "F12");
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "y", ctrlKey: true, shiftKey: true, bubbles: true }));
+        ok("the new key runs the command", !!document.querySelector(".dialog .sheet-description"));
+        Dialog.close("t");
+        Commands.run("help.customkeys");
+        ok("Help > Customize Shortcuts lists them", document.querySelectorAll(".shortcuts-dlg input").length >= 10);
+        Dialog.close("t");
+        Shortcuts.resetAll();
+        ok("Reset all restores the shipped keys", Commands.get("view.describe").keys === "Ctrl+Shift+D" && Object.keys(JSON.parse(localStorage.getItem(Shortcuts.KEY))).length === 0);
+    }
+    {
         RecentDesigns.clear();
         ok("no recent designs to start with", RecentDesigns.list().length === 0);
         for (let n = 0; n < 10; n++) RecentDesigns.add(`d${n}.json`, { marker: n });

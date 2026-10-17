@@ -75,6 +75,7 @@
  "js/ui/palette.js",
  "js/ui/recent.js",
  "js/ui/describe.js",
+ "js/ui/shortcuts.js",
  "js/ui/report.js",
  "js/ui/sheet-bar.js",
  "js/ui/touchbar.js",
