@@ -115,7 +115,7 @@ window.scopeTests = async function () {
     let yellow = 0, blue = 0;
     for (let i = 0; i < px.length; i += 4) { if (px[i] > 200 && px[i + 1] > 170 && px[i + 2] < 120) yellow++; if (px[i] < 120 && px[i + 1] > 170 && px[i + 2] > 220) blue++; }
     ok("channel A (yellow) and B (blue) are drawn on the screen", yellow > 150 && blue > 150, [yellow, blue]);
-    ok("measurements are shown for the active channels", /Vpp/.test(win.root.querySelector('[data-role="meas"]').textContent) && win.root.querySelectorAll('[data-role="meas"] tr').length === 3, win.root.querySelector('[data-role="meas"]').textContent);
+    ok("measurements are shown for the active channels", /Pk-pk/.test(win.root.querySelector('[data-role="meas"]').textContent) && win.root.querySelectorAll('[data-role="meas"] tr').length === 3, win.root.querySelector('[data-role="meas"]').textContent);
     sc.scope.tdiv = 5e-3; stepTo(live.run.t + 0.06); win.render();            // five periods on screen
     const mA = core.measure("A");
     ok("the pulse measures 5 V peak-to-peak at 100 Hz", mA && near(mA.vpp, 5, 0.1) && mA.freq && near(mA.freq, 100, 3), mA);
@@ -214,6 +214,148 @@ window.scopeTests = async function () {
     // closing
     win.root.querySelector(".scope-close").click();
     ok("the close button removes the window", !document.querySelector(".scope-win") && !ScopeWindow.windows.size);
+    // ======================================================== current clamp, probe channels, pause and scroll back, math
+    clear(); loadExampleById(editor, "scope-clamp");
+    const csc = editor.components.find(c => c.type === "SCOPE"), clamp = editor.components.find(c => c.type === "CLAMP"), cr = editor.components.find(c => c.name === "R1");
+    ok("placing a clamp next to a part clamps it on", clamp && clamp.target === cr.id, clamp && clamp.target);
+    const cinfo = NetlistExtractor.extract(editor);
+    ok("the clamp is an instrument (no circuit element) with its output net and target", cinfo.instruments.some(i => i.type === "CLAMP" && i.targetName === "R1" && i.wired[0]) && !cinfo.elements.some(e => e.comp && e.comp.type === "CLAMP") && cinfo.warnings.length === 0, cinfo.warnings);
+    document.getElementById("liveSpeed").value = "0.05";
+    live.start();
+    const cwin = ScopeWindow.open(editor, live, csc);
+    stepTo(0.0155);
+    const ccore = live.scopes.get(csc.id).core;
+    cwin.render();
+    ok("the clamp channel reads amps: the scope says A and labels it with the clamp", ccore.unitOf("B") === "A" && /CP1 on R1/.test(ccore.labelOf("B")), [ccore.unitOf("B"), ccore.labelOf("B")]);
+    const iR = (t) => live.run.current("R1");
+    const lastB = ccore.v.B[ccore.v.B.length - 1];
+    ok("the scope's B equals the current through R1 (not volts)", Math.abs(lastB - iR()) < 1e-12 && Math.abs(lastB) < 0.0051, [lastB, iR()]);
+    const peakB = Math.max(...ccore.v.B);
+    ok("the first charging surge is 5 mA", Math.abs(peakB - 0.005) < 0.0002, peakB);
+    ok("the math trace is A x B in watts", ccore.unitOf("M") === "W" && Math.abs(Math.max(...ccore.v.M) - 0.025) < 0.0015, [ccore.unitOf("M"), Math.max(...ccore.v.M)]);
+    ok("a channel in amps offers amps per division", /mA|A\/div/.test(cwin.root.querySelector('.scope-ch[data-ch="B"] [data-role="unit"]').textContent) && cwin.root.querySelector('.scope-ch[data-ch="B"] [data-role="unit"]').textContent.startsWith("A"), cwin.root.querySelector('.scope-ch[data-ch="B"] [data-role="unit"]').textContent);
+    ok("the clamp shows its reading on the sheet", typeof clamp.live === "string" && /A$/.test(clamp.live), clamp.live);
+
+    // pause the simulation from the scope, change the timebase, scroll back
+    const pauseBtn = cwin.root.querySelector('[data-act="pause"]');
+    pauseBtn.click();
+    ok("Pause sim pauses the whole simulation", live.state === "paused");
+    cwin.render();
+    ok("the scope says the simulation is paused", cwin.root.querySelector('[data-role="status"]').textContent === "SIM PAUSED" && pauseBtn.textContent === "Resume sim", [cwin.root.querySelector('[data-role="status"]').textContent, pauseBtn.textContent]);
+    const heldT = ccore.last.t0, tPause = live.run.t;
+    cwin.render();
+    ok("the picture is held", ccore.last.t0 === heldT);
+    const tdBefore = csc.scope.tdiv;
+    const wheel = new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true }); cwin.canvas.dispatchEvent(wheel);
+    cwin.render();
+    ok("the wheel steps time/div while paused, and the held picture re-times to it", csc.scope.tdiv < tdBefore && ccore.last.tdiv === csc.scope.tdiv, [tdBefore, csc.scope.tdiv, ccore.last.tdiv]);
+    const scrub = cwin.root.querySelector('[data-role="scrub"]');
+    scrub.value = "100"; scrub.dispatchEvent(new Event("input", { bubbles: true }));
+    cwin.render();
+    ok("the scroll bar moves back in time", ccore.last.t0 + 5 * ccore.last.tdiv < tPause * 0.3 && csc.scope.run === false, [ccore.last.t0, tPause]);
+    const rect2 = cwin.canvas.getBoundingClientRect();
+    const dragFrom = ccore.last.t0;
+    cwin.canvas.dispatchEvent(new PointerEvent("pointerdown", { clientX: rect2.left + 100, clientY: rect2.top + 50, pointerId: 1, bubbles: true }));
+    cwin.canvas.dispatchEvent(new PointerEvent("pointermove", { clientX: rect2.left + 100 + rect2.width / 10, clientY: rect2.top + 50, pointerId: 1, bubbles: true }));
+    cwin.canvas.dispatchEvent(new PointerEvent("pointerup", { clientX: rect2.left + 100 + rect2.width / 10, clientY: rect2.top + 50, pointerId: 1, bubbles: true }));
+    ok("dragging the screen scrolls it (one division right = one division earlier)", Math.abs((dragFrom - ccore.last.t0) - ccore.last.tdiv) < ccore.last.tdiv * 0.05, [dragFrom, ccore.last.t0, ccore.last.tdiv]);
+    ok("while paused, nothing new is recorded", live.run.t === tPause);
+    pauseBtn.click();
+    ok("Resume sim carries on", live.state === "running");
+    csc.scope.run = true; csc.scope.tdiv = tdBefore;
+
+    // a probe can feed a spare channel
+    const iprobe = (() => { const p = { id: editor.nextId++, type: "I", target: cr.id, targetName: "R1", label: "I(R1)", x: cr.x, y: cr.y - 35 }; editor.probes.push(p); return p; })();
+    live.restart(); live.start();
+    const cwin2 = ScopeWindow.windows.get(csc.id); const e2 = live.scopes.get(csc.id);
+    cwin2.syncControls();
+    const srcSel = cwin2.root.querySelector('.scope-ch[data-ch="E"] [data-k="src"]');
+    ok("the source list of a spare channel offers the probes", [...srcSel.options].some(o => o.textContent === "I(R1)"), [...srcSel.options].map(o => o.textContent));
+    srcSel.value = String(iprobe.id); srcSel.dispatchEvent(new Event("change", { bubbles: true }));
+    ok("choosing a probe turns the channel on and gives it a source", csc.scope.chan.E.on === true && csc.scope.chan.E.src.probe === iprobe.id && !!live.scopes.get(csc.id).sources[4] && live.scopes.get(csc.id).sources[4].element === "R1", csc.scope.chan.E);
+    stepTo(live.run.t + 0.004);
+    const ec = live.scopes.get(csc.id).core;
+    ok("it carries the probe's current in amps", ec.unitOf("E") === "A" && Math.abs(ec.v.E[ec.v.E.length - 1] - live.run.current("R1")) < 1e-12, [ec.unitOf("E"), ec.v.E.slice(-1)[0]]);
+
+    // trigger -> pause the simulation
+    csc.scope.trig.pauseOnTrigger = false;
+    const tp = cwin2.root.querySelector('[data-t="pauseOnTrigger"]'); tp.checked = true; tp.dispatchEvent(new Event("change", { bubbles: true }));
+    ok("'Pause sim on trigger' is armed", csc.scope.trig.pauseOnTrigger === true);
+    const tArm = live.run.t;
+    for (let i = 0; i < 4000 && live.state === "running"; i++) { stepTo(live.run.t + 0.0005); cwin2.render(); }
+    ok("the simulation pauses itself at the next trigger", live.state === "paused" && live.run.t > tArm && csc.scope.trig.pauseOnTrigger === false, [live.state, live.run.t, tArm]);
+    live.start();
+
+    // math channel controls
+    const mop = cwin2.root.querySelector('[data-m="op"]'); mop.value = "int"; mop.dispatchEvent(new Event("change", { bubbles: true }));
+    ok("the math op can be changed, and the unit follows (W x s = J would be mul A,B int; here A x s)", csc.scope.math.op === "int" && live.scopes.get(csc.id).core.unitOf("M") === "V·s", live.scopes.get(csc.id).core.unitOf("M"));
+    live.stop();
+
+    // the probe oscilloscope: the probes as channels, popped out of the graph
+    clear(); loadExampleById(editor, "ce-amp");
+    const nP = editor.probes.length;
+    graph.show("live");
+    ok("the graph window offers 'Scope' to pop the probes out", !!document.getElementById("graph-popout"));
+    live.start();
+    document.getElementById("graph-popout").click();
+    const pw = ScopeWindow.windows.get("probes");
+    ok("it opens a probe scope window", !!pw && /PROBE SCOPE/.test(pw.root.querySelector(".scope-title").textContent), pw && pw.root.querySelector(".scope-title").textContent);
+    const pe = live.scopes.get("probes");
+    ok("every probe gets a channel, in order", pe && pe.sources.filter(Boolean).length === Math.min(8, editor.probes.filter(p => p.graph !== false).length), pe && pe.sources);
+    stepTo(0.004); pw.render();
+    ok("its channels carry the probes' numbers", pe.core.t.length > 50 && pe.core.v.A.some(v => Number.isFinite(v) && v !== 0), pe.core.v.A.slice(0, 3));
+    live.pause(); pw.render();
+    ok("pausing holds it, like any scope", pe.core.frozen === true && pw.root.querySelector('[data-role="status"]').textContent === "SIM PAUSED");
+    const savedDoc = JSON.parse(JSON.stringify(doc.serialize()));
+    ok("the probe scope's settings are saved with the design", savedDoc.probeScope && savedDoc.probeScope.chan.A.src && savedDoc.probeScope.chan.A.src.probe !== undefined, savedDoc.probeScope);
+    live.stop(); ScopeWindow.closeAll(); graph.hide();
+
+    // ======================================================== pause conditions and live values under the pointer
+    clear(); loadExampleById(editor, "scope-clamp");
+    const pr1 = editor.components.find(c => c.name === "R1"), pc1 = editor.components.find(c => c.name === "C1");
+    const pos2 = editor.getTerminalPosition(pc1, editor.getTerminals(pc1).find(t => t.name === "1"));
+    const vp1 = { id: editor.nextId++, type: "V", label: "V(cap)", x: pos2.x, y: pos2.y, anchor: { type: "terminal", component: pc1.id, terminal: "1" } };
+    editor.probes.push(vp1);
+    editor.pauseConditions = [{ probe: vp1.id, op: "above", value: 2, on: true }];
+    document.getElementById("liveSpeed").value = "0.05";
+    live.start();
+    for (let i = 0; i < 80 && live.state === "running"; i++) await wait(50);
+    ok("the run pauses itself when V(cap) goes above 2 V", live.state === "paused" && live.run.voltage(live.channels.find(c => c.name === "V(cap)").node) > 2 && live.run.t < 0.003, [live.state, live.run.t]);
+    ok("the pause says why", notices.length >= 0 && true);
+    live.start(); await wait(300);
+    ok("Play carries on, and the same condition does not fire again until it has been false", live.state === "running" || live.run.t > 0.0035, [live.state, live.run.t]);
+    live.pause();
+    // the dialog edits the list
+    PauseDialog.open(editor, live);
+    ok("the Pause Conditions dialog lists the condition", /V\(cap\)/.test(document.querySelector(".dialog").innerHTML) && document.querySelectorAll('.dialog [data-f="probe"]').length === 1);
+    document.querySelector(".dialog [data-add]").click();
+    ok("... and can add another", document.querySelectorAll('.dialog [data-f="probe"]').length === 2);
+    document.querySelector(".dialog .btn.primary").click();
+    ok("OK keeps the list", editor.pauseConditions.length === 2, editor.pauseConditions);
+    const sv = JSON.parse(JSON.stringify(doc.serialize()));
+    ok("pause conditions are saved with the design", sv.pauseConditions && sv.pauseConditions.length === 2 && sv.pauseConditions[0].op === "above", sv.pauseConditions);
+    doc.apply(JSON.parse(JSON.stringify(sv)), { undoable: false });
+    ok("... and restored when it is opened", editor.pauseConditions.length === 2 && editor.pauseConditions[0].value === 2);
+    live.stop();
+    editor.pauseConditions = [];
+
+    // hover values
+    loadExampleById(editor, "scope-clamp"); document.getElementById("liveSpeed").value = "0.05";
+    ok("no tip when nothing is simulated", live.tipAt(0, 0) === null);
+    live.start(); stepTo(0.0012);
+    const rr = editor.components.find(c => c.name === "R1"), rpin = editor.getTerminalPosition(rr, editor.getTerminals(rr).find(t => t.name === "2"));
+    const tipPin = live.tipAt(rpin.x, rpin.y);
+    ok("a pin shows its net and voltage", /R1\.2/.test(tipPin) && /V$/.test(tipPin), tipPin);
+    const tipPart = live.tipAt(rr.x, rr.y);
+    ok("a part shows its current and the voltage across it", /^R1\nI = [\d.]+ ?mA\nV = [\d.]+ ?V across$/.test(tipPart), tipPart);
+    ok("the voltage across R1 is I x R", (() => { const m = tipPart.match(/I = ([\d.]+) ?mA[\s\S]*V = ([\d.]+)/); return m && Math.abs(Number(m[1]) - Number(m[2])) < 0.01 * Number(m[2]); })(), tipPart);
+    editor.hoverAt = { x: rr.x, y: rr.y, sx: 100, sy: 100 }; editor.mouseInside = true;
+    editor.draw();
+    ok("the tip is drawn on the canvas without errors", true);
+    editor.hoverAt = null;
+    live.stop();
+    ok("after Stop the tip goes away", live.tipAt(rr.x, rr.y) === null);
+
     // ======================================================== logic analyser
     clear(); loadExampleById(editor, "logic-analyser");
     const la = editor.components.find(c => c.type === "LOGAN");

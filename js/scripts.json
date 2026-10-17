@@ -49,6 +49,7 @@
  "js/ui/erc-dialog.js",
  "js/ui/format.js",
  "js/ui/document.js",
+ "js/ui/pause-dialog.js",
  "js/ui/device-list.js",
  "js/ui/menubar.js",
  "js/ui/toolbars.js",

@@ -41,6 +41,8 @@ class DocumentStore {
             params: ed.params,
             sheets: ed.sheetsForSave((c) => this.strip(c)),
             pcb: ed.pcb || undefined,
+            probeScope: ed.probeScope ? ed.probeScope.scope : undefined,
+            pauseConditions: ed.pauseConditions && ed.pauseConditions.length ? ed.pauseConditions : undefined,
             subckts: SubcktLibrary.used(ed),
             nextId: ed.nextId,
             view: { zoom: ed.zoom, panX: ed.panX, panY: ed.panY },
@@ -103,6 +105,8 @@ class DocumentStore {
         const v = state.view || { zoom: 1, panX: state.panX || 0, panY: state.panY || 0 };
         ed.zoom = v.zoom || 1; ed.panX = v.panX || 0; ed.panY = v.panY || 0;
         ed.loadSheets(state.sheets);
+        ed.probeScope = state.probeScope && typeof state.probeScope === "object" ? { id: "probes", name: "PROBES", type: "SCOPE", scope: ScopeCore.merge(state.probeScope) } : null;
+        ed.pauseConditions = Array.isArray(state.pauseConditions) ? state.pauseConditions.filter(c => c && Number.isFinite(Number(c.value)) && c.probe !== undefined).map(c => ({ probe: c.probe, op: c.op === "below" ? "below" : "above", value: Number(c.value), on: c.on !== false })) : [];
         ed.pcb = state.pcb && typeof state.pcb === "object" && Array.isArray(state.pcb.parts) && state.pcb.outline ? state.pcb : null;
         ed.clearSelection();
         ed.refreshWires();

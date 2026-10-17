@@ -84,6 +84,7 @@ class SymbolRenderer {
             case "VM": this.drawMeter(component, "V"); break;
             case "AM": this.drawMeter(component, "A"); break;
             case "SCOPE": this.drawScope(component); break;
+            case "CLAMP": this.drawClamp(component); break;
             case "LOGAN": this.drawLogan(component); break;
             default: this.drawPart(component);
         }
@@ -390,6 +391,31 @@ class SymbolRenderer {
     }
 
     // Oscilloscope symbol: the screen is drawn live by the simulation window.
+    // a clamp-on current probe: an open ring (the jaw) joined to a small body whose output pin goes to a scope channel
+    drawClamp(component) {
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.col("#e8edf5");
+        ctx.fillStyle = this.col("#171b23");
+        ctx.lineWidth = this.lw(2.5);
+        ctx.beginPath(); ctx.arc(-20, 0, 15, 0.35 * Math.PI, 2.65 * Math.PI); ctx.stroke();           // the jaw, open at the bottom
+        ctx.beginPath(); ctx.moveTo(-5, -3); ctx.lineTo(4, -3); ctx.stroke();
+        ctx.lineWidth = this.lw(2);
+        ctx.beginPath(); ctx.rect(4, -13, 24, 26); ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(28, 0); ctx.lineTo(40, 0); ctx.stroke();
+        ctx.fillStyle = this.col("#ffd54a"); ctx.font = "bold 9px system-ui"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText("A→V", 16, 0);
+        // a dashed link to the part it is clamped on, in the symbol's own (rotated) space
+        const t = component.target !== undefined && component.target !== "" && this.components.find(k => String(k.id) === String(component.target));
+        if (t) {
+            const a = (component.rotation * Math.PI) / 180, dx = t.x - component.x, dy = t.y - component.y;
+            let lx = dx * Math.cos(a) + dy * Math.sin(a); const ly = -dx * Math.sin(a) + dy * Math.cos(a);
+            if (component.mirror) lx = -lx;
+            ctx.strokeStyle = this.col("#ffd54a"); ctx.lineWidth = this.lw(1.2); ctx.setLineDash([4, 3]);
+            ctx.beginPath(); ctx.moveTo(-20, -15); ctx.lineTo(lx, ly); ctx.stroke(); ctx.setLineDash([]);
+        }
+        this.drawLabel(component);
+    }
+
     drawScope(component) {
         const ctx = this.ctx;
         ctx.strokeStyle = this.col("#e8edf5");

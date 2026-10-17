@@ -30,6 +30,7 @@ class GraphWindow {
                     <select id="fftAxis" title="Frequency axis"><option value="lin">Linear</option><option value="log">Log</option></select>
                 </span>
                 <span id="plotTitle">No simulation run yet</span>
+                <button class="tb-btn txt" id="graph-popout" title="Pop the probes out as an oscilloscope: pause, scroll back, change volts/div and time/div">Scope ⧉</button>
                 <button class="tb-btn txt" id="graph-measure" title="Cursors and measurements (click the graph for cursor A, Shift+click for B)">Measure</button>
                 <button class="tb-btn txt" id="graph-export" title="Export the plotted data (CSV) or the picture (PNG)">Export ▾</button>
                 <button class="tb-btn" id="graph-sim" title="Simulate (analysis for this tab)">${Icons.svg("play")}</button>
@@ -68,6 +69,7 @@ class GraphWindow {
         }
         this.timeKind = "tran";
         root.querySelector("#graph-sim").onclick = () => this.simulate();
+        root.querySelector("#graph-popout").onclick = () => { const c = Commands.get("graph.probescope"); if (c) c.run(); };
         root.querySelector("#graph-measure").onclick = () => this.toggleMeasure();
         root.querySelector("#graph-export").onclick = (e) => this.exportMenu(e.currentTarget.getBoundingClientRect());
 

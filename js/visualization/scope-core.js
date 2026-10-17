@@ -14,23 +14,40 @@ class ScopeCore {
     static TDIV = [];
     static VDIV = [];
     static CAPACITY = 150000;
-    static CHANNELS = ["A", "B", "C", "D"];
-    static COLORS = { A: "#ffd54a", B: "#4fc3f7", C: "#ff6e9a", D: "#7cf08a" };
+    static CHANNELS = ["A", "B", "C", "D", "E", "F", "G", "H"];      // inputs: A-D are the scope's pins, E-H take probes
+    static MATH = "M";                                                // a computed trace: A-B, A*B, integral, ...
+    static ALL = [...ScopeCore.CHANNELS, "M"];
+    static COLORS = { A: "#ffd54a", B: "#4fc3f7", C: "#ff6e9a", D: "#7cf08a", E: "#c792ea", F: "#ff9e57", G: "#5ce1e6", H: "#c5e478", M: "#ffffff" };
+    static MATH_OPS = {
+        sub: "A − B", add: "A + B", mul: "A × B", div: "A ÷ B", int: "∫A dt", diff: "dA/dt"
+    };
 
     static defaults() {
         return {
             tdiv: 1e-3, hpos: 0,
+            keep: 300,                                      // screens of history kept for scrolling back (0 = as much as fits)
             chan: {
                 A: { on: true, vdiv: 1, pos: 0, coup: "DC" },
                 B: { on: true, vdiv: 1, pos: 0, coup: "DC" },
                 C: { on: false, vdiv: 1, pos: 0, coup: "DC" },
-                D: { on: false, vdiv: 1, pos: 0, coup: "DC" }
+                D: { on: false, vdiv: 1, pos: 0, coup: "DC" },
+                E: { on: false, vdiv: 1, pos: 0, coup: "DC" },
+                F: { on: false, vdiv: 1, pos: 0, coup: "DC" },
+                G: { on: false, vdiv: 1, pos: 0, coup: "DC" },
+                H: { on: false, vdiv: 1, pos: 0, coup: "DC" },
+                M: { on: false, vdiv: 1, pos: 0, coup: "DC" }
             },
-            trig: { src: "A", level: 0, slope: "rise", mode: "auto", autoLevel: true },
+            math: { op: "sub", a: "A", b: "B" },
+            trig: { src: "A", level: 0, slope: "rise", mode: "auto", autoLevel: true, pauseOnTrigger: false },
             xy: false, run: true,
             cur: { on: false, x: [3, 7], ch: "A" },          // measurement cursors, in divisions from the left edge
             fft: { on: false, chan: "A", window: "hann" }
         };
+    }
+
+    // merge only when something is missing, so a settings object already in use keeps its identity
+    static complete(saved) {
+        return saved && typeof saved === "object" && saved.chan && saved.math && saved.keep !== undefined && ScopeCore.ALL.every(c => saved.chan[c]) && saved.trig && saved.cur && saved.fft ? saved : ScopeCore.merge(saved);
     }
 
     // fill any missing fields of saved settings (older designs, partial edits)
@@ -38,7 +55,8 @@ class ScopeCore {
         const base = ScopeCore.defaults(), s = saved && typeof saved === "object" ? saved : {};
         const out = Object.assign(ScopeCore.defaults(), s);
         out.chan = {};
-        for (const c of ScopeCore.CHANNELS) out.chan[c] = Object.assign(base.chan[c], (s.chan || {})[c] || {});
+        for (const c of ScopeCore.ALL) out.chan[c] = Object.assign(base.chan[c], (s.chan || {})[c] || {});
+        out.math = Object.assign(base.math, s.math || {});
         out.trig = Object.assign(base.trig, s.trig || {});
         out.cur = Object.assign(base.cur, s.cur || {});
         out.cur.x = [Number((s.cur && s.cur.x && s.cur.x[0]) ?? 3), Number((s.cur && s.cur.x && s.cur.x[1]) ?? 7)];
@@ -54,7 +72,11 @@ class ScopeCore {
 
     reset() {
         this.t = [];
-        this.v = { A: [], B: [], C: [], D: [] };
+        this.v = {};
+        for (const c of ScopeCore.ALL) this.v[c] = [];
+        this.meta = this.meta || {};     // per channel, set by the simulation: { unit, label } (not saved)
+        this.mInt = 0; this.mPrev = null;
+        this.frozen = false;             // the simulation is paused or finished: hold the picture, as if STOPped
         this.lastStored = -Infinity;
         this.last = null;            // the capture currently shown
         this.armedAt = null;         // time a SINGLE sweep was armed
@@ -70,24 +92,78 @@ class ScopeCore {
     // last 30 screens' worth of time, and when the buffer gets big the oldest half is thinned.
     push(t, values) {
         this.live = true;
+        const m = this.mathValue(values, t, this.t.length && t <= this.t[this.t.length - 1]);
         if (this.t.length && t <= this.t[this.t.length - 1]) {            // same instant: just refresh the values
             const n = this.t.length - 1;
             for (const c of ScopeCore.CHANNELS) if (values[c] !== undefined) this.v[c][n] = values[c];
+            this.v.M[n] = m;
             return;
         }
         this.t.push(t);
         for (const c of ScopeCore.CHANNELS) this.v[c].push(values[c] === undefined ? NaN : values[c]);
-        const horizon = t - 30 * this.s.tdiv - 1e-12;
-        if (this.t[0] < horizon) {
-            const k = PlotMath.lowerBound(this.t, horizon);
-            if (k > 0) { this.t.splice(0, k); for (const c of ScopeCore.CHANNELS) this.v[c].splice(0, k); }
+        this.v.M.push(m);
+        const keep = this.s.keep > 0 ? Math.max(this.s.keep, 30) : 0;
+        if (keep) {
+            const horizon = t - keep * this.s.tdiv - 1e-12;
+            if (this.t[0] < horizon) {
+                const k = PlotMath.lowerBound(this.t, horizon);
+                if (k > 0) { this.t.splice(0, k); for (const c of ScopeCore.ALL) this.v[c].splice(0, k); }
+            }
         }
         if (this.t.length > ScopeCore.CAPACITY) {
-            const half = this.t.length >> 1, keep = (_, i) => i >= half || i % 2 === 0;
-            this.t = this.t.filter(keep);
-            for (const c of ScopeCore.CHANNELS) this.v[c] = this.v[c].filter(keep);
+            const half = this.t.length >> 1, keepIt = (_, i) => i >= half || i % 2 === 0;
+            this.t = this.t.filter(keepIt);
+            for (const c of ScopeCore.ALL) this.v[c] = this.v[c].filter(keepIt);
         }
     }
+
+    // the math trace for one instant. `again` = the same instant as the last call (do not accumulate twice)
+    mathValue(values, t, again) {
+        const m = this.s.math, a = values[m.a], b = values[m.b];
+        const ok = Number.isFinite(a);
+        switch (m.op) {
+            case "add": return ok && Number.isFinite(b) ? a + b : NaN;
+            case "mul": return ok && Number.isFinite(b) ? a * b : NaN;
+            case "div": return ok && Number.isFinite(b) && Math.abs(b) > 1e-12 ? a / b : NaN;
+            case "int": case "diff": {
+                if (!ok) return NaN;
+                const p = this.mPrev;
+                let r = m.op === "int" ? this.mInt : (p && t > p.t ? (a - p.a) / (t - p.t) : NaN);
+                if (!again) {
+                    if (m.op === "int" && p && t > p.t) { this.mInt += 0.5 * (a + p.a) * (t - p.t); r = this.mInt; }
+                    this.mPrev = { t, a };
+                }
+                return r;
+            }
+            default: return ok && Number.isFinite(b) ? a - b : NaN;           // "sub"
+        }
+    }
+
+    // the math settings changed: redo the trace over everything recorded
+    recomputeMath() {
+        this.mInt = 0; this.mPrev = null;
+        this.v.M = this.t.map((t, i) => {
+            const vals = {};
+            for (const c of ScopeCore.CHANNELS) vals[c] = this.v[c][i];
+            return this.mathValue(vals, t, false);
+        });
+    }
+
+    // unit of a channel's numbers ("V" unless the simulation says otherwise); the math trace follows from its operands
+    unitOf(c) {
+        if (c !== "M") return (this.meta[c] && this.meta[c].unit) || "V";
+        const m = this.s.math, ua = this.unitOf(m.a), ub = this.unitOf(m.b);
+        switch (m.op) {
+            case "mul": return ua === ub ? ua + "²" : ((ua === "V" && ub === "A") || (ua === "A" && ub === "V") ? "W" : ua + "·" + ub);
+            case "div": return ua === ub ? "" : (ua === "V" && ub === "A" ? "Ω" : ua + "/" + ub);
+            case "int": return ua + "·s";
+            case "diff": return ua + "/s";
+            default: return ua;
+        }
+    }
+
+    // a label for a channel: the probe or pin feeding it, else its letter
+    labelOf(c) { return (this.meta[c] && this.meta[c].label) || c; }
 
     // ---- trigger --------------------------------------------------------------------------------------------
 
@@ -111,7 +187,7 @@ class ScopeCore {
     capture() {
         const s = this.s, tdiv = s.tdiv;
         if (!this.t.length) { this.status = this.live ? "WAIT" : "STOP"; return this.last; }
-        if (!s.run) { this.status = "STOP"; return this.last; }
+        if (!s.run || (this.frozen && this.last)) { this.retime(); this.status = "STOP"; return this.last; }
 
         // auto level: keep the trigger level at the middle of the source signal, so a 0-5 V square wave triggers
         // without anyone setting a level
@@ -138,6 +214,38 @@ class ScopeCore {
         else if (s.trig.mode === "auto") { this.last = make(false, null); this.status = "AUTO"; }
         else this.status = this.last ? "WAIT" : "WAIT";                    // normal: keep the last sweep
         return this.last;
+    }
+
+    // ---- looking back while stopped ----------------------------------------------------------------------------
+
+    // a stopped picture follows the time/div and position controls: same centre (or the same trigger point), new scale
+    retime() {
+        const c = this.last, s = this.s;
+        if (!c || (c.tdiv === s.tdiv && c.hpos === s.hpos)) return;
+        const t0 = c.trigged ? c.trigT - (5 + s.hpos) * s.tdiv : c.t0 + 5 * c.tdiv - 5 * s.tdiv;
+        this.last = Object.assign({}, c, { tdiv: s.tdiv, hpos: s.hpos, t0 });
+    }
+
+    // slide the stopped picture by dt seconds (negative = back in time), staying inside the recorded data
+    scrub(dt) {
+        const c = this.last;
+        if (!c || !this.t.length) return false;
+        const lo = this.t[0] - 5 * c.tdiv, hi = this.tNow - 5 * c.tdiv;
+        this.last = Object.assign({}, c, { t0: Math.min(hi, Math.max(lo, c.t0 + dt)), trigged: false, trigT: null });
+        return true;
+    }
+
+    // put the middle of the stopped picture at time t
+    seek(t) {
+        const c = this.last;
+        if (!c) return false;
+        return this.scrub(t - (c.t0 + 5 * c.tdiv));
+    }
+
+    // what the scroll bar needs: the recorded range and the middle of the picture
+    range() {
+        const c = this.last;
+        return this.t.length && c ? { min: this.t[0], max: this.tNow, mid: c.t0 + 5 * c.tdiv } : null;
     }
 
     // arm a single sweep (also resumes from STOP)
@@ -225,16 +333,16 @@ class ScopeCore {
     snapshot(cap = this.last, n = 500) {
         if (!cap) return null;
         const traces = {};
-        for (const c of ScopeCore.CHANNELS) if (this.s.chan[c].on) traces[c] = this.samples(c, n, cap);
+        for (const c of ScopeCore.ALL) if (this.s.chan[c].on) traces[c] = this.samples(c, n, cap);
         return { tdiv: cap.tdiv, hpos: cap.hpos, traces };
     }
 
     // CSV of the displayed window (time relative to the left edge)
     csv(cap = this.last, n = 1000) {
         if (!cap) return "";
-        const on = ScopeCore.CHANNELS.filter(c => this.s.chan[c].on);
+        const on = ScopeCore.ALL.filter(c => this.s.chan[c].on);
         const cols = on.map(c => this.samples(c, n, cap));
-        const lines = [["Time (s)", ...on.map(c => `${c} (V)`)].join(",")];
+        const lines = [["Time (s)", ...on.map(c => `${this.labelOf(c)} (${this.unitOf(c)})`)].join(",")];
         for (let i = 0; i < n; i++) lines.push([cap.t0 + (i / (n - 1)) * 10 * cap.tdiv, ...cols.map(v => (Number.isFinite(v[i]) ? v[i] : ""))].join(","));
         return lines.join("\r\n");
     }
@@ -254,7 +362,7 @@ class ScopeCore {
         }
         if (!best) return false;
         const nice = (value, list) => list.find(v => v >= value) || list[list.length - 1];
-        for (const c of ScopeCore.CHANNELS) {
+        for (const c of ScopeCore.ALL) {
             if (!s.chan[c].on) continue;
             const st = PlotMath.stats(this.t, this.v[c].map(v => (Number.isFinite(v) ? v : 0)), lo, hi);
             if (!st) continue;
@@ -280,4 +388,4 @@ class ScopeCore {
 
 // 1-2-5 steps
 ScopeCore.TDIV = (() => { const a = []; for (let e = -6; e <= 0; e++) for (const m of [1, 2, 5]) a.push(m * Math.pow(10, e)); a.push(10); return a.map(x => Number(x.toPrecision(3))); })();
-ScopeCore.VDIV = (() => { const a = []; for (let e = -3; e <= 1; e++) for (const m of [1, 2, 5]) a.push(m * Math.pow(10, e)); a.push(100); return a.map(x => Number(x.toPrecision(3))); })();
+ScopeCore.VDIV = (() => { const a = []; for (let e = -6; e <= 1; e++) for (const m of [1, 2, 5]) a.push(m * Math.pow(10, e)); a.push(100); return a.map(x => Number(x.toPrecision(3))); })();

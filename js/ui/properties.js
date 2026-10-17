@@ -77,6 +77,12 @@ class PropertiesPanel {
         else if (type === "NODEIC") html += this.text("Voltage", "value", c.value, "0 V") +
             this.select("Use as", "mode", [["ic", "Initial condition (.ic): the start of a \"start from 0\" transient"], ["nodeset", "Starting guess (.nodeset): helps the DC solver find a bistable circuit's state"]], c.mode || "ic") +
             `<div class="prop-note">An initial condition forces the net's voltage at the start; a starting guess only picks where the solver begins looking, so it never changes a circuit that has a single solution.</div>`;
+        else if (type === "CLAMP") {
+            const targets = this.editor.components.filter(k => !["GND", "VM", "AM", "SCOPE", "CLAMP", "LOGAN", "NODEIC", "POWER", "NETLABEL", "PORT", "TEXT", "SHEET", "BUSTAP"].includes(k.type) && !this.editor.isOverlay(k));
+            html += this.select("Clamped on", "target", [["", "(nothing)"], ...targets.map(k => [String(k.id), k.name])], c.target === undefined ? "" : String(c.target), "The part whose current it reads. Placing the clamp next to a part attaches it.") +
+                this.text("Sensitivity (V per A)", "sens", c.sens === undefined ? "0.1" : c.sens, "0.1 = 100 mV/A") +
+                `<div class="prop-note">The output pin carries volts = amps x sensitivity. Wire it to a scope channel; the scope shows amps. The reading is the current of the clamped part as the simulator defines it (into its first pin).</div>`;
+        }
         else if (type === "E") html += this.text("Voltage gain", "value", c.value, "10");
         else if (type === "G") html += this.text("Transconductance (S)", "value", c.value, "10m");
         else if (type === "SW") html += this.select("State", "closed", [["false", "Open"], ["true", "Closed"]], String(!!c.closed), "Double-click the switch to toggle it.");

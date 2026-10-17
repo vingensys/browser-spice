@@ -115,8 +115,9 @@ test("measurements: Vpp, Vrms, frequency", () => {
     near(b.vpp, 1, 0.03);
 });
 
-test("the buffer is bounded: it keeps about 30 screens however long the run", () => {
-    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-3 }));
+test("the buffer is bounded: it keeps `keep` screens however long the run", () => {
+    if (ScopeCore.merge().keep !== 300) throw new Error("default history is 300 screens");
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-3, keep: 30 }));
     feed(sc, 5, 1e-5, sine(100));
     if (sc.t.length > 3200) throw new Error("buffer grew to " + sc.t.length);
     if (sc.t[0] < 5 - 31e-3) throw new Error("kept too much history: " + sc.t[0]);
@@ -173,7 +174,7 @@ test("the trigger is stable on a 0/5 V square wave: successive captures are iden
 
 test("the 1-2-5 steps", () => {
     const t = ScopeCore.TDIV, v = ScopeCore.VDIV;
-    near(t[0], 1e-6, 0); near(t[t.length - 1], 10, 0); near(v[0], 1e-3, 0); near(v[v.length - 1], 100, 0);
+    near(t[0], 1e-6, 0); near(t[t.length - 1], 10, 0); near(v[0], 1e-6, 0); near(v[v.length - 1], 100, 0);
     if (!t.includes(2e-4) || !t.includes(5e-3) || !v.includes(0.2) || !v.includes(5)) throw new Error("1-2-5 values missing");
     if (t.some((x, i) => i && x <= t[i - 1])) throw new Error("ascending");
 });
@@ -205,6 +206,78 @@ test("a saved trace keeps the screen as it was, and the CSV lists time and chann
     if (!snap.traces.A.some(Number.isFinite)) throw new Error("snapshot changed");
     sc.capture(); const lines = sc.csv(sc.last, 50).split("\r\n");
     if (lines.length !== 51 || lines[0] !== "Time (s),A (V),B (V)") throw new Error(lines[0]);
+});
+
+test("eight input channels and a math channel exist, with defaults", () => {
+    const m = ScopeCore.merge();
+    for (const c of "ABCDEFGHM") if (!m.chan[c] || m.chan[c].vdiv !== 1) throw new Error("channel " + c);
+    if (m.chan.E.on || m.chan.M.on || m.math.op !== "sub" || m.math.a !== "A" || m.math.b !== "B") throw new Error(JSON.stringify(m.math));
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-4, chan: { E: { on: true } } }));
+    sc.push(0, { A: 1, E: 2 }); sc.push(1e-6, { A: 1, E: 3 });
+    near(sc.v.E[1], 3, 0); if (!Number.isNaN(sc.v.F[1])) throw new Error("unfed channel is NaN");
+});
+
+test("math channel: A-B, A+B, A*B, A/B", () => {
+    const run = (op) => { const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-4, math: { op, a: "A", b: "B" } })); for (let i = 0; i < 5; i++) sc.push(i * 1e-6, { A: 6, B: 2 }); return sc.v.M[4]; };
+    near(run("sub"), 4, 1e-12); near(run("add"), 8, 1e-12); near(run("mul"), 12, 1e-12); near(run("div"), 3, 1e-12);
+    const z = new ScopeCore(ScopeCore.merge({ math: { op: "div", a: "A", b: "B" } })); z.push(0, { A: 1, B: 0 });
+    if (!Number.isNaN(z.v.M[0])) throw new Error("divide by zero gives no trace");
+});
+
+test("math channel: integral and derivative of a sine", () => {
+    const f = 1000, w = 2 * Math.PI * f;
+    const run = (op) => { const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-3, math: { op, a: "A", b: "B" } })); feed(sc, 0.002, 1e-6, (t) => ({ A: Math.sin(w * t), B: 0 })); return sc; };
+    const i = run("int"), t = i.t, k = t.findIndex(x => x >= 0.00125);
+    near(i.v.M[k], (1 - Math.cos(w * t[k])) / w, 2e-6, "integral of sin");
+    const d = run("diff"), j = d.t.findIndex(x => x >= 0.0004);
+    near(d.v.M[j], w * Math.cos(w * d.t[j]), w * 0.002, "derivative of sin");
+});
+
+test("changing the math op recomputes the whole recorded trace", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ math: { op: "sub", a: "A", b: "B" } }));
+    for (let i = 0; i < 6; i++) sc.push(i * 1e-6, { A: 5, B: 1 });
+    near(sc.v.M[5], 4, 1e-12);
+    sc.s.math.op = "add"; sc.recomputeMath();
+    near(sc.v.M[0], 6, 1e-12); near(sc.v.M[5], 6, 1e-12);
+    sc.s.math.op = "int"; sc.recomputeMath();
+    near(sc.v.M[5], 5 * 5e-6, 1e-12, "integral of 5 over 5 us");
+});
+
+test("math units follow the operands (V x A = W, V / A = ohm)", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ math: { op: "mul", a: "A", b: "B" } }));
+    sc.meta = { A: { unit: "V" }, B: { unit: "A" } };
+    if (sc.unitOf("M") !== "W") throw new Error(sc.unitOf("M"));
+    sc.s.math.op = "div"; if (sc.unitOf("M") !== "Ω") throw new Error(sc.unitOf("M"));
+    sc.s.math.op = "int"; if (sc.unitOf("M") !== "V·s") throw new Error(sc.unitOf("M"));
+    sc.s.math.op = "sub"; if (sc.unitOf("M") !== "V") throw new Error(sc.unitOf("M"));
+});
+
+test("a stopped picture can change time/div and be scrolled back through the history", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-4, keep: 0, trig: { level: 0, slope: "rise", mode: "auto", autoLevel: false } }));
+    feed(sc, 0.02, 1e-6, sine(1000));
+    const first = sc.capture();
+    sc.s.run = false;
+    sc.s.tdiv = 2e-4; sc.s.hpos = 0;
+    const wide = sc.capture();                                               // retimed, same trigger point
+    near(wide.tdiv, 2e-4, 0); near(wide.trigT, first.trigT, 1e-12); near(wide.t0 + 5 * wide.tdiv, first.trigT, 1e-12, "trigger stays centred");
+    const before = wide.t0;
+    sc.scrub(-0.005);
+    near(sc.last.t0, before - 0.005, 1e-12, "scrolled back 5 ms");
+    near(sc.samples("A", 3, sc.last)[0], Math.sin(2 * Math.PI * 1000 * sc.last.t0), 0.01, "data from the past");
+    sc.scrub(-10); if (sc.last.t0 < sc.t[0] - 5 * sc.last.tdiv - 1e-12) throw new Error("clamped at the oldest data");
+    sc.scrub(+10); if (sc.last.t0 > sc.tNow - 5 * sc.last.tdiv + 1e-12) throw new Error("clamped at the newest data");
+    const r = sc.range(); near(r.max, sc.tNow, 0); near(r.min, 0, 0);
+    sc.seek(0.01); near(sc.last.t0 + 5 * sc.last.tdiv, 0.01, 1e-12, "seek centres on the time");
+});
+
+test("a paused simulation holds the picture (frozen) even while the display is set to run", () => {
+    const sc = new ScopeCore(ScopeCore.merge({ tdiv: 1e-4, keep: 0 }));
+    feed(sc, 0.01, 1e-6, sine(1000));
+    const a = sc.capture();
+    sc.frozen = true; feed(sc, 0.0123, 1e-6, sine(1000));
+    if (sc.capture().trigT !== a.trigT || sc.status !== "STOP") throw new Error("frozen picture moved");
+    sc.frozen = false;
+    if (sc.capture().trigT === a.trigT) throw new Error("unfrozen picture follows the signal");
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

@@ -206,6 +206,8 @@
 
     C("graph.tran", "Analogue Analysis (Transient)", { run: () => graph.show("tran") });
     C("graph.ac", "Frequency Response (AC)", { run: () => graph.show("ac") });
+    C("sim.conditions", "Pause Conditions…", { run: () => PauseDialog.open(editor, live) });
+    C("graph.probescope", "Probe Oscilloscope", { run: () => ScopeWindow.openProbes(editor, live) });
     C("graph.measure", "Measurements…", { run: () => MeasureDialog.open(editor, runner, graph) });
     C("graph.tf", "Transfer Function (.tf)…", { run: () => TfDialog.open(editor, runner) });
     C("graph.noise", "Noise Analysis", { run: () => graph.show("noise") });
@@ -274,8 +276,8 @@
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },
             { sub: "Place Terminal", items: () => placeItems("terminals", DeviceCatalog.terminals()) }] },
         { title: "Design", items: ["design.titleblock", "design.settings", "design.params", "-", { sub: "Sheets", items: ["sheet.add", "sheet.rename", "sheet.duplicate", "sheet.delete", "-", "sheet.up", "sheet.next"] }, "-", "design.sweep", "design.montecarlo", "design.sensitivity", "-", "design.erc", "design.ercnext", "-", "net.highlight", "net.clear"] },
-        { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.simulate"] },
-        { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop"] },
+        { title: "Graph", items: ["graph.tran", "graph.ac", "graph.noise", "graph.sweep", "graph.dc", "-", "graph.tf", "graph.measure", "-", "graph.probescope", "graph.simulate"] },
+        { title: "Debug", mnemonic: "b", items: ["sim.play", "sim.step", "sim.pause", "sim.stop", "-", "sim.conditions"] },
         { title: "Library", items: ["lib.pick", "lib.remove", "-", "file.import", "lib.reset"] },
         { title: "Help", items: ["help.start", "palette.open", "help.keys", "help.about"] }
     ]);
@@ -418,6 +420,7 @@
     };
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") { ctx.style.display = "none"; SimWorker.cancel(); } });
 
+    editor.onHoverTip = (x, y) => live.tipAt(x, y);
     editor.onEditProbe = (probe) => {
         const wrap = document.createElement("div");
         const colors = [["", "Automatic"], ["#e53935", "Red"], ["#fb8c00", "Orange"], ["#fdd835", "Yellow"], ["#43a047", "Green"], ["#00acc1", "Cyan"], ["#1e88e5", "Blue"], ["#8e24aa", "Purple"], ["#f06292", "Pink"]];

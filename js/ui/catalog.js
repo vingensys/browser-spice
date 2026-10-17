@@ -99,7 +99,8 @@ const DeviceCatalog = {
             { name: "VOLTMETER", type: "VM", desc: "DC voltmeter: reads the voltage across its pins while the simulation runs", props: { value: "" } },
             { name: "AMMETER", type: "AM", desc: "DC ammeter: put it in series; reads the current while the simulation runs", props: { value: "" } },
             { name: "LOGIC ANALYSER", type: "LOGAN", desc: "Eight-input logic analyser: digital traces, a trigger, cursors and bus values while the simulation runs", props: { value: "" } },
-            { name: "OSCILLOSCOPE", type: "SCOPE", desc: "Four-channel oscilloscope: shows its inputs live while the simulation runs", props: { value: "" } }
+            { name: "OSCILLOSCOPE", type: "SCOPE", desc: "Four-channel oscilloscope (eight with probes and a math trace): shows its inputs live while the simulation runs; pause and scroll back through the history", props: { value: "" } },
+            { name: "CURRENT CLAMP", type: "CLAMP", desc: "Clamp-on current probe: clamps on a part without breaking the circuit and outputs volts = amps x sensitivity on its pin; wire that to a scope channel (the scope shows amps)", props: { value: "", sens: "0.1" } }
         ];
     },
 

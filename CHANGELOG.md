@@ -2,6 +2,14 @@
 
 ## 1.0 (current)
 
+Oscilloscope and probes
+- The scope has eight input channels (A-D pins, E-H assigned probes) and a math trace (A-B, A+B, AxB, A/B, integral, derivative); channels carry volts or amps and the scope labels and scales them accordingly.
+- Current Clamp instrument: clamps on a part, wire its output to a scope channel; also any probe can be assigned to a channel.
+- Probe oscilloscope: Graph > Probe Oscilloscope (or Scope on the graph toolbar) pops the probes out as a scope.
+- Pause the simulation from the scope, change time/div and volts/div while held, and scroll back through the history (drag, wheel, scroll bar); History setting.
+- Debug > Pause Conditions (probe above / below a value) and the scope's Pause sim on trigger; live voltage / current tip under the pointer while a run exists.
+- New example: current clamp on the oscilloscope.
+
 Foundations
 - Design files are versioned (`browser-spice/2`) and documented (`docs/FILE-FORMAT.md`); older files are upgraded on open and files from a newer app are refused with a message.
 - Large designs: opening a 900-part deck went from 35 s to under 1 s, and a 2,700-part redraw from 310 ms to 20 ms (`npm run perf`). Causes: a re-route of every wire for every part added, a full routing-context rebuild per wire, and a pairwise junction search.

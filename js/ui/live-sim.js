@@ -89,6 +89,7 @@ class LiveSim {
             else this.channels.push({ name: prb.label, probe: orig, element: prb._target || prb.targetName });
         }
         this.meters = info.instruments.filter(i => i.type === "VM" || i.type === "AM");
+        this.clamps = info.instruments.filter(i => i.type === "CLAMP");
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
             sc.nets.forEach((net, k) => { if (sc.wired[k]) this.channels.push({ name: `${sc.comp.name}:${"ABCD"[k]}${sc.path ? "@" + sc.path.replace(/__/g, "/") : ""}`, node: net, scope: sc.comp, index: k }); });
         }
@@ -99,9 +100,14 @@ class LiveSim {
         // oscilloscopes keep their own full-resolution buffers (and their settings live on the part)
         this.scopes = new Map();
         for (const sc of info.instruments.filter(i => i.type === "SCOPE")) {
-            sc.comp.scope = ScopeCore.merge(sc.comp.scope);
-            this.scopes.set(sc.key !== undefined ? sc.key : sc.comp.id, { comp: sc.comp, nets: sc.nets, wired: sc.wired, core: new ScopeCore(sc.comp.scope) });
+            sc.comp.scope = ScopeCore.complete(sc.comp.scope);
+            const core = new ScopeCore(sc.comp.scope);
+            const { sources, meta } = this.scopeSources(sc.comp, sc.nets, sc.wired);
+            core.meta = meta;
+            this.scopes.set(sc.key !== undefined ? sc.key : sc.comp.id, { comp: sc.comp, nets: sc.nets, wired: sc.wired, core, sources });
         }
+        if (this.editor.probeScope) this.attachProbeScope();
+        this.buildConditions();
         this.logans = new Map();
         for (const la of info.instruments.filter(i => i.type === "LOGAN")) {
             la.comp.logan = LogicCore.merge(la.comp.logan);
@@ -113,6 +119,124 @@ class LiveSim {
         this.feedScopes();
         this.applyScopeResolution();
         this.readout();
+    }
+
+    // Where each scope channel (A-H) gets its numbers: { node } = a net's voltage, { element } = a part's current.
+    // A-D are the scope's pins (a pin on a clamp's output reads that clamp's part, in amps); a channel can also be
+    // assigned a probe (comp.scope.chan[X].src = { probe: id }), which is how E-H are fed.
+    scopeSources(comp, nets, wired) {
+        const sources = new Array(8).fill(null), meta = {};
+        const probeSource = (prb) => {
+            const orig = prb._orig || prb;
+            return prb.type === "V"
+                ? { src: { node: prb._node !== undefined ? prb._node : this.info.getPointNodeName(prb.x, prb.y) }, meta: { unit: "V", label: orig.label } }
+                : { src: { element: prb._target || prb.targetName }, meta: { unit: "A", label: orig.label } };
+        };
+        (nets || []).forEach((net, k) => {
+            if (!wired[k] || k > 3) return;
+            const clamp = (this.clamps || []).find(c => c.wired[0] && c.nets[0] === net && c.targetName);
+            if (clamp) { sources[k] = { element: clamp.elementName || clamp.targetName }; meta["ABCD"[k]] = { unit: "A", label: `${clamp.comp.name} on ${clamp.targetName}` }; }
+            else { sources[k] = { node: net }; meta["ABCD"[k]] = { unit: "V", label: "ABCD"[k] }; }
+        });
+        ScopeCore.CHANNELS.forEach((c, k) => {
+            const a = comp.scope.chan[c].src;
+            if (!a || a.probe === undefined) return;
+            const prb = this.info.probes.find(p => (p._orig || p).id === a.probe && !p._sub);
+            if (!prb) return;
+            const r = probeSource(prb);
+            sources[k] = r.src; meta[c] = r.meta;
+        });
+        return { sources, meta };
+    }
+
+    // The probe oscilloscope: a scope that is not a part on the sheet. Its channels are the probes, in order
+    // (or whichever probe a channel was assigned). Created when the graph is popped out.
+    attachProbeScope() {
+        if (!this.run || !this.info) return null;
+        const comp = this.editor.probeScopeComp();
+        const probes = this.info.probes.filter(p => p.graph !== false && !p._sub);
+        // keep the assignments that still point at a probe; give every other probe the first free channel
+        const alive = new Set(probes.map(p => p.id));
+        const used = new Set();
+        for (const c of ScopeCore.CHANNELS) {
+            const a = comp.scope.chan[c].src;
+            if (a && alive.has(a.probe) && !used.has(a.probe)) used.add(a.probe); else delete comp.scope.chan[c].src;
+        }
+        for (const prb of probes) {
+            if (used.has(prb.id)) continue;
+            const c = ScopeCore.CHANNELS.find(k => !comp.scope.chan[k].src);
+            if (!c) break;
+            comp.scope.chan[c].src = { probe: prb.id };
+            comp.scope.chan[c].on = true;
+            used.add(prb.id);
+        }
+        const { sources, meta } = this.scopeSources(comp, [], []);
+        const old = this.scopes.get("probes");
+        const core = old ? old.core : new ScopeCore(comp.scope);
+        core.s = comp.scope; core.meta = meta;
+        const entry = { comp, nets: [], wired: [], core, sources, probeScope: true };
+        this.scopes.set("probes", entry);
+        return entry;
+    }
+
+    // Pause conditions (Debug > Pause Conditions): "pause when this probe goes above / below a value". A condition fires once,
+    // when its test turns from false to true, so one that is already true at the start does not stop the run at once.
+    buildConditions() {
+        this.condSrc = [];
+        for (const c of this.editor.pauseConditions || []) {
+            if (c.on === false) continue;
+            const prb = this.info.probes.find(p => !p._sub && p.id === c.probe);
+            if (!prb) continue;
+            const src = prb.type === "V" ? { node: prb._node !== undefined ? prb._node : this.info.getPointNodeName(prb.x, prb.y) } : { element: prb._target || prb.targetName };
+            this.condSrc.push({ c, src, label: prb.label, unit: prb.type === "V" ? "V" : "A", was: false });
+        }
+    }
+
+    // after a step: the text for the first condition that has just become true, else null
+    checkConditions() {
+        const run = this.run;
+        for (const k of this.condSrc) {
+            const v = k.src.node !== undefined ? run.voltage(k.src.node) : run.current(k.src.element);
+            const now = k.c.op === "below" ? v < k.c.value : v > k.c.value;
+            const fired = now && !k.was;
+            k.was = now;
+            if (fired) return `${k.label} went ${k.c.op === "below" ? "below" : "above"} ${Units.formatSI(k.c.value, k.unit)} (${Units.formatSI(v, k.unit)}) at t = ${Units.formatSI(run.t, "s")}`;
+        }
+        return null;
+    }
+
+    // The live value under the pointer: a pin or wire shows its net's voltage, a part shows its current (and the voltage
+    // across it). Only on the first sheet, only while a run exists (running, paused or finished).
+    tipAt(x, y) {
+        if (!this.run || !this.info || this.state === "stopped" || this.editor.sheetIndex !== 0) return null;
+        const ed = this.editor, run = this.run, nets = this.info.nets;
+        const nm = (n) => (nets.displayName ? nets.displayName(n) : n);
+        const V = (n) => Units.formatSI(run.voltage(n), "V");
+        const pin = ed.findTerminal(x, y, 12);
+        if (pin) {
+            const n = nets.terminalNode(pin.component, pin.terminal.name);
+            return n === null ? null : `${pin.component.name}.${pin.terminal.name}   net ${nm(n)}\n${V(n)}`;
+        }
+        const comp = ed.findComponent(x, y);
+        if (comp && !["GND", "TEXT", "SCOPE", "LOGAN", "VM", "CLAMP", "NODEIC", "POWER", "NETLABEL", "PORT", "SHEET", "BUSTAP"].includes(comp.type)) {
+            const term = ed.getTerminals(comp), cur = run.current(comp.name);
+            const lines = [comp.name];
+            if (Number.isFinite(cur) && cur !== 0) lines.push(`I = ${Units.formatSI(cur, "A")}`);
+            if (term.length === 2) { const a = nets.terminalNode(comp, term[0].name), b = nets.terminalNode(comp, term[1].name); if (a !== null && b !== null) lines.push(`V = ${Units.formatSI(run.voltage(a) - run.voltage(b), "V")} across`); }
+            return lines.length > 1 ? lines.join("\n") : null;
+        }
+        const hit = ed.findWireNearest(x, y, 8);
+        if (hit) { const n = nets.wireNode(hit.wire); return n === null ? null : `net ${nm(n)}\n${V(n)}`; }
+        return null;
+    }
+
+    // a channel's source was changed in the scope window
+    refreshSources(key) {
+        const e = this.scopes.get(key);
+        if (!e || !this.info) return;
+        if (e.probeScope) { this.attachProbeScope(); return; }
+        const { sources, meta } = this.scopeSources(e.comp, e.nets, e.wired);
+        e.sources = sources; e.core.meta = meta;
     }
 
     restart() {
@@ -146,6 +270,16 @@ class LiveSim {
         this.readout();
         this.paint(true);
         this.emit();
+        if (this.pauseReason) this.stopForCondition();
+    }
+
+    // a pause condition fired: hold the simulation there and say why
+    stopForCondition() {
+        const why = this.pauseReason;
+        this.pauseReason = null;
+        this.pause();
+        this.paint(true);
+        this.runner.toast(`Paused: ${why}. Open the scope or graph to look around, then press Play to continue.`, "info");
     }
 
     cancel() { if (this.raf) cancelAnimationFrame(this.raf); this.raf = 0; }
@@ -167,6 +301,7 @@ class LiveSim {
             this.readout();
             this.paint(false, now);
             this.emit();
+            if (this.pauseReason) { this.stopForCondition(); return; }
             if (this.run.done) { this.pause(); return; }
             this.raf = requestAnimationFrame(frame);
         };
@@ -190,11 +325,13 @@ class LiveSim {
         while (!run.done && performance.now() - t0 < ms && (this.speed <= 0 || run.t < this.target)) {
             run.step();
             if (this.scopes.size || this.logans.size) this.feedScopes();
+            if (this.condSrc && this.condSrc.length) { const why = this.checkConditions(); if (why) this.pauseReason = why; }
             if (run.t >= this.nextSample) {
                 this.times.push(run.t);
                 this.channels.forEach((ch, i) => this.values[i].push(ch.node !== undefined ? run.voltage(ch.node) : run.current(ch.element)));
                 this.nextSample = run.t + minGap;
             }
+            if (this.pauseReason) break;
         }
         // keep only the visible time window
         const cut = run.t - this.span;
@@ -227,6 +364,7 @@ class LiveSim {
             for (const comp of st.components) { const part = PartLib.defs[comp.type]; if (part && part.live) part.live(comp, view); }
         }
         if (window.opOverlay && window.opOverlay.on) window.opOverlay.fromRun(run);
+        for (const cl of this.clamps || []) cl.comp.live = cl.targetName ? fmt(run.current(cl.elementName || cl.targetName), "A") : "—";
         for (const m of this.meters) {
             m.comp.live = m.type === "VM" ? fmt(run.voltage(m.nets[0]) - run.voltage(m.nets[1]), "V") : fmt(run.current(m.elementName || m.comp.name), "A");
         }
@@ -257,7 +395,10 @@ class LiveSim {
         const run = this.run;
         for (const e of this.scopes.values()) {
             const values = {};
-            ["A", "B", "C", "D"].forEach((c, k) => { if (e.wired[k]) values[c] = run.voltage(e.nets[k]); });
+            ScopeCore.CHANNELS.forEach((c, k) => {
+                const s = e.sources[k];
+                if (s) values[c] = s.node !== undefined ? run.voltage(s.node) : run.current(s.element);
+            });
             e.core.push(run.t, values);
         }
         for (const e of this.logans.values()) {

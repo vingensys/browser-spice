@@ -252,6 +252,22 @@ const EXAMPLES = [
         }
     },
     {
+        id: "scope-clamp",
+        name: "Current clamp on the oscilloscope",
+        note: "Press Play (F12), then double-click the scope. A is the source voltage, B is the charging current read by the clamp-on probe on R1 (the scope shows it in amps), and the white trace M is A x B, the power drawn from the source. Pause the simulation (scope: Pause sim) and drag the screen to look back in time.",
+        settings: { tStop: "60m", tStep: "20u" },
+        build(b) {
+            const v = b.part("V", 120, 300, { rot: 270, sourceType: "PULSE", pulse: { v1: 0, v2: 5, delay: 0, rise: 1e-6, fall: 1e-6, width: 5e-3, period: 10e-3 } });
+            const r = b.part("R", 280, 200, { value: "1 kΩ" });
+            const c = b.part("C", 460, 300, { rot: 90, value: "2.2 µF" });
+            const cl = b.part("CLAMP", 280, 100, { sens: "0.1" });
+            const sc = b.part("SCOPE", 700, 240, { scope: { tdiv: 2e-3, chan: { A: { on: true, vdiv: 2, pos: 1.5 }, B: { on: true, vdiv: 0.002, pos: -1.5 }, M: { on: true, vdiv: 0.005, pos: -1.5 } }, math: { op: "mul", a: "A", b: "B" } } });
+            const g = b.part("GND", 300, 420);
+            b.wire(v, "2", r, "1"); b.wire(r, "2", c, "1"); b.wire(c, "2", g, "1"); b.wire(v, "1", g, "1");
+            b.wire(sc, "A", r, "1"); b.wire(cl, "O", sc, "B");
+        }
+    },
+    {
         id: "psu",
         name: "Power supply (transformer, bridge, 7805)",
         note: "36 V / 50 Hz mains-style source, 2:1 transformer, bridge rectifier, 1000 µF reservoir and a 7805. Press Play: the probes show the ripple and the regulated 5 V.",

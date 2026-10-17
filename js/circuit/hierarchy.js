@@ -101,7 +101,7 @@ class Hierarchy {
         els.instruments = els.instruments || [];
         for (const ins of cels.instruments || []) {
             if (!firstUse) { warnings.push(`${path}: ${ins.comp.name} is only active in the first use of its sheet`); continue; }
-            els.instruments.push({ ...ins, key: `${sheetId}:${ins.comp.id}`, path, nets: ins.nets.map(node), elementName: ins.type === "AM" ? `${path}__${ins.comp.name}` : undefined, sub: true });
+            els.instruments.push({ ...ins, key: `${sheetId}:${ins.comp.id}`, path, nets: ins.nets.map(node), elementName: ins.type === "AM" ? `${path}__${ins.comp.name}` : (ins.type === "CLAMP" && ins.targetName ? `${path}__${ins.targetName}` : undefined), sub: true });
         }
         for (const e of cels) {
             if (e.comp && e.comp.type === "POWER") {

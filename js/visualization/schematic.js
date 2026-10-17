@@ -87,6 +87,7 @@ class SchematicEditor {
 
         canvas.addEventListener("pointerleave", () => {
             this.mouseInside = false;
+            this.hoverAt = null;
             if (!this.wiring && !this.isDragging()) this.hoverSnap = null;
             this.draw();
         });
@@ -605,7 +606,7 @@ class SchematicEditor {
 
     // the part to measure the current of: the part clicked, or the nearer end of the wire clicked
     findCurrentProbeTarget(x, y) {
-        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "NODEIC", "POWER", "NETLABEL", "PORT"].includes(c.type);
+        const ok = (c) => c && c.type !== "GND" && !this.isOverlay(c) && !["VM", "AM", "SCOPE", "CLAMP", "NODEIC", "POWER", "NETLABEL", "PORT"].includes(c.type);
         const direct = this.findComponent(x, y);
         if (ok(direct)) return direct;
         const hit = this.findWireNearest(x, y, 12);
@@ -660,7 +661,7 @@ class SchematicEditor {
         R: "R", C: "C", L: "L", V: "V", I: "I", E: "E", G: "G", D: "D", DZ: "D", LED: "D",
         BJT_NPN: "Q", BJT_PNP: "Q", NMOS: "Q", PMOS: "Q", OPAMP: "U", IC555: "U",
         AND: "U", OR: "U", NOT: "U", NAND: "U", NOR: "U", XOR: "U", XNOR: "U", BUF: "U",
-        SW: "SW", POT: "RV", VM: "VM", AM: "AM", SCOPE: "OSC", LOGAN: "LA", NODEIC: "IC"
+        SW: "SW", POT: "RV", VM: "VM", AM: "AM", SCOPE: "OSC", CLAMP: "CP", LOGAN: "LA", NODEIC: "IC"
     };
 
     nextReference(type) {
@@ -722,6 +723,15 @@ class SchematicEditor {
             if (!component.model && part.value) component.value = part.value;
         }
 
+        if (type === "CLAMP" && component.target === undefined) {              // clamp onto the nearest real part
+            let best = null, bd = 120;
+            for (const k of this.components) {
+                if (["GND", "VM", "AM", "SCOPE", "CLAMP", "LOGAN", "NODEIC", "POWER", "NETLABEL", "PORT", "TEXT", "SHEET", "BUSTAP"].includes(k.type) || this.isOverlay(k)) continue;
+                const d = Math.hypot(k.x - component.x, k.y - component.y);
+                if (d < bd) { bd = d; best = k; }
+            }
+            if (best) component.target = best.id;
+        }
         this.components.push(component);
         if (!this.deferRefresh) { this.refreshWires(); this.draw(); }
         return component;
@@ -1404,7 +1414,8 @@ class SchematicEditor {
             return;
         }
 
-        // hover feedback in select mode
+        // hover feedback in select mode (and the live value tip, which follows the pointer)
+        this.hoverAt = { x: pos.x, y: pos.y, sx: pos.screenX, sy: pos.screenY };
         const pin = this.findTerminal(pos.x, pos.y, 10);
         let target = null;
         if (!pin) {
@@ -1723,6 +1734,7 @@ class SchematicEditor {
 
         ctx.restore();
 
+        if (!this.exporting && this.hoverAt && this.mouseInside && this.tool === "select" && typeof this.onHoverTip === "function") this.drawHoverTip();
         if (!this.exporting) {
             ctx.fillStyle = this.tok("hud");
             ctx.font = "11px system-ui";
@@ -1731,6 +1743,26 @@ class SchematicEditor {
             ctx.fillText(`${Math.round(this.zoom * 100)}%`, this.width - 10, this.height - 8);
         }
         if (typeof this.onDraw === "function") this.onDraw();
+    }
+
+    // a small box beside the pointer with the live value of what it is over (see LiveSim.tipAt); only while a simulation exists
+    drawHoverTip() {
+        const h = this.hoverAt;
+        const text = this.onHoverTip(h.x, h.y);
+        if (!text) return;
+        const ctx = this.ctx, rect = this.canvas.getBoundingClientRect();
+        const sx = (h.sx !== undefined ? h.sx : h.x * this.zoom + this.panX), sy = (h.sy !== undefined ? h.sy : h.y * this.zoom + this.panY);
+        ctx.save();
+        ctx.font = "12px Consolas, monospace";
+        const lines = String(text).split("\n"), w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 14, hgt = lines.length * 16 + 8;
+        let x = sx + 16, y = sy + 16;
+        if (x + w > this.width - 4) x = sx - w - 12;
+        if (y + hgt > this.height - 4) y = sy - hgt - 12;
+        ctx.fillStyle = "rgba(16, 22, 30, 0.93)"; ctx.strokeStyle = "#5b6b80"; ctx.lineWidth = 1;
+        ctx.fillRect(x, y, w, hgt); ctx.strokeRect(x + 0.5, y + 0.5, w, hgt);
+        ctx.fillStyle = "#e8edf5"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+        lines.forEach((l, i) => ctx.fillText(l, x + 7, y + 5 + i * 16));
+        ctx.restore();
     }
 
     drawSheet() {

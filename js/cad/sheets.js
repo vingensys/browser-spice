@@ -160,7 +160,16 @@ class SheetManager {
         this.sheets = [{ id: 1, name: "Main", data: null, history: [], future: [] }];
         this.sheetIndex = 0;
         this.sheetStack = [];
+        this.pauseConditions = [];             // and its "pause when ..." conditions
+        this.probeScope = null;                // so does the probe oscilloscope's setup
         this.pcb = null;                       // the board belongs to the design, so a new design starts without one
+    }
+
+    // the oscilloscope that shows the probes (not a part on the sheet); created the first time it is opened
+    probeScopeComp() {
+        if (!this.probeScope) this.probeScope = { id: "probes", name: "PROBES", type: "SCOPE", scope: ScopeCore.merge() };
+        this.probeScope.scope = ScopeCore.complete(this.probeScope.scope);
+        return this.probeScope;
     }
 
     // the probes the simulation reads: this sheet's, plus those placed on sub-sheets (one per use of the sheet, labelled

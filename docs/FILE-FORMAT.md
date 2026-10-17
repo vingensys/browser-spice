@@ -39,6 +39,8 @@ it migrates older files and checks structure, and `tests/format.test.js` pins it
 | `sheets` | list | Sheet list. The active sheet is `{ id, name, active: true }` (its content is the top-level lists); others carry `state: { components, wires, probes, titleBlock, nextId }` |
 | `pcb` | object, optional | Board: `outline`, `parts`, tracks, vias, pours, rules |
 | `subckts` | list | Subcircuits the design uses, `{ name, ports, text, models }`; they travel with the file |
+| `probeScope` | object, optional | Setup of the probe oscilloscope (Graph > Probe Oscilloscope): the scope settings (`tdiv`, `chan.A..H` / `M` with `vdiv`, `pos`, `coup`, `on` and `src: { probe: <probe id> }`, `trig`, `math`, `cur`, `fft`, `keep`) |
+| `pauseConditions` | list, optional | Debug > Pause Conditions: `{ probe: <probe id>, op: "above" \| "below", value, on }` |
 | `nextId` | number | Next free object id. Must be above every id in the file |
 | `view` | object | `{ zoom, panX, panY }`; not part of the "has unsaved changes" test |
 | `settings` | object | Run settings: `tStop`, `tStep`, `fStart`, `fStop`, sweep, `temp`, `uic`, `engine`, solver options, `method`, `liveSpeed` |
@@ -50,6 +52,8 @@ it migrates older files and checks structure, and `tests/format.test.js` pins it
   Run-time fields (`live`, `scopeTrace`, `glow`, `on`, ...) are never saved.
 - **Wire**: `{ id, start, end, route }`. An end is `{ type: "terminal", component, terminal }` or a free point / junction.
 - **Probe**: `{ id, type: "V" | "I", x, y, label, ... }`.
+- **Oscilloscope** (`SCOPE` part) settings live in the part's `scope` field (same shape as `probeScope` above). A channel's `src` assigns a probe to it; without one, channels A-D read the scope's pins.
+- **Current clamp** (`CLAMP` part): `{ target: <component id>, sens: "0.1" (V per A), ... }`; its `O` pin carries volts = amps x sens, and a scope channel wired to it shows amps.
 
 Ids are unique per kind within one sheet and come from one counter (`nextId`).
 

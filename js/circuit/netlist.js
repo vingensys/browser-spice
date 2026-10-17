@@ -286,6 +286,14 @@ class NetlistExtractor {
                 });
                 continue;
             }
+            if (comp.type === "CLAMP") {
+                // a clamp-on current probe: it reads the current of the part it is clamped on, without touching the circuit
+                const tgt = comp.target === undefined || comp.target === "" ? null : editor.components.find(k => String(k.id) === String(comp.target));
+                if (!tgt) warnings.push(`${comp.name}: the clamp is not attached to a part (choose "Clamped on" in its properties)`);
+                const sens = Units.parseSI(comp.sens);
+                instruments.push({ type: "CLAMP", comp, nets: [pin("O")], wired: [nets.wired.has(`${comp.id}:O`)], targetName: tgt ? tgt.name : null, sens: sens > 0 ? sens : 0.1 });
+                continue;
+            }
             if (comp.type === "AM") {
                 // an ideal ammeter is a 0 V source in series; its branch current is the reading
                 instruments.push({ type: "AM", comp, nets: [pin("+"), pin("-")] });
