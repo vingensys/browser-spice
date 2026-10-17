@@ -356,6 +356,14 @@ window.analysisTests = async function () {
         Dialog.close("t");
     }
 
+    {
+        const keepCache = plotter.cache, keepData = plotter.data;
+        ok("there are results to forget", !!plotter.cache.tran);
+        graph.reset();
+        ok("opening another design clears the graph, every tab's last result and the cursors", Object.keys(plotter.cache).length === 0 && plotter.data === null && plotter.cursors.a === null && !plotter.lastPhasors);
+        plotter.cache = keepCache; plotter.data = keepData; plotter.draw();
+    }
+
     const tfInfo = NetlistExtractor.extract(editor);
     Commands.run("graph.tf");
     ok("Graph > Transfer Function opens its dialog", !!document.querySelector(".dialog .tf #tfOut"));

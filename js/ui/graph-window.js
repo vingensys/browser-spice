@@ -353,6 +353,17 @@ class GraphWindow {
         this.plotter.draw();
     }
 
+    // a different design is now open: forget every result (the results belong to the old circuit)
+    reset() {
+        const p = this.plotter;
+        p.cache = {}; p.data = null; p.lastPhasors = null; p.noiseSource = null; p.timeKind = null;
+        p.clearCursors(); p.resetZoom && p.resetZoom();
+        this.timeKind = "tran";
+        this.root.querySelector("#dcResults").innerHTML = `<div class="no-selection">Run the operating point to see node voltages and currents.</div>`;
+        this.root.querySelector("#plotTitle").textContent = "";
+        if (this.visible) this.show(this.kind); else p.draw();
+    }
+
     hide() {
         this.root.classList.add("hidden");
         this.editor.resize();

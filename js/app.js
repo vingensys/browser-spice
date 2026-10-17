@@ -56,6 +56,7 @@
 
     const afterLoad = () => {
         ScopeWindow.closeAll();
+        graph.reset();
         runner.refreshSweepSources();
         editor.notify();
         Commands.refresh();
