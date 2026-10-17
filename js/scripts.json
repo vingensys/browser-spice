@@ -44,6 +44,7 @@
  "js/ui/eagle-import.js",
  "js/pcb/pcb.js",
  "js/pcb/length.js",
+ "js/pcb/view3d.js",
  "js/ui/pcb-view.js",
  "js/ui/catalog.js",
  "js/cad/parts.js",

@@ -56,6 +56,7 @@ class PcbView {
                 <button class="tb-btn txt" data-a="pourboard" title="Pour the whole board on the active layer with the chosen net">Pour board</button>
                 <button class="tb-btn txt" data-a="footprints" title="Define your own footprints, or import a KiCad .kicad_mod">Footprints…</button>
                 <span class="sep"></span>
+                <button class="tb-btn txt" data-a="view3d" title="A 3D picture of the board: copper, silkscreen and the parts as boxes (drag to turn it, wheel to zoom)">3D</button>
                 <button class="tb-btn txt" data-a="lengths" title="Track lengths, length-match groups and differential pairs, with serpentine tuning">Lengths…</button>
                 <button class="tb-btn txt" data-a="drc" title="Check clearances, shorts, board edge, track width and unrouted nets">Check rules</button>
                 <button class="tb-btn txt" data-a="export" title="Download Gerber (F.Cu, B.Cu, edge) and Excellon drill files as a ZIP">Export Gerber…</button>
@@ -67,6 +68,19 @@ class PcbView {
                 <div class="pcb-side"><div id="pcbIssues" class="pcb-issues"></div></div>
             </div>
             <div class="pcb-status" id="pcbStatus"></div>
+            <div id="pcb3d" class="pcb-fped hidden">
+                <div class="pcb-fped-box" style="width:min(92vw,1000px)">
+                    <div class="pcb-fped-head"><b>3D view</b>
+                        <button class="tb-btn txt" data-3d="top">Top</button><button class="tb-btn txt" data-3d="iso">Angle</button><button class="tb-btn txt" data-3d="bottom">Bottom</button>
+                        <label><input type="checkbox" data-3d-show="parts" checked style="width:auto"> parts</label>
+                        <label><input type="checkbox" data-3d-show="copper" checked style="width:auto"> copper</label>
+                        <label><input type="checkbox" data-3d-show="silk" checked style="width:auto"> silkscreen</label>
+                        <button class="tb-btn txt" data-3d="png">Save PNG</button>
+                        <span class="grow"></span><button class="tb-btn" data-3d="close" title="Close">✕</button></div>
+                    <canvas id="pcb3dCanvas" width="960" height="600" style="width:100%;display:block;touch-action:none"></canvas>
+                    <div class="pcb-note" style="padding:4px 8px">Drag to turn, wheel to zoom, double-click to reset. Parts are boxes from the footprint outline and a typical package height, not the real shapes.</div>
+                </div>
+            </div>
             <div id="pcbLen" class="pcb-fped hidden">
                 <div class="pcb-fped-box" style="width:640px;max-height:86vh;display:flex;flex-direction:column">
                     <div class="pcb-fped-head"><b>Track lengths</b><span class="grow"></span><button class="tb-btn" data-ln="close" title="Close">✕</button></div>
@@ -241,9 +255,38 @@ class PcbView {
             case "footprints": this.openFootprints(); break;
             case "backannotate": this.openBackAnnotate(); break;
             case "lengths": this.openLengths(); break;
+            case "view3d": this.open3d(); break;
             case "drc": this.runDrc(); break;
             case "export": this.exportGerber(); break;
         }
+    }
+
+    // ---------------------------------------------------------------- 3D
+    open3d() {
+        const ed = this.root.querySelector("#pcb3d"), cv = ed.querySelector("#pcb3dCanvas");
+        ed.classList.remove("hidden");
+        if (!this.v3) {
+            const v = this.v3 = new Pcb3D(cv);
+            ed.querySelectorAll("[data-3d]").forEach(b => b.onclick = () => {
+                const a = b.dataset["3d"];
+                if (a === "close") { ed.classList.add("hidden"); this.cv.focus(); return; }
+                if (a === "png") { cv.toBlob(bl => { const u = URL.createObjectURL(bl), l = document.createElement("a"); l.href = u; l.download = "board-3d.png"; l.click(); setTimeout(() => URL.revokeObjectURL(u), 2000); }); return; }
+                v.preset(a); v.draw();
+            });
+            ed.querySelectorAll("[data-3d-show]").forEach(c => c.onchange = () => { v.show[c.dataset["3dShow"]] = c.checked; v.draw(); });
+            let drag = null;
+            cv.onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY }; cv.setPointerCapture(e.pointerId); };
+            cv.onpointermove = (e) => {
+                if (!drag) return;
+                v.yaw += (e.clientX - drag.x) * 0.01; v.pitch = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, v.pitch + (e.clientY - drag.y) * 0.01));
+                drag = { x: e.clientX, y: e.clientY }; v.draw();
+            };
+            cv.onpointerup = () => { drag = null; };
+            cv.onwheel = (e) => { e.preventDefault(); v.zoom = Math.max(0.3, Math.min(8, v.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15))); v.draw(); };
+            cv.ondblclick = () => { v.preset("iso"); v.draw(); };
+        }
+        this.v3.setScene(Pcb3D.scene(this.pcb));
+        this.v3.draw();
     }
 
     // ---------------------------------------------------------------- lengths, match groups, pairs

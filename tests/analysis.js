@@ -1365,6 +1365,20 @@ window.analysisTests = async function () {
             ln.querySelector('[data-ln="close"]').click();
             editor.pcb = keepPcb; pcbView.sel = keepSel; pcbView.rev++; pcbView.draw();
         }
+        {
+            pcbView.act("view3d");
+            const d3 = pcbView.root.querySelector("#pcb3d"), c3 = pcbView.root.querySelector("#pcb3dCanvas"), px = (x, y) => Array.from(c3.getContext("2d").getImageData(x, y, 1, 1).data);
+            ok("3D opens and draws the board (green slab) on a dark background", !d3.classList.contains("hidden") && px(2, 2)[0] < 40 && (() => { for (let x = 100; x < 860; x += 20) { const q = px(x, 300); if (q[1] > q[0] + 20 && q[1] > q[2] + 10) return true; } return false; })(), px(480, 300));
+            const before = c3.toDataURL();
+            pcbView.root.querySelector('[data-3d="top"]').click();
+            ok("the Top preset redraws", c3.toDataURL() !== before);
+            const partsOn = c3.toDataURL(); const cb = pcbView.root.querySelector('[data-3d-show="parts"]'); cb.checked = false; cb.dispatchEvent(new Event("change"));
+            ok("the Parts switch changes the picture", c3.toDataURL() !== partsOn); cb.checked = true; cb.dispatchEvent(new Event("change"));
+            c3.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, cancelable: true }));
+            ok("the wheel zooms", pcbView.v3.zoom > 1);
+            pcbView.root.querySelector('[data-3d="close"]').click();
+            ok("3D closes", d3.classList.contains("hidden"));
+        }
         pcbView.root.querySelector("#pcbZoneNet").value = "0";
         pcbView.layer = "B"; pcbView.act("pourboard");
         ok("Pour board adds a pour on the active layer and net", editor.pcb.zones.length === 1 && editor.pcb.zones[0].layer === "B" && editor.pcb.zones[0].net === "0", editor.pcb.zones);

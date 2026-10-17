@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- PCB: 3D view (copper, pads, vias, silkscreen and the parts as boxes of typical package height; drag to turn, wheel to zoom, Top / Angle / Bottom, Save PNG). Drawn on a 2D canvas with a perspective projection, no WebGL.
 - PCB: Lengths… shows the copper length of every net, and lets you define length-match groups and differential pairs (target, tolerance); Tune to match adds square serpentine bumps in the middle of the shorter nets' longest straight run, on the side that creates no rule violation. The rule check lists groups outside tolerance.
 - PCB: Back-annotate… numbers the parts by their place on the board (rows or columns) and renames the schematic's references to match, and writes each part's footprint to its Footprint field. Parts in sub-sheets are skipped.
 - PCB: footprint libraries. Footprints… has a browser-wide library you fill by picking a KiCad .pretty folder (or any .kicad_mod files); search it, load a footprint, and Use on selected part copies it into the design. KiCad silkscreen arcs and polygons are now imported, and clashing names in a library import are made unique.
