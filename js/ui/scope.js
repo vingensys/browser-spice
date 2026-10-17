@@ -39,7 +39,9 @@ class ScopeWindow {
         comp.scope = ScopeCore.complete(comp.scope);          // (a scope already running keeps the settings object its buffer uses)
         this.comp = comp;
         this.idle = new ScopeCore(comp.scope);          // used while no simulation has been started
-        this.W = 480; this.H = 384;                     // 10 x 8 divisions of 48 px
+        this.W = 480; this.H = 384;                     // the screen's size in pixels (10 x 8 divisions); follows the window
+        this.sel = "A";                                  // the channel the mouse wheel / shift-drag acts on
+        this.win = window;                              // the browser window the scope lives in (a popup after Pop out)
         this.build();
         this.live.applyScopeResolution && this.live.applyScopeResolution();
         this.loop();
@@ -67,10 +69,10 @@ class ScopeWindow {
                 ${c === "M" ? "" : `<select data-k="src" class="scope-src" title="What feeds this channel: the scope pin, or a probe on the sheet"></select>`}
             </div>`;
         root.innerHTML = `
-            <div class="scope-title"><span>${this.key === "probes" ? "PROBE SCOPE" : "OSCILLOSCOPE"} <b>${this.key === "probes" ? "" : esc(this.comp.name)}</b></span><span class="scope-status" data-role="status">STOP</span><button class="scope-close" title="Close">✕</button></div>
+            <div class="scope-title"><span>${this.key === "probes" ? "PROBE SCOPE" : "OSCILLOSCOPE"} <b>${this.key === "probes" ? "" : esc(this.comp.name)}</b></span><span class="scope-status" data-role="status">STOP</span><button class="scope-pop" data-act="pop" title="Pop out into its own window (and back)">⧉</button><button class="scope-close" title="Close">✕</button></div>
             <div class="scope-main">
                 <div class="scope-left">
-                    <canvas class="scope-screen" width="${this.W}" height="${this.H}"></canvas>
+                    <div class="scope-cv"><canvas class="scope-screen" width="${this.W}" height="${this.H}"></canvas></div>
                     <input type="range" class="scope-scrub" data-role="scrub" min="0" max="1000" step="1" value="1000" title="Scroll back through the recorded history (stopped or paused)">
                     <div class="scope-hint" data-role="hint"></div>
                 </div>
@@ -112,7 +114,14 @@ class ScopeWindow {
                         <label title="Keep the level in the middle of the signal"><input type="checkbox" data-t="autoLevel"> Auto level</label>
                         <label title="Pause the whole simulation at the first trigger after this is ticked, so you can inspect the moment"><input type="checkbox" data-t="pauseOnTrigger"> Pause sim on trigger</label>
                     </fieldset>
-                    <fieldset><legend>Channels</legend>${ScopeCore.CHANNELS.map(chan).join("")}
+                    <fieldset><legend>Channels</legend>
+                        <div class="scope-all" title="Put every channel of a kind on the same scale, to compare them">
+                            <span class="u">All</span>
+                            <select data-all="V"><option value="">volts/div…</option>${ScopeWindow.vdivOptions("V")}</select>
+                            <select data-all="A"><option value="">amps/div…</option>${ScopeWindow.vdivOptions("A")}</select>
+                            <label title="Changing one channel's scale changes every channel of the same kind"><input type="checkbox" data-link> link</label>
+                        </div>
+                        ${ScopeCore.CHANNELS.map(chan).join("")}
                         <button type="button" class="scope-more" data-act="more" title="Show or hide the channels that are off">Show all channels</button></fieldset>
                     <fieldset><legend>Math</legend>
                         <div class="scope-ch" data-ch="M" style="--ch:${ScopeCore.COLORS.M}">
@@ -128,7 +137,8 @@ class ScopeWindow {
                     </fieldset>
                     <table class="scope-meas" data-role="meas"></table>
                 </div>
-            </div>`;
+            </div>
+            <div class="scope-grip" title="Drag to resize the scope"></div>`;
         document.body.appendChild(root);
         this.root = root;
         this.canvas = root.querySelector("canvas");
@@ -141,13 +151,27 @@ class ScopeWindow {
         // drag by the title bar
         const bar = root.querySelector(".scope-title");
         bar.addEventListener("pointerdown", (e) => {
-            if (e.target.closest("button")) return;
+            if (e.target.closest("button") || this.popped) return;
             const r = root.getBoundingClientRect(), dx = e.clientX - r.left, dy = e.clientY - r.top;
             bar.setPointerCapture(e.pointerId);
             const move = (ev) => { root.style.left = `${Math.max(0, ev.clientX - dx)}px`; root.style.top = `${Math.max(0, ev.clientY - dy)}px`; };
             const up = () => { bar.removeEventListener("pointermove", move); bar.removeEventListener("pointerup", up); };
             bar.addEventListener("pointermove", move); bar.addEventListener("pointerup", up);
         });
+        // initial size (remembered with the design), and a grip in the bottom-right corner to resize
+        const win = this.s.win && this.s.win.w ? this.s.win : { w: 860, h: 560 };
+        root.style.width = `${win.w}px`; root.style.height = `${win.h}px`;
+        const grip = root.querySelector(".scope-grip");
+        grip.addEventListener("pointerdown", (e) => {
+            e.preventDefault();
+            const r0 = root.getBoundingClientRect(), x0 = e.clientX, y0 = e.clientY;
+            try { grip.setPointerCapture(e.pointerId); } catch (err) { /* synthetic pointer */ }
+            const move = (ev) => this.resizeTo(r0.width + ev.clientX - x0, r0.height + ev.clientY - y0);
+            const up = () => { grip.removeEventListener("pointermove", move); grip.removeEventListener("pointerup", up); };
+            grip.addEventListener("pointermove", move); grip.addEventListener("pointerup", up);
+        });
+        // click a channel row to make it the one the wheel and shift-drag act on
+        root.addEventListener("pointerdown", (e) => { const row = e.target.closest && e.target.closest(".scope-ch"); if (row && row.dataset.ch) { this.sel = row.dataset.ch; this.markSelected(); } });
         root.addEventListener("pointerdown", () => this.toFront());
         root.querySelector(".scope-close").onclick = () => this.close();
         this.refs = [];
@@ -164,13 +188,14 @@ class ScopeWindow {
 
     syncControls() {
         const s = this.s, root = this.root, core = this.core;
-        const set = (el, v) => { if (el && document.activeElement !== el) { if (el.type === "checkbox") el.checked = !!v; else el.value = String(v); } };
+        const doc = root.ownerDocument;
+        const set = (el, v) => { if (el && doc.activeElement !== el) { if (el.type === "checkbox") el.checked = !!v; else el.value = String(v); } };
         set(root.querySelector('[data-k="tdiv"]'), s.tdiv);
         set(root.querySelector('[data-k="hpos"]'), s.hpos);
         set(root.querySelector('[data-k="keep"]'), s.keep);
         for (const k of ["src", "slope", "mode", "autoLevel", "pauseOnTrigger"]) set(root.querySelector(`[data-t="${k}"]`), s.trig[k]);
         const lvl = root.querySelector('[data-t="level"]');
-        if (document.activeElement !== lvl) lvl.value = String(Number(s.trig.level.toPrecision(4)));
+        if (doc.activeElement !== lvl) lvl.value = String(Number(s.trig.level.toPrecision(4)));
         lvl.disabled = !!s.trig.autoLevel;
         const probes = this.editor.allProbes ? this.editor.allProbes() : this.editor.probes;
         const srcSig = probes.map(p => `${p.id}:${p.label}`).join("|");
@@ -187,10 +212,12 @@ class ScopeWindow {
                 src.innerHTML = `<option value="">${"ABCD".includes(c) ? "scope pin" : "(none)"}</option>` + probes.map(p => `<option value="${p.id}">${PropertiesPanel.esc(p.label)}</option>`).join("");
                 src.dataset.sig = srcSig;
             }
-            if (src && document.activeElement !== src) src.value = ch.src && ch.src.probe !== undefined ? String(ch.src.probe) : "";
+            if (src && doc.activeElement !== src) src.value = ch.src && ch.src.probe !== undefined ? String(ch.src.probe) : "";
             // the channels that are off are tucked away until asked for
             if (c !== "M") row.style.display = this.showAll || ch.on || "ABCD".includes(c) || (ch.src && ch.src.probe !== undefined) ? "" : "none";
         }
+        this.markSelected();
+        set(root.querySelector("[data-link]"), s.link);
         root.querySelector('[data-act="more"]').textContent = this.showAll ? "Hide unused channels" : "Show all channels";
         const m = s.math;
         set(root.querySelector('[data-m="op"]'), m.op); set(root.querySelector('[data-m="a"]'), m.a); set(root.querySelector('[data-m="b"]'), m.b);
@@ -215,8 +242,15 @@ class ScopeWindow {
 
     onControl(e) {
         const t = e.target;
-        if (!t.matches || !t.matches("[data-k],[data-t],[data-c],[data-f],[data-m]")) return;
+        if (!t.matches || !t.matches("[data-k],[data-t],[data-c],[data-f],[data-m],[data-all],[data-link]")) return;
         const s = this.s;
+        if (t.dataset.all !== undefined) {           // every voltage (or current) channel to one scale, for comparing them
+            if (t.value !== "") this.setAllDiv(t.dataset.all, Number(t.value));
+            t.value = "";
+            this.syncControls();
+            return;
+        }
+        if (t.dataset.link !== undefined) { s.link = t.checked; if (s.link) this.setAllDiv(this.core.unitOf(this.sel), s.chan[this.sel].vdiv); this.syncControls(); return; }
         if (t.dataset.m) { s.math[t.dataset.m] = t.value; this.core.recomputeMath(); this.syncControls(); return; }
         if (t.dataset.c) { s.cur.ch = t.value; this.syncControls(); return; }
         if (t.dataset.f) { s.fft[t.dataset.f] = t.value; this.syncControls(); return; }
@@ -237,6 +271,7 @@ class ScopeWindow {
             } else if (row) {
                 const ch = s.chan[row.dataset.ch];
                 ch[k] = k === "on" ? t.checked : (k === "coup" ? t.value : num(t.value));
+                if (k === "vdiv" && s.link) this.setAllDiv(this.core.unitOf(row.dataset.ch), ch.vdiv);       // linked: the others follow
             } else if (k === "keep") s.keep = num(t.value);
             else if (k === "tdiv") {
                 s.tdiv = num(t.value);
@@ -256,6 +291,7 @@ class ScopeWindow {
             if (this.live.state === "running") this.live.pause();
             else if (this.live.state === "paused") this.live.start();
         } else if (name === "more") this.showAll = !this.showAll;
+        else if (name === "pop") this.popped ? this.dock() : this.popOut();
         else if (name === "single") core.arm();
         else if (name === "xy") { s.xy = !s.xy; if (s.xy) s.fft.on = false; }
         else if (name === "cur") s.cur.on = !s.cur.on;
@@ -273,6 +309,107 @@ class ScopeWindow {
             if (this.live.applyScopeResolution) this.live.applyScopeResolution();
         }
         this.syncControls();
+    }
+
+    // ---- size, scale and window helpers ----------------------------------------------------------------------------
+
+    // every channel that carries `unit` (V or A) gets the same units per division
+    setAllDiv(unit, value) {
+        const core = this.core;
+        for (const c of ScopeCore.ALL) if (core.unitOf(c) === unit) this.s.chan[c].vdiv = value;
+    }
+
+    // step a channel's units per division along the 1-2-5 list (dir > 0: bigger), and every channel of its kind when linked
+    stepDiv(c, dir) {
+        const list = ScopeCore.VDIV, cur = this.s.chan[c].vdiv;
+        let i = list.findIndex(v => v >= cur - 1e-15);
+        if (i < 0) i = list.length - 1;
+        const j = Math.min(list.length - 1, Math.max(0, i + dir));
+        this.s.chan[c].vdiv = list[j];
+        if (this.s.link) this.setAllDiv(this.core.unitOf(c), list[j]);
+    }
+
+    markSelected() {
+        for (const row of this.root.querySelectorAll(".scope-ch")) row.classList.toggle("sel", row.dataset.ch === this.sel);
+    }
+
+    // resize the window (docked); the screen follows, the controls scroll
+    resizeTo(w, h) {
+        const root = this.root, maxW = (this.win.innerWidth || 1600) - 8, maxH = (this.win.innerHeight || 1000) - 8;
+        const W = Math.round(Math.min(maxW, Math.max(720, w))), H = Math.round(Math.min(maxH, Math.max(440, h)));
+        root.style.width = `${W}px`; root.style.height = `${H}px`;
+        this.s.win = { w: W, h: H };
+    }
+
+    // make the canvas match the room it has (called every frame; cheap when nothing changed)
+    fitCanvas() {
+        const wrap = this.canvas.parentElement, r = wrap.getBoundingClientRect();
+        const w = Math.max(160, Math.floor(r.width)), h = Math.max(120, Math.floor(r.height));
+        const dpr = this.win.devicePixelRatio || 1;
+        if (this.canvas.width !== Math.round(w * dpr) || this.canvas.height !== Math.round(h * dpr) || this.W !== w || this.H !== h) {
+            this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
+            this.canvas.style.width = `${w}px`; this.canvas.style.height = `${h}px`;
+            this.W = w; this.H = h;
+        }
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // which channel's trace is nearest the point (x, y) on the screen, within 14 px; null when none is
+    pickChannel(x, y) {
+        const core = this.core, cap = core.last, s = this.s;
+        if (!cap || s.xy || s.fft.on) return null;
+        const H = this.H, dy = H / 8, col = Math.min(this.W - 1, Math.max(0, Math.round(x)));
+        let best = null, bd = 14;
+        for (const c of ScopeCore.ALL) {
+            if (!s.chan[c].on) continue;
+            const ys = core.samples(c, this.W, cap), v = ys[col];
+            if (!Number.isFinite(v)) continue;
+            const py = H / 2 - (v / s.chan[c].vdiv + s.chan[c].pos) * dy, d = Math.abs(py - y);
+            if (d < bd) { bd = d; best = c; }
+        }
+        return best;
+    }
+
+    // Pop out: the whole scope moves into its own browser window (same page state, so it keeps running), and back again
+    popOut() {
+        if (this.popped) return;
+        const w = window.open("", `scope-${this.key}`, "popup,width=1120,height=720");
+        if (!w) { if (this.live.runner) this.live.runner.toast("The browser blocked the pop-up window. Allow pop-ups for this page and try again.", "warn"); return; }
+        const d = w.document;
+        d.title = `Oscilloscope ${this.key === "probes" ? "(probes)" : this.comp.name} - Browser SPICE`;
+        for (const el of document.querySelectorAll('link[rel="stylesheet"], style')) d.head.appendChild(el.cloneNode(true));
+        d.body.style.cssText = "margin:0;background:#20252b;overflow:hidden";
+        this.docked = { left: this.root.style.left, top: this.root.style.top, width: this.root.style.width, height: this.root.style.height };
+        d.body.appendChild(this.root);
+        this.root.classList.add("popped");
+        this.root.style.cssText = "position:fixed;left:0;top:0;right:0;bottom:0;width:auto;height:auto;border:none;border-radius:0;box-shadow:none";
+        this.popup = w;
+        this.popped = true;
+        cancelAnimationFrame(this.raf);
+        this.win = w;
+        this.onPopupClose = () => { if (this.popped && !this.stopped) this.dock(); };
+        w.addEventListener("pagehide", this.onPopupClose);
+        this.root.querySelector('[data-act="pop"]').textContent = "⇲";
+        this.root.querySelector('[data-act="pop"]').title = "Dock the scope back into the app";
+        this.loop();
+    }
+
+    dock() {
+        if (!this.popped) return;
+        const w = this.popup;
+        this.popped = false;
+        cancelAnimationFrame(this.raf);
+        try { w.removeEventListener("pagehide", this.onPopupClose); } catch (e) { /* the popup is already gone */ }
+        document.body.appendChild(this.root);
+        this.root.classList.remove("popped");
+        this.root.style.cssText = "";
+        Object.assign(this.root.style, this.docked || {});
+        this.win = window;
+        this.popup = null;
+        this.root.querySelector('[data-act="pop"]').textContent = "⧉";
+        this.root.querySelector('[data-act="pop"]').title = "Pop out into its own window (and back)";
+        try { w.close(); } catch (e) { /* ignore */ }
+        this.loop();
     }
 
     static download(name, blob) {
@@ -302,7 +439,19 @@ class ScopeWindow {
                 return;
             }
             const core = this.core;
+            const r0 = cv.getBoundingClientRect(), px = e.clientX - r0.left, py = e.clientY - r0.top;
+            const hit = this.pickChannel(px, py);
+            if (hit) { this.sel = hit; this.markSelected(); }
             if (!core.last) return;
+            if (e.shiftKey) {                    // shift-drag moves the selected channel up and down
+                const ch = s.chan[this.sel];
+                let lastY = e.clientY;
+                try { cv.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer */ }
+                const moveV = (ev) => { ch.pos = Math.max(-4, Math.min(4, ch.pos + (lastY - ev.clientY) / (this.H / 8))); lastY = ev.clientY; };
+                const upV = () => { cv.removeEventListener("pointermove", moveV); cv.removeEventListener("pointerup", upV); this.syncControls(); };
+                cv.addEventListener("pointermove", moveV); cv.addEventListener("pointerup", upV);
+                return;
+            }
             s.run = false;                       // grab the picture
             let lastX = e.clientX;
             try { cv.setPointerCapture(e.pointerId); } catch (err) { /* a synthetic pointer */ }
@@ -316,6 +465,11 @@ class ScopeWindow {
         });
         cv.addEventListener("wheel", (e) => {
             e.preventDefault();
+            if (e.shiftKey) {                         // shift + wheel: the selected channel's volts (amps) per division
+                this.stepDiv(this.sel, e.deltaY > 0 || (e.deltaY === 0 && e.deltaX > 0) ? 1 : -1);
+                this.syncControls();
+                return;
+            }
             const list = ScopeCore.TDIV, i = list.findIndex(v => v >= this.s.tdiv - 1e-15);
             const j = Math.min(list.length - 1, Math.max(0, (i < 0 ? list.length - 1 : i) + (e.deltaY > 0 ? 1 : -1)));
             this.s.tdiv = list[j];
@@ -330,12 +484,13 @@ class ScopeWindow {
             core.seek(r.min + (Number(scrub.value) / 1000) * (r.max - r.min));
             this.syncControls();
         });
-        cv.title = "Drag to scroll back through the history, wheel to change time/div. With Cursors on: click or drag to place the nearer cursor.";
+        cv.title = "Drag: scroll back through the history. Wheel: time/div. Shift+wheel: volts (amps) per div of the selected channel (click a trace or a channel row to select it). Shift+drag: move the selected channel. With Cursors on: click or drag to place the nearer cursor.";
     }
 
     close() {
         this.stopped = true;
         cancelAnimationFrame(this.raf);
+        if (this.popup) { try { this.popup.removeEventListener("pagehide", this.onPopupClose); this.popup.close(); } catch (e) { /* ignore */ } }
         this.root.remove();
         ScopeWindow.windows.delete(this.key);
         if (this.live.applyScopeResolution) this.live.applyScopeResolution();
@@ -347,9 +502,9 @@ class ScopeWindow {
         const frame = (now) => {
             if (this.stopped) return;
             try { this.render(now); } catch (e) { console.error(e); }
-            this.raf = requestAnimationFrame(frame);
+            this.raf = this.win.requestAnimationFrame(frame);
         };
-        this.raf = requestAnimationFrame(frame);
+        this.raf = this.win.requestAnimationFrame(frame);
     }
 
     render(now = performance.now()) {
@@ -357,6 +512,7 @@ class ScopeWindow {
         const st = this.editor.sheetState(this.sheetId), comp = this.key === "probes" ? this.editor.probeScopeComp() : (st && st.components.find(c => c.id === this.compId));
         if (!comp) { this.close(); return; }
         if (comp !== this.comp) { this.comp = comp; comp.scope = ScopeCore.merge(comp.scope); this.idle = new ScopeCore(comp.scope); this.syncControls(); }
+        this.fitCanvas();
         const core = this.core;
         const simOn = !!(this.live.scopes && this.live.scopes.has(this.key));
         core.frozen = simOn && this.live.state === "paused";               // a paused simulation holds the picture so it can be inspected
@@ -387,7 +543,7 @@ class ScopeWindow {
         const sc = this.root.querySelector('[data-role="scrub"]'), r = core.range();
         const held = !this.s.run || core.frozen;
         sc.disabled = !r;
-        if (r && document.activeElement !== sc) sc.value = String(r.max > r.min ? Math.round(1000 * (r.mid - r.min) / (r.max - r.min)) : 1000);
+        if (r && sc.ownerDocument.activeElement !== sc) sc.value = String(r.max > r.min ? Math.round(1000 * (r.mid - r.min) / (r.max - r.min)) : 1000);
         const hint = this.root.querySelector('[data-role="hint"]');
         hint.textContent = !r ? "" : held && r.max > r.min ? `Recorded ${Units.formatSI(r.min, "s")} to ${Units.formatSI(r.max, "s")}. Drag the screen or this bar to scroll; the wheel changes time/div.` : "Pause the simulation or Stop the display to scroll back; drag the screen to grab it.";
     }
@@ -429,7 +585,7 @@ class ScopeWindow {
             ctx.beginPath(); ctx.rect(0, 0, W, H); ctx.clip();
             for (const c of active) {
                 const ys = core.samples(c, W, cap);
-                ctx.strokeStyle = ScopeCore.COLORS[c]; ctx.lineWidth = 1.8; ctx.lineJoin = "round";
+                ctx.strokeStyle = ScopeCore.COLORS[c]; ctx.lineWidth = c === this.sel && active.length > 1 ? 2.8 : 1.8; ctx.lineJoin = "round";
                 ctx.beginPath();
                 let started = false;
                 ys.forEach((v, i) => {

@@ -2,6 +2,10 @@
 
 ## 1.0 (current)
 
+Scope usability
+- The scope window can be resized by its corner grip (the screen follows; the size is saved with the design) and popped out into its own browser window.
+- Shift + wheel zooms the selected channel's amplitude, shift-drag moves it; click a trace or a channel row to select. All volts/div and all amps/div controls, and a link switch, put channels of a kind on a common scale.
+
 Logic export
 - Counters (7493, 7490, 74160-74163, 74193, 74393, 4017, 4040), shift registers (74164, 74165, 74194, 74595), registers and latches (74175, 74273, 74373, 74374) and the 74244 buffer now export to SPICE, checked against the built-in chips in ngspice. The counter and shift-register examples are compared with ngspice in the test suite (they were skipped before).
 

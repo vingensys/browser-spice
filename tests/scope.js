@@ -310,6 +310,90 @@ window.scopeTests = async function () {
     ok("the probe scope's settings are saved with the design", savedDoc.probeScope && savedDoc.probeScope.chan.A.src && savedDoc.probeScope.chan.A.src.probe !== undefined, savedDoc.probeScope);
     live.stop(); ScopeWindow.closeAll(); graph.hide();
 
+    // ======================================================== resize, wheel zoom of amplitude, all-channels scale, pop out
+    clear(); loadExampleById(editor, "scope-clamp");
+    const zsc = editor.components.find(c => c.type === "SCOPE");
+    document.getElementById("liveSpeed").value = "0.05";
+    live.start();
+    const zw = ScopeWindow.open(editor, live, zsc);
+    stepTo(0.0155); zw.render();
+    const w0 = zw.root.getBoundingClientRect(), cw0 = zw.W, ch0 = zw.H;
+    const grip = zw.root.querySelector(".scope-grip");
+    const gr = grip.getBoundingClientRect();
+    grip.dispatchEvent(new PointerEvent("pointerdown", { clientX: gr.left + 5, clientY: gr.top + 5, pointerId: 1, bubbles: true }));
+    grip.dispatchEvent(new PointerEvent("pointermove", { clientX: gr.left + 5 + 200, clientY: gr.top + 5 + 120, pointerId: 1, bubbles: true }));
+    grip.dispatchEvent(new PointerEvent("pointerup", { clientX: gr.left + 205, clientY: gr.top + 125, pointerId: 1, bubbles: true }));
+    zw.render();
+    const w1 = zw.root.getBoundingClientRect();
+    ok("dragging the corner grip makes the scope window bigger", Math.abs(w1.width - (w0.width + 200)) < 2 && Math.abs(w1.height - (w0.height + 120)) < 2, [w0.width, w1.width, w0.height, w1.height]);
+    ok("the screen grows with it (and keeps drawing)", zw.W > cw0 + 150 && zw.H > ch0 + 80 && zw.canvas.width >= zw.W, [cw0, zw.W, ch0, zw.H]);
+    ok("the size is kept in the scope's settings", zsc.scope.win && zsc.scope.win.w === Math.round(w1.width), zsc.scope.win);
+    zw.resizeTo(100, 100);
+    ok("it cannot be made smaller than a usable scope", zw.root.getBoundingClientRect().width >= 720 && zw.root.getBoundingClientRect().height >= 440);
+    zw.resizeTo(w1.width, w1.height); zw.render();
+
+    // click a trace to select its channel; shift + wheel zooms that channel's amplitude
+    zw.core.capture(); zw.render();
+    const zcap = zw.core.last, cv = zw.canvas, zr = cv.getBoundingClientRect();
+    const colX = Math.round(zw.W * 0.62);
+    const yB = zw.H / 2 - (zw.core.samples("B", zw.W, zcap)[colX] / zsc.scope.chan.B.vdiv + zsc.scope.chan.B.pos) * (zw.H / 8);
+    cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: zr.left + colX, clientY: zr.top + yB, pointerId: 1, bubbles: true }));
+    cv.dispatchEvent(new PointerEvent("pointerup", { clientX: zr.left + colX, clientY: zr.top + yB, pointerId: 1, bubbles: true }));
+    ok("clicking a trace selects its channel", zw.sel === "B" && zw.root.querySelector('.scope-ch.sel[data-ch="B"]'), zw.sel);
+    zsc.scope.run = true; zsc.scope.link = false;
+    const vB = zsc.scope.chan.B.vdiv, vA = zsc.scope.chan.A.vdiv;
+    cv.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, shiftKey: true, bubbles: true, cancelable: true }));
+    ok("shift + wheel up zooms the selected channel (smaller units per division); the others stay", zsc.scope.chan.B.vdiv < vB && zsc.scope.chan.A.vdiv === vA, [vB, zsc.scope.chan.B.vdiv, vA]);
+    cv.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, shiftKey: true, bubbles: true, cancelable: true })); cv.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, shiftKey: true, bubbles: true, cancelable: true }));
+    ok("shift + wheel down zooms out", zsc.scope.chan.B.vdiv > vB);
+    const tdv = zsc.scope.tdiv;
+    cv.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true, cancelable: true }));
+    ok("the plain wheel still changes time/div", zsc.scope.tdiv < tdv);
+    const posB = zsc.scope.chan.B.pos;
+    cv.dispatchEvent(new PointerEvent("pointerdown", { clientX: zr.left + 50, clientY: zr.top + 200, pointerId: 1, shiftKey: true, bubbles: true }));
+    cv.dispatchEvent(new PointerEvent("pointermove", { clientX: zr.left + 50, clientY: zr.top + 200 - zw.H / 8, pointerId: 1, shiftKey: true, bubbles: true }));
+    cv.dispatchEvent(new PointerEvent("pointerup", { clientX: zr.left + 50, clientY: zr.top + 200 - zw.H / 8, pointerId: 1, shiftKey: true, bubbles: true }));
+    ok("shift-drag moves the selected channel up by a division", zsc.scope.chan[zw.sel].pos !== undefined && (zw.sel === "B" ? Math.abs(zsc.scope.chan.B.pos - (posB + 1)) < 0.05 : true), [zw.sel, posB, zsc.scope.chan.B.pos]);
+
+    // one scale for every channel of a kind
+    const allV = zw.root.querySelector('[data-all="V"]'), allA = zw.root.querySelector('[data-all="A"]');
+    allA.value = "0.005"; allA.dispatchEvent(new Event("change", { bubbles: true }));
+    ok("'All amps/div' puts every current channel on one scale (the clamp channel B)", zsc.scope.chan.B.vdiv === 0.005 && zsc.scope.chan.A.vdiv === vA, [zsc.scope.chan.B.vdiv, zsc.scope.chan.A.vdiv]);
+    allV.value = "2"; allV.dispatchEvent(new Event("change", { bubbles: true }));
+    zsc.scope.chan.C.vdiv = 10; zsc.scope.chan.D.vdiv = 0.1;
+    allV.value = "5"; allV.dispatchEvent(new Event("change", { bubbles: true }));
+    ok("'All volts/div' puts every voltage channel on one scale and leaves the amps alone", ["A", "C", "D"].every(c => zsc.scope.chan[c].vdiv === 5) && zsc.scope.chan.B.vdiv === 0.005 && allV.value === "", ["A", "C", "D"].map(c => zsc.scope.chan[c].vdiv));
+    const link = zw.root.querySelector("[data-link]"); link.checked = true; link.dispatchEvent(new Event("change", { bubbles: true }));
+    const rowA = zw.root.querySelector('.scope-ch[data-ch="A"] [data-k="vdiv"]'); rowA.value = "0.5"; rowA.dispatchEvent(new Event("change", { bubbles: true }));
+    ok("with 'link' on, changing one voltage channel's scale changes the other voltage channels, not the amps", ["C", "D"].every(c => zsc.scope.chan[c].vdiv === 0.5) && zsc.scope.chan.B.vdiv === 0.005 && zsc.scope.link === true, ["C", "D"].map(c => zsc.scope.chan[c].vdiv));
+    zw.sel = "A"; cv.dispatchEvent(new WheelEvent("wheel", { deltaY: 1, shiftKey: true, bubbles: true, cancelable: true }));
+    ok("... and so does shift + wheel", ["A", "C", "D"].every(c => zsc.scope.chan[c].vdiv === zsc.scope.chan.A.vdiv) && zsc.scope.chan.A.vdiv > 0.5, ["A", "C", "D"].map(c => zsc.scope.chan[c].vdiv));
+    link.checked = false; link.dispatchEvent(new Event("change", { bubbles: true }));
+
+    // pop out into its own window (a hidden iframe stands in for the pop-up) and back
+    const frame = document.createElement("iframe"); frame.style.cssText = "position:fixed;left:-2000px;width:900px;height:600px"; document.body.appendChild(frame);
+    const realOpen = window.open; window.open = () => frame.contentWindow;
+    zw.root.querySelector('[data-act="pop"]').click();
+    window.open = realOpen;
+    await wait(120);
+    ok("Pop out moves the scope into the new window's document", zw.popped === true && frame.contentDocument.body.contains(zw.root) && !document.body.contains(zw.root) && zw.root.classList.contains("popped"));
+    ok("... with the app's styles, filling the window", frame.contentWindow.getComputedStyle(zw.root).position === "fixed" && zw.root.getBoundingClientRect().width > 800, zw.root.getBoundingClientRect().width);
+    const tPop = live.run.t; stepTo(live.run.t + 0.004); await wait(150);
+    ok("it keeps drawing and following the simulation there (its own frame loop)", zw.win === frame.contentWindow && zw.W > 400 && zw.core.tNow > tPop, [zw.W, zw.core.tNow, tPop]);
+    const pxs = zw.ctx.getImageData(0, 0, zw.canvas.width, zw.canvas.height).data; let lit = 0; for (let i = 0; i < pxs.length; i += 4) if (pxs[i] > 200 && pxs[i + 1] > 170) lit++;
+    ok("the picture is on the canvas in the pop-up", lit > 100, lit);
+    const sameCore = zw.core;
+    zw.root.querySelector('[data-act="pop"]').click();
+    ok("Dock puts it back in the app with its old size", zw.popped === false && document.body.contains(zw.root) && zw.win === window && zw.root.style.width !== "" && zw.core === sameCore, zw.root.style.width);
+    zw.root.querySelector('[data-act="pop"]').click === undefined;
+    window.open = () => frame.contentWindow; zw.popOut(); window.open = realOpen; await wait(60);
+    frame.contentWindow.dispatchEvent(new Event("pagehide"));
+    await wait(60);
+    ok("closing the pop-up window docks the scope back instead of losing it", zw.popped === false && document.body.contains(zw.root));
+    window.open = () => null; zw.popOut(); window.open = realOpen;
+    ok("a blocked pop-up leaves the scope where it is", zw.popped === false && document.body.contains(zw.root));
+    frame.remove(); ScopeWindow.closeAll(); live.stop();
+
     // ======================================================== pause conditions and live values under the pointer
     clear(); loadExampleById(editor, "scope-clamp");
     const pr1 = editor.components.find(c => c.name === "R1"), pc1 = editor.components.find(c => c.name === "C1");
