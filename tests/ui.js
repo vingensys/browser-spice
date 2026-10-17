@@ -26,13 +26,24 @@ window.uiTests = async function () {
     const menus = [...document.querySelectorAll("#menubar .menu")];
     ok("menu bar has the ISIS menus", menus.map(m => m.querySelector(".menu-title").textContent).join(",") ===
         "File,Edit,View,Tool,Design,Graph,Debug,Library,Help", menus.map(m => m.querySelector(".menu-title").textContent).join(","));
-    const missing = [...document.querySelectorAll("#menubar .menu-item[data-cmd]")].map(r => r.dataset.cmd).filter(id => !id.startsWith("ex.") && !id.startsWith("ins.") && !id.startsWith("place.") && !Commands.get(id));
+    const missing = [...document.querySelectorAll("#menubar .menu-item[data-cmd]")].map(r => r.dataset.cmd).filter(id => !id.startsWith("ex.") && !id.startsWith("ins.") && !id.startsWith("place.") && !id.startsWith("recent.") && !Commands.get(id));
     ok("every menu entry maps to a command", missing.length === 0, missing);
     menus[0].querySelector(".menu-title").dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     ok("clicking a menu title opens it", menus[0].classList.contains("open"));
     document.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     ok("clicking elsewhere closes it", !menus[0].classList.contains("open"));
-    ok("Examples submenu lists every example", document.querySelectorAll("#menubar .menu")[0].querySelectorAll(".has-sub").length === 1 && EXAMPLES.length >= 10);
+    ok("Examples submenu lists every example", document.querySelectorAll("#menubar .menu")[0].querySelectorAll(".has-sub").length === 2 && EXAMPLES.length >= 10);
+    {
+        RecentDesigns.clear();
+        ok("no recent designs to start with", RecentDesigns.list().length === 0);
+        for (let n = 0; n < 10; n++) RecentDesigns.add(`d${n}.json`, { marker: n });
+        RecentDesigns.add("d5.json", { marker: 55 });
+        const rl = RecentDesigns.list();
+        ok("recent list keeps the newest 8, newest first, no duplicates", rl.length === 8 && rl[0].name === "d5.json" && rl.filter(r => r.name === "d5.json").length === 1, rl.map(r => r.name).join());
+        ok("a recent design reads back", RecentDesigns.get("d5.json").marker === 55 && RecentDesigns.get("nope") === null);
+        ok("an oversized design is not kept", RecentDesigns.add("big.json", { s: "x".repeat(RecentDesigns.LIMIT + 1) }) === false);
+        RecentDesigns.clear();
+    }
 
     // ---- reference designators ----
     editor.addComponent("R", 200, 200);

@@ -3,6 +3,7 @@
 ## 1.0 (current)
 
 Capture and export
+- File > Open Recent (the last 8 saved or opened designs, kept in this browser).
 - Eagle schematic import (`.sch` XML: R C L, diodes / LEDs, BJTs, MOSFETs, supplies); Ctrl+K also places parts ("Place resistor"). Altium is not supported (closed binary format).
 - KiCad schematic export (.kicad_sch, KiCad 7), BOM with manufacturer part number / maker / footprint and an Excel (.xlsx) download. Importing a KiCad file now keeps library LEDs and zeners as LEDs and zeners.
 - Off-sheet connectors (same name = same net across all sheets, with a direction and a rule check), Design > Auto-Annotate, and PDF export of the schematic (vector, selectable text, A4 / Letter).

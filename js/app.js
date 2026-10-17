@@ -85,6 +85,7 @@
         const name = doc.name || "circuit_design.json";
         download(name, JSON.stringify(doc.serialize(), null, 2), "application/json");
         doc.markSaved(name);
+        RecentDesigns.add(name, doc.serialize());
     };
 
     C("file.new", "New Design", { icon: "new", keys: "Ctrl+N", global: true, run() {
@@ -266,6 +267,24 @@
         }
     }));
 
+    const recentItems = () => {
+        const list = RecentDesigns.list();
+        if (!list.length) return [{ id: "recent.none", label: "(none yet)", keys: "", run() {} }];
+        return [...list.map(r => ({
+            id: `recent.${r.name}`, label: r.name, keys: new Date(r.at).toLocaleDateString(),
+            run() {
+                doc.confirmDiscard(() => {
+                    const state = RecentDesigns.get(r.name);
+                    if (!state) { runner.toast(`"${r.name}" could not be read back.`, "error"); return; }
+                    live.stop();
+                    const res = doc.apply(state);
+                    afterLoad(); doc.markSaved(r.name);
+                    if (res.notes.length) runner.toast(`Opened "${r.name}" with ${res.notes.length} problem(s): ${res.notes.slice(0, 2).join("; ")}`, "warn");
+                }, saveToFile);
+            }
+        })), "-", { id: "recent.clear", label: "Clear list", keys: "", run() { RecentDesigns.clear(); } }];
+    };
+
     // arm placement of a source / instrument / terminal straight from the menu
     const placeItems = (mode, entries) => entries.map(e => ({
         id: `place.${e.name}`, label: e.name, keys: "",
@@ -273,7 +292,7 @@
     }));
 
     new Menubar($("menubar"), [
-        { title: "File", items: ["file.new", "file.open", "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.pdf", "file.kicadsch", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
+        { title: "File", items: ["file.new", "file.open", { sub: "Open Recent", items: recentItems }, "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.pdf", "file.kicadsch", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
         { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",
@@ -468,6 +487,7 @@
                 const r = doc.apply(state);
                 afterLoad();
                 doc.markSaved(file.name);
+                RecentDesigns.add(file.name, state);
                 if (doc.lastMigration) runner.toast(`"${file.name}" was in an older file format (${doc.lastMigration.from}); it is saved in the current one next time.`, "info");
                 if (r.notes.length) runner.toast(`Opened "${file.name}" with ${r.notes.length} problem(s): ${r.notes.slice(0, 2).join("; ")}${r.notes.length > 2 ? " …" : ""}`, "warn");
             } catch (err) {
