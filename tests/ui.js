@@ -664,6 +664,17 @@ window.uiTests = async function () {
     ok("a file from a newer app is refused", /newer Browser SPICE/.test(msg), msg);
     ok("the refused file left the design alone", editor.components.length === 1, editor.components.length);
 
+    // ---- .include / .lib on import: the library comes from the other selected files ----
+    reset();
+    {
+        const libText = "lib\n.subckt half a b out\nR1 a out 1k\nR2 out b 1k\n.ends\n";
+        const deckText = "divider\nV1 in 0 DC 5\n.include models/half.lib\nX1 in 0 mid half\n.op\n.end";
+        const rr = SchematicImporter.import(editor, deckText, { "half.lib": libText });
+        ok("import with an included library places the circuit", rr.count >= 2 && !rr.warnings.some(w => /not found/.test(w)), JSON.stringify(rr.warnings));
+        reset();
+        const r2 = SchematicImporter.import(editor, deckText, {});
+        ok("import without the library says which file is missing", r2.warnings.some(w => /half\.lib/.test(w) && /not found/.test(w)), JSON.stringify(r2.warnings));
+    }
     reset();
     const failed = results.filter(x => !x.pass);
     return { total: results.length, failed: failed.length, failures: failed };

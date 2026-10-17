@@ -9,16 +9,16 @@ const num = (v, fallback) => { if (v === undefined || v === null || v === "") re
 const round = (x, d = 6) => (Number.isFinite(x) ? Number(x.toPrecision(d)) : x === Infinity ? "inf" : x === -Infinity ? "-inf" : null);
 const arr = (a, d = 6) => Array.from(a, x => round(x, d));
 
-function parseDeck(netlist) {
+function parseDeck(netlist, files) {
     if (typeof netlist !== "string" || !netlist.trim()) throw new Error("netlist must be the text of a SPICE deck");
-    const deck = SpiceParser.parse(netlist);
+    const deck = SpiceParser.parse(netlist, { files });
     const { circuit, warnings } = SpiceParser.build(deck);
     return { deck, circuit, warnings };
 }
 
 // a deck must be rebuilt for every run (elements keep state)
-function engineFor(netlist) {
-    const { deck, circuit, warnings } = parseDeck(netlist);
+function engineFor(netlist, files) {
+    const { deck, circuit, warnings } = parseDeck(netlist, files);
     return { deck, warnings, engine: new SimEngine(circuit, Object.assign({ temp: deck.temp === undefined ? 27 : deck.temp }, deck.options || {})), circuit };
 }
 
@@ -56,7 +56,7 @@ const opToSpice = (sp) => `.meas op ${sp.name} find ${sp.type}(${sp.sig})`;
 
 // ------------------------------------------------------------------------------------------------ simulate
 function simulate(args) {
-    const { deck, engine, circuit, warnings } = engineFor(args.netlist);
+    const { deck, engine, circuit, warnings } = engineFor(args.netlist, args.files);
     const { type, card } = pickAnalysis(deck, args);
     const out = { analysis: type, warnings: warnings.slice(0, 10), nodes: circuit.names.filter(n => !n.includes("#") && !n.includes(".")) };
     const maxPoints = Math.min(Math.max(Math.round(num(args.maxPoints, 100)), 2), 2000);
@@ -171,10 +171,10 @@ function monteCarlo(args) {
     const tol = Object.assign({ R: 5, C: 10, L: 10 }, args.tolerance_percent || {});
     const rand = rng(num(args.seed, 1));
     const gauss = () => { let u = 0, v = 0; while (!u) u = rand(); while (!v) v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-    const base = parseDeck(args.netlist), values = [];
+    const base = parseDeck(args.netlist, args.files), values = [];
     const card = base.deck.analyses.find(a => a.type === spec.kind) || {};
     for (let i = 0; i < runs; i++) {
-        const { deck } = parseDeck(args.netlist);
+        const { deck } = parseDeck(args.netlist, args.files);
         for (const e of deck.elements) if (["R", "C", "L"].includes(e.kind) && tol[e.kind] > 0) {
             const t = tol[e.kind] / 100;
             e.value *= 1 + (args.distribution === "uniform" ? (rand() * 2 - 1) * t : Math.max(-t, Math.min(t, (gauss() * t) / 3)));
@@ -200,7 +200,7 @@ function monteCarlo(args) {
 
 // ------------------------------------------------------------------------------------------------ check / compare / models
 function checkDeck(args) {
-    const { deck, circuit, warnings } = parseDeck(args.netlist);
+    const { deck, circuit, warnings } = parseDeck(args.netlist, args.files);
     const kinds = {};
     for (const e of circuit.elements) if (!e.name.includes(".")) kinds[e.constructor.name] = (kinds[e.constructor.name] || 0) + 1;
     let op = null, opError = null;
@@ -211,7 +211,7 @@ function checkDeck(args) {
 
 function compareNgspice(args) {
     if (spawnSync("ngspice", ["-v"]).error) throw new Error("ngspice is not installed on this machine, so there is nothing to compare with");
-    const { deck, engine, circuit } = engineFor(args.netlist);
+    const { deck, engine, circuit } = engineFor(args.netlist, args.files);
     const nodes = circuit.names.filter(n => !n.includes("#") && !n.includes("."));
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "bs-cmp-"));
     let body = args.netlist.split("\n").filter(l => !/^\s*\.(op|tran|ac|dc|end|control|endc|print|plot)\b/i.test(l)).join("\n");
@@ -281,23 +281,24 @@ function listModels() {
 }
 
 // ------------------------------------------------------------------------------------------------ registry
-const NETLIST = { type: "string", description: "The SPICE deck as text (first line is the title). Supports R C L V I E G B D Q M J K X, .model, .subckt, .param, .ic, .tran/.ac/.dc/.op, .meas." };
+const NETLIST = { type: "string", description: "The SPICE deck as text (first line is the title). Supports R C L V I E G B D Q M J K X, .model, .subckt, .param, .ic, .tran/.ac/.dc/.op, .meas, and .include / .lib when the files are given in `files`." };
+const FILES = { type: "object", additionalProperties: { type: "string" }, description: "Optional library files the deck includes: { \"name.lib\": \"text\" }. Matched by base name, case-insensitively." };
 const MEAS = { type: "array", items: { type: "string" }, description: 'SPICE measurements, e.g. ".meas tran vpk max v(out) from=1m to=5m", ".meas ac f3db when vdb(out)=-3 fall=1"' };
 
 const TOOLS = [
     {
         name: "simulate", description: "Run one analysis of a SPICE deck on the Browser SPICE engine and return numbers an agent can reason about: operating point, transient waveforms (downsampled, with min/max/mean/rms/final), AC gain and phase (with peak, -3 dB bandwidth, unity-gain frequency, phase margin), DC sweep, noise or the small-signal transfer function. Optional .meas measurements are evaluated.",
-        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, analysis: { type: "string", enum: ["op", "tran", "ac", "dc", "noise", "tf"], description: "Default: the first analysis card in the deck, else op." }, tran: { type: "object", description: "tStop, tStep (seconds, SI suffixes allowed), uic (bool)" }, ac: { type: "object", description: "fStart, fStop, pointsPerDecade" }, dc: { type: "object", description: "source, start, stop, step" }, noise: { type: "object", description: "output (node), input (source name), fStart, fStop" }, tf: { type: "object", description: "output (node), input (source name)" }, signals: { type: "array", items: { type: "string" }, description: "e.g. [\"v(out)\", \"i(v1)\"]; AC also vdb/vp. Default: the first nodes." }, maxPoints: { type: "number", description: "Waveform points returned (default 100, max 2000)." }, measures: MEAS } },
+        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, files: FILES, analysis: { type: "string", enum: ["op", "tran", "ac", "dc", "noise", "tf"], description: "Default: the first analysis card in the deck, else op." }, tran: { type: "object", description: "tStop, tStep (seconds, SI suffixes allowed), uic (bool)" }, ac: { type: "object", description: "fStart, fStop, pointsPerDecade" }, dc: { type: "object", description: "source, start, stop, step" }, noise: { type: "object", description: "output (node), input (source name), fStart, fStop" }, tf: { type: "object", description: "output (node), input (source name)" }, signals: { type: "array", items: { type: "string" }, description: "e.g. [\"v(out)\", \"i(v1)\"]; AC also vdb/vp. Default: the first nodes." }, maxPoints: { type: "number", description: "Waveform points returned (default 100, max 2000)." }, measures: MEAS } },
         run: simulate
     },
     {
         name: "sweep", description: "Sweep a .param of the deck over a list or a linear/log range, run the analysis for each value and return the requested measurements. Use {name} in element values and a '.param name=value' line.",
-        inputSchema: { type: "object", required: ["netlist", "param", "measures"], properties: { netlist: NETLIST, param: { type: "string", description: "Name of a .param line in the deck." }, values: { type: "array", items: { type: "number" } }, start: { type: "number" }, stop: { type: "number" }, points: { type: "number" }, scale: { type: "string", enum: ["lin", "log"] }, analysis: { type: "string", enum: ["tran", "ac"] }, tran: { type: "object" }, ac: { type: "object" }, measures: MEAS } },
+        inputSchema: { type: "object", required: ["netlist", "param", "measures"], properties: { netlist: NETLIST, files: FILES, param: { type: "string", description: "Name of a .param line in the deck." }, values: { type: "array", items: { type: "number" } }, start: { type: "number" }, stop: { type: "number" }, points: { type: "number" }, scale: { type: "string", enum: ["lin", "log"] }, analysis: { type: "string", enum: ["tran", "ac"] }, tran: { type: "object" }, ac: { type: "object" }, measures: MEAS } },
         run: sweep
     },
     {
         name: "monte_carlo", description: "Tolerance analysis: vary every resistor, capacitor and inductor randomly (seeded, Gaussian with tolerance = 3 sigma, or uniform), measure one quantity each run, and return mean, sigma, min/max, yield against optional limits and a histogram.",
-        inputSchema: { type: "object", required: ["netlist", "measure"], properties: { netlist: NETLIST, measure: { type: "string", description: 'One .meas line, e.g. ".meas tran vfinal find v(out) at=5m"' }, runs: { type: "number", description: "2-1000, default 50" }, seed: { type: "number" }, distribution: { type: "string", enum: ["gaussian", "uniform"] }, tolerance_percent: { type: "object", description: 'e.g. {"R": 1, "C": 5}; defaults R 5, C 10, L 10' }, limits: { type: "object", description: "min and/or max for the yield" } } },
+        inputSchema: { type: "object", required: ["netlist", "measure"], properties: { netlist: NETLIST, files: FILES, measure: { type: "string", description: 'One .meas line, e.g. ".meas tran vfinal find v(out) at=5m"' }, runs: { type: "number", description: "2-1000, default 50" }, seed: { type: "number" }, distribution: { type: "string", enum: ["gaussian", "uniform"] }, tolerance_percent: { type: "object", description: 'e.g. {"R": 1, "C": 5}; defaults R 5, C 10, L 10' }, limits: { type: "object", description: "min and/or max for the yield" } } },
         run: monteCarlo
     },
     {
@@ -307,7 +308,7 @@ const TOOLS = [
     },
     {
         name: "compare_with_ngspice", description: "Cross-check the deck against native ngspice (if installed): operating point, and transient when the deck has a .tran card. Returns the worst deviations.",
-        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, after: { type: "number", description: "Ignore the transient before this time (seconds) when comparing: a circuit can chatter chaotically at its first diode commutations, where two correct engines disagree about the phase." }, ngspice_method: { type: "string", enum: ["trap", "gear"], description: "Integration method ngspice uses (default trap). Its trapezoidal rule rings on nodes that only diode leakage holds (a floating transformer secondary between rectifier conductions) when the step is coarse; gear damps that, so use gear to compare such circuits." } } },
+        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, files: FILES, after: { type: "number", description: "Ignore the transient before this time (seconds) when comparing: a circuit can chatter chaotically at its first diode commutations, where two correct engines disagree about the phase." }, ngspice_method: { type: "string", enum: ["trap", "gear"], description: "Integration method ngspice uses (default trap). Its trapezoidal rule rings on nodes that only diode leakage holds (a floating transformer secondary between rectifier conductions) when the step is coarse; gear damps that, so use gear to compare such circuits." } } },
         run: compareNgspice
     },
     {

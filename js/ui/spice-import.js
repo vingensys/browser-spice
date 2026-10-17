@@ -22,14 +22,17 @@ class SchematicImporter {
     };
 
     // addComponent re-routes every wire and redraws; with hundreds of parts that is quadratic, so do it once at the end
-    static import(editor, text) {
+    // `files` ({ name: text }) are the other files the deck's .include / .lib lines refer to
+    static import(editor, text, files = {}) {
         editor.deferRefresh = true;
-        try { return SchematicImporter.importDeck(editor, text); } finally { editor.deferRefresh = false; }
+        try { return SchematicImporter.importDeck(editor, text, files); } finally { editor.deferRefresh = false; }
     }
 
-    static importDeck(editor, text) {
+    static importDeck(editor, text, files) {
+        const pre = [];
+        if (/^\s*\.(include|inc|lib)\b/im.test(text)) text = SpiceParser.expandIncludes(text, files, pre, []);
         const deck = SpiceParser.parse(text);
-        const warnings = [...deck.warnings];
+        const warnings = [...pre, ...deck.warnings];
         const els = SchematicImporter.coupleInductors(SpiceParser.flatten(deck, deck.elements, "", null, warnings), warnings);
 
         const parts = [];

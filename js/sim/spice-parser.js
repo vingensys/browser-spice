@@ -99,9 +99,72 @@ class SpiceParser {
         return out;
     }
 
-    static parse(text) {
+    // ---- .include / .lib -----------------------------------------------------------
+    // A browser page cannot read a path, so the files a deck refers to come from `files` ({ name: text }, the files the
+    // user selected together with the deck). Names match by base name, case-insensitively.
+    //   .include "f.lib"       the whole file
+    //   .lib "f.lib" SECTION   only the lines between ".lib SECTION" and ".endl" of that file
+    //   .lib "f.lib"           the whole file
+    // A file that is not supplied is reported in `warnings` and listed in `missing`.
+    static baseName(n) { return String(n).replace(/^["']|["']$/g, "").split(/[\\/]/).pop().trim().toLowerCase(); }
+
+    static expandIncludes(text, files, warnings, missing, stack = [], depth = 0) {
+        const byName = new Map(Object.entries(files).map(([k, v]) => [SpiceParser.baseName(k), v]));
+        const out = [];
+        for (const line of text.replace(/\r/g, "").split("\n")) {
+            const m = /^\s*\.(include|inc|lib)\s+(.+?)\s*$/i.exec(line.replace(/\$.*$/, "").replace(/;.*$/, ""));
+            if (!m) { out.push(line); continue; }
+            const kind = m[1].toLowerCase();
+            const args = (m[2].match(/"[^"]*"|'[^']*'|\S+/g) || []);
+            const fname = args[0] ? SpiceParser.baseName(args[0]) : "";
+            const section = kind === "lib" && args[1] ? args[1].replace(/^["']|["']$/g, "").toLowerCase() : null;
+            if (kind === "lib" && args.length === 1 && !byName.has(fname)) { out.push(line); continue; }   // ".lib SECTION": a section header inside a library file
+            if (!byName.has(fname)) {
+                if (!missing.includes(fname)) { missing.push(fname); warnings.push(`${m[1]} file "${fname}" was not found; select it together with the deck`); }
+                continue;
+            }
+            const key = `${fname}#${section || ""}`;
+            if (stack.includes(key) || depth >= 8) { warnings.push(`${m[1]} "${fname}" skipped (circular or too deeply nested)`); continue; }
+            let body = byName.get(fname);
+            if (section) {
+                const lines = body.replace(/\r/g, "").split("\n"), pick = [];
+                let on = false, found = false;
+                for (const l of lines) {
+                    const h = /^\s*\.lib\s+(\S+)\s*$/i.exec(l), e = /^\s*\.endl\b/i.test(l);
+                    if (h && h[1].replace(/^["']|["']$/g, "").toLowerCase() === section) { on = true; found = true; continue; }
+                    if (on && e) { on = false; continue; }
+                    if (on) pick.push(l);
+                }
+                if (!found) { warnings.push(`library section "${section}" was not found in ${fname}`); continue; }
+                body = pick.join("\n");
+            }
+            body = body.split("\n").filter(l => !/^\s*\.end\s*$/i.test(l)).join("\n");
+            out.push(SpiceParser.expandIncludes(body, files, warnings, missing, [...stack, key], depth + 1));
+        }
+        return out.join("\n");
+    }
+
+    // which of several selected files is the deck: not referenced by the others, and holding circuit elements
+    static pickRoot(files) {
+        const names = Object.keys(files);
+        const refd = new Set();
+        for (const t of Object.values(files)) for (const m of t.matchAll(/^\s*\.(?:include|inc|lib)\s+("[^"]+"|'[^']+'|\S+)/gim)) refd.add(SpiceParser.baseName(m[1]));
+        const free = names.filter(n => !refd.has(SpiceParser.baseName(n)));
+        const hasElements = (n) => {            // a circuit element outside any .subckt
+            let inSub = false;
+            return files[n].split("\n").slice(1).some(l => {
+                if (/^\s*\.subckt\b/i.test(l)) inSub = true; else if (/^\s*\.ends\b/i.test(l)) inSub = false;
+                return !inSub && /^\s*[a-zA-Z]/.test(l);
+            });
+        };
+        return free.find(hasElements) || free[0] || names[0];
+    }
+
+    static parse(text, { files = null } = {}) {
         const warnings = [];
-        const deck = { title: "", elements: [], models: {}, subckts: {}, analyses: [], warnings };
+        const missingFiles = [];
+        if (/^\s*\.(include|inc|lib)\b/im.test(text)) text = SpiceParser.expandIncludes(text, files || {}, warnings, missingFiles);
+        const deck = { title: "", elements: [], models: {}, subckts: {}, analyses: [], warnings, missingFiles };
         const lines = SpiceParser.applyParams(SpiceParser.logicalLines(text), warnings);
         let current = null; // open .subckt
 
@@ -180,8 +243,9 @@ class SpiceParser {
                 deck.nodeset = deck.nodeset || {};
                 for (const m of line.toLowerCase().matchAll(/v\(\s*([^)\s]+)\s*\)\s*=\s*(\S+)/g)) deck.nodeset[m[1]] = N(m[2]);
                 break;
+            case ".include": case ".inc": case ".lib": case ".endl": break;   // handled (or reported) by expandIncludes
             case ".print": case ".plot":
-            case ".probe": case ".save": case ".control": case ".endc": case ".include": case ".lib":
+            case ".probe": case ".save": case ".control": case ".endc":
                 warnings.push(`${tok[0]} is not supported and was ignored`);
                 break;
             default:
