@@ -21,10 +21,10 @@ against Proteus / ngspice, **P3** polish.
 | ~~No multi-sheet or hierarchical designs~~ | P2 | **Done**: sheets, hierarchical ports and sheet symbols, flattened netlist (see README). Per-instance parameters, rule check across sheets and probes inside sub-sheets (cross-probing) are done. Buses (bus wires, entries, bus ports through sheet symbols) are done. Instruments and part animations on sub-sheets are done (first use of a sheet only). |
 | ~~No autosave / unsaved-changes warning~~ | P1 | **Done**: autosave to browser storage with restore, dirty tracking, Save / Don't Save / Cancel prompts. Remaining: autosave is per browser profile (no cloud), and two tabs on the same address overwrite each other's copy. |
 | ~~No net highlighting~~ | P2 | **Done** (H / right-click). Still missing: net names drawn on the wires and cross-probing with graphs. |
-| Grid and snap size are fixed (20 px = 0.1 in) | P3 | |
+| ~~Grid and snap size are fixed~~ | P3 | **Partly done**: View > Placement Snap (every grid dot, every 2, every 5) for parts. The wire / pin grid stays 20 px = 0.1 in on purpose: the router and every pin position depend on it. |
 | ~~ERC is basic~~ | P2 | **Done**: 15 rules (see README), results list with go-to, marks on the sheet, F4 next issue, and fatal ones stop the simulator with a clear message. Still missing: bus / net-class rules, voltage-level mismatches between logic families, polarised-capacitor checks. |
 | Auto-router can still make long detours around ICs when pins are on the far side | P3 | Example layouts were tidied by hand. |
-| No component search by keyboard on the sheet, no recent-designs list | P3 | |
+| ~~No component search by keyboard on the sheet, no recent-designs list~~ | P3 | **Done**: Ctrl+K lists every part as "Place <name>"; File > Open Recent keeps the last 8 designs in this browser. |
 
 ## 2. Simulation
 | Gap | Pri | Notes |
@@ -49,7 +49,7 @@ PIC16F84A microcontroller (`js/sim/pic.js` core, assembler, HEX reader; `js/sim/
 ## 3. Graphs and instruments
 | Gap | Pri | Notes |
 | --- | --- | --- |
-| ~~No cursors / measurements~~ | P2 | **Done**: cursors A / B, per-trace readouts, frequency / duty / rise-fall, AC peak / −3 dB / unity gain / phase margin. Still missing: multi-axis graphs, user-defined `.measure` expressions. |
+| ~~No cursors / measurements~~ | P2 | **Done**: cursors A / B, per-trace readouts, frequency / duty / rise-fall, AC peak / −3 dB / unity gain / phase margin. **Done later**: a second axis for currents on mixed V / I graphs, and `.meas … param='expr'` measurements built from other measurements. |
 | ~~No export of graph data~~ | P2 | **Done**: CSV (all / visible / between cursors), measurements CSV, PNG. |
 | ~~Oscilloscope is only a preview~~ | P2 | **Done**: a real scope window with timebase, triggers (auto / normal / single), channel scaling and coupling, XY, readouts. Also done: cursors, FFT mode, saved reference traces, CSV/PNG export. |
 | ~~No logic analyser or spectrum view~~ | P3 | **Done** (logic analyser part and window; spectrum tab and scope FFT). Signal generator panel still missing. |
@@ -65,8 +65,8 @@ PIC16F84A microcontroller (`js/sim/pic.js` core, assembler, HEX reader; `js/sim/
 | Gap | Pri | Notes |
 | --- | --- | --- |
 | ~~Not usable on a phone-width screen~~ | P3 | **Improved**: View > Sidebar hides the left pane (it starts hidden below 760 px), the toolbar scrolls and dialogs fit. Touch drawing: pinch zoom, one-finger pan, long-press menu, double-tap, larger pin hit targets and a floating touch toolbar (View > Touch Toolbar, automatic on coarse pointers). |
-| ~~Dialogs do not trap focus~~ | P3 | **Done**: dialogs have a role and label, trap Tab and return focus; icon buttons get names. The schematic canvas itself is not screen-reader accessible. |
-| No customisable shortcuts, no localisation | P3 | |
+| ~~Dialogs do not trap focus~~ | P3 | **Done**: dialogs have a role and label, trap Tab and return focus; icon buttons get names. The schematic canvas itself is not screen-reader accessible, but View > Describe Sheet gives its content as text and announces it. |
+| ~~No customisable shortcuts~~, no localisation | P3 | **Shortcuts done** for the global commands (Help > Customize Shortcuts…); the editor's own keys are fixed. No localisation yet. |
 | ~~No in-app help~~ | P3 | **Done**: Help > Getting Started, the command palette (Ctrl+K). |
 
 ## 6. Engineering

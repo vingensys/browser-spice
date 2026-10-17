@@ -34,7 +34,7 @@ BOMs, Gerber. Everything runs client-side; a file is a link.
 
 ### 3. Capture
 - Buses, off-sheet connectors with direction, probes and instruments inside sub-sheets, cross-probing across sheets, auto-annotation: all done.
-- Touch-friendly drawing is done; a screen-reader description of the sheet is not.
+- Touch-friendly drawing is done; View > Describe Sheet gives a text description for screen readers (the canvas itself is still not navigable by keyboard).
 
 ### 4. PCB layout (the "other half" of Proteus)
 - **Done (MVP)**: View > PCB Layout: footprints from the netlist, board outline, auto-place, ratsnest, manual routing on two layers with vias, a grid autorouter, a design-rule check and Gerber / Excellon ZIP export.

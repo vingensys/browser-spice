@@ -34,6 +34,16 @@ window.uiTests = async function () {
     ok("clicking elsewhere closes it", !menus[0].classList.contains("open"));
     ok("Examples submenu lists every example", document.querySelectorAll("#menubar .menu")[0].querySelectorAll(".has-sub").length === 2 && EXAMPLES.length >= 10);
     {
+        const keep = editor.partSnapSize;
+        ok("placement snap defaults to every grid dot", keep === 20 && editor.snapPart(31) === 40 && editor.snapPart(29) === 20);
+        Commands.run("view.snap100");
+        ok("Placement Snap: coarse snaps part origins to 100", editor.partSnapSize === 100 && editor.snapPart(130) === 100 && editor.snapPart(160) === 200 && editor.snap(130) === 140, editor.snapPart(130));
+        ok("the choice is remembered", localStorage.getItem("browser-spice/part-snap") === "100");
+        ok("and is checked in the menu", Commands.checked("view.snap100") && !Commands.checked("view.snap20"));
+        Commands.run("view.snap20");
+        editor.partSnapSize = keep;
+    }
+    {
         Shortcuts.resetAll();
         ok("a global command's key can be changed", Shortcuts.set("view.describe", "Ctrl+Shift+Y") === null && Commands.get("view.describe").keys === "Ctrl+Shift+Y");
         ok("a key another command has is refused", /already used/.test(Shortcuts.set("view.describe", "Ctrl+S") || "") && Commands.get("view.describe").keys === "Ctrl+Shift+Y");

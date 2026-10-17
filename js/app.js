@@ -153,6 +153,8 @@
     C("view.grid", "Grid", { icon: "grid", keys: "Ctrl+G", global: true, checked: () => editor.showGrid !== false, run() { editor.showGrid = editor.showGrid === false; editor.draw(); } });
     C("view.graph", "Graph Window", { icon: "graph", checked: () => graph.visible, run: () => (graph.visible ? graph.hide() : graph.show()) });
     C("view.describe", "Describe Sheet (for screen readers)…", { keys: "Ctrl+Shift+D", global: true, run: () => SheetDescriber.open(editor) });
+    for (const n of [20, 40, 100]) C(`view.snap${n}`, n === 20 ? "Placement Snap: Fine (every grid dot)" : `Placement Snap: Coarse (every ${n / 20} dots)`, { checked: () => editor.partSnapSize === n, run() { editor.partSnapSize = n; try { localStorage.setItem("browser-spice/part-snap", String(n)); } catch (e) { /* ignore */ } editor.draw(); } });
+    try { const n = Number(localStorage.getItem("browser-spice/part-snap")); if ([20, 40, 100].includes(n)) editor.partSnapSize = n; } catch (e) { /* ignore */ }
     C("view.classic", "Classic (ISIS) Colours", { checked: () => Theme.name === "classic", run: () => Theme.set("classic") });
     C("view.dark", "Dark Colours", { checked: () => Theme.name === "dark", run: () => Theme.set("dark") });
 
@@ -297,7 +299,7 @@
     new Menubar($("menubar"), [
         { title: "File", items: ["file.new", "file.open", { sub: "Open Recent", items: recentItems }, "file.save", "-", "file.import", "file.export", "file.bom", "file.image", "file.svg", "file.pdf", "file.kicadsch", "file.kicad", "file.report", "file.share", "-", { sub: "Examples", items: exampleItems }, "-", "file.print"] },
         { title: "Edit", items: ["edit.undo", "edit.redo", "-", "edit.cut", "edit.copy", "edit.paste", "edit.delete", "edit.selectall", "-", "edit.drag", "-", "edit.rotate", "edit.rotateccw", "edit.rotate180", "edit.mirrorx", "edit.mirrory", "-", "edit.properties", "edit.tidy"] },
-        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "view.describe", "-", "view.classic", "view.dark"] },
+        { title: "View", items: ["view.zoomin", "view.zoomout", "view.fit", "view.reset", "-", "view.grid", "view.graph", "view.op", "view.pcb", "view.sidebar", "view.touchbar", "view.describe", "-", { sub: "Placement Snap", items: ["view.snap20", "view.snap40", "view.snap100"] }, "-", "view.classic", "view.dark"] },
         { title: "Tool", items: ["tool.select", "tool.wire", "tool.bus", "tool.text", "tool.vprobe", "tool.iprobe", "-",
             { sub: "Place Source", items: () => placeItems("generators", DeviceCatalog.generators()) },
             { sub: "Place Instrument", items: () => placeItems("instruments", DeviceCatalog.instruments()) },

@@ -14,6 +14,7 @@ class SchematicEditor {
         this.ctx = canvas.getContext("2d");
 
         this.gridSize = 20;
+        this.partSnapSize = 20;          // parts are placed / moved to multiples of this (a multiple of gridSize keeps every pin on the wire grid)
 
         this.components = [];
         this.wires = [];
@@ -466,6 +467,12 @@ class SchematicEditor {
     // VIEW: ZOOM & PAN
     // ============================================================
 
+    // coarse snap for part origins (View > Placement Snap); wires and pins stay on gridSize
+    snapPart(value) {
+        const g = Math.max(this.gridSize, Math.round((this.partSnapSize || this.gridSize) / this.gridSize) * this.gridSize);
+        return Math.round(value / g) * g;
+    }
+
     snap(value) {
         return Math.round(value / this.gridSize) * this.gridSize;
     }
@@ -738,7 +745,7 @@ class SchematicEditor {
     }
 
     placeAt(x, y) {
-        const gx = this.snap(x), gy = this.snap(y);
+        const gx = this.snapPart(x), gy = this.snapPart(y);
         const probe = { type: this.tool, x: gx, y: gy, rotation: this.placeRotation, mirror: this.placeMirror };
         if (!this.isPlacementFree(probe, gx, gy, this.placeRotation)) return null;
 
@@ -1492,8 +1499,8 @@ class SchematicEditor {
     doMove(pos) {
         const m = this.move;
         const base = m.orig.get(m.clicked);
-        const dx = this.snap(pos.x - m.offX) - base.x;
-        const dy = this.snap(pos.y - m.offY) - base.y;
+        const dx = this.snapPart(pos.x - m.offX) - base.x;
+        const dy = this.snapPart(pos.y - m.offY) - base.y;
 
         if (dx === m.last.dx && dy === m.last.dy) return;
 
@@ -2045,8 +2052,8 @@ class SchematicEditor {
     drawGhost() {
         this.drawPasteGhost();
         if (!this.isPlacing() || !this.mouseInside) return;
-        const x = this.snap(this.mouse.x);
-        const y = this.snap(this.mouse.y);
+        const x = this.snapPart(this.mouse.x);
+        const y = this.snapPart(this.mouse.y);
         const ghost = Object.assign({ id: -1, type: this.tool, x, y, rotation: this.placeRotation, mirror: this.placeMirror, name: "", value: "" }, this.placeProps ? JSON.parse(JSON.stringify(this.placeProps)) : {});
         this.drawComponent(ghost, { free: this.isPlacementFree(ghost, x, y, this.placeRotation) });
     }
