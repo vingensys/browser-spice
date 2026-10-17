@@ -216,6 +216,7 @@ class SpiceParser {
                 deck.analyses.push({ type: "dc", source: tok[1], start: N(tok[2]), stop: N(tok[3]), step: N(tok[4]) });
                 break;
             case ".tf": deck.analyses.push({ type: "tf", out: (line.toLowerCase().match(/v\(\s*([^),\s]+)\s*(?:,\s*([^)\s]+)\s*)?\)/) || []).slice(1, 3).filter(Boolean), source: tok[tok.length - 1] }); break;
+            case ".sens": deck.analyses.push({ type: "sens", out: (line.toLowerCase().match(/v\(\s*([^),\s]+)\s*(?:,\s*([^)\s]+)\s*)?\)/) || []).slice(1, 3).filter(Boolean) }); break;
             case ".meas": case ".measure": {
                 const m = typeof Measure !== "undefined" ? Measure.parse(line) : null;
                 if (m) (deck.measures = deck.measures || []).push(m);

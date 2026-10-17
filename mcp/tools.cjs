@@ -128,6 +128,13 @@ function simulate(args) {
         if (!t.output || !t.input) throw new Error("tf needs tf.output (a node) and tf.input (a source name)");
         const r = engine.tf({ out: [String(t.output)], input: String(t.input).toUpperCase() });
         out.gain = round(r.gain); out.input_resistance_ohm = round(r.rin); out.output_resistance_ohm = round(r.rout);
+    } else if (type === "sens") {
+        const t = args.sens || {};
+        const o = t.output || (card.out && card.out.join(","));
+        if (!o) throw new Error("sens needs sens.output (a node, or \"a,b\" for a difference)");
+        const r = engine.sens({ out: String(o).split(",").map(x => x.trim()) });
+        out.output_dc = round(r.nominal);
+        out.sensitivities = r.rows.map(x => ({ element: x.element, parameter: x.param, value: round(x.value), d_output_d_parameter: round(x.abs), output_change_for_100_percent: round(x.scaled) }));
     } else throw new Error(`unknown analysis "${type}"`);
     return out;
 }
@@ -288,7 +295,7 @@ const MEAS = { type: "array", items: { type: "string" }, description: 'SPICE mea
 const TOOLS = [
     {
         name: "simulate", description: "Run one analysis of a SPICE deck on the Browser SPICE engine and return numbers an agent can reason about: operating point, transient waveforms (downsampled, with min/max/mean/rms/final), AC gain and phase (with peak, -3 dB bandwidth, unity-gain frequency, phase margin), DC sweep, noise or the small-signal transfer function. Optional .meas measurements are evaluated.",
-        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, files: FILES, analysis: { type: "string", enum: ["op", "tran", "ac", "dc", "noise", "tf"], description: "Default: the first analysis card in the deck, else op." }, tran: { type: "object", description: "tStop, tStep (seconds, SI suffixes allowed), uic (bool)" }, ac: { type: "object", description: "fStart, fStop, pointsPerDecade" }, dc: { type: "object", description: "source, start, stop, step" }, noise: { type: "object", description: "output (node), input (source name), fStart, fStop" }, tf: { type: "object", description: "output (node), input (source name)" }, signals: { type: "array", items: { type: "string" }, description: "e.g. [\"v(out)\", \"i(v1)\"]; AC also vdb/vp. Default: the first nodes." }, maxPoints: { type: "number", description: "Waveform points returned (default 100, max 2000)." }, measures: MEAS } },
+        inputSchema: { type: "object", required: ["netlist"], properties: { netlist: NETLIST, files: FILES, analysis: { type: "string", enum: ["op", "tran", "ac", "dc", "noise", "tf", "sens"], description: "Default: the first analysis card in the deck, else op." }, tran: { type: "object", description: "tStop, tStep (seconds, SI suffixes allowed), uic (bool)" }, ac: { type: "object", description: "fStart, fStop, pointsPerDecade" }, dc: { type: "object", description: "source, start, stop, step" }, noise: { type: "object", description: "output (node), input (source name), fStart, fStop" }, tf: { type: "object", description: "output (node), input (source name)" }, sens: { type: "object", description: "output (node, or \"a,b\" for a difference): DC sensitivity of the output to every resistor and source" }, signals: { type: "array", items: { type: "string" }, description: "e.g. [\"v(out)\", \"i(v1)\"]; AC also vdb/vp. Default: the first nodes." }, maxPoints: { type: "number", description: "Waveform points returned (default 100, max 2000)." }, measures: MEAS } },
         run: simulate
     },
     {

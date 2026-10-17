@@ -250,6 +250,39 @@ class SimEngine {
         return Object.assign({ x: r.x, method, iterations: r.iters }, this.snapshot(r.x));
     }
 
+    // ------------------------------------------------------- DC sensitivity (.sens)
+
+    // d(output)/d(parameter) at the operating point, for every resistor value and every source's DC level, as SPICE's
+    // ".sens" reports them: `abs` in output units per parameter unit, `scaled` = abs * value (output change for a 100 %
+    // change, SPICE's "_scale"). `out` is [node] or [node, referenceNode]. Central differences on a relative step of 1e-4.
+    sens({ out }) {
+        const c = this.c;
+        const volt = () => {
+            const nv = this.operatingPoint().nodeVoltages;
+            const get = (n) => { const k = Object.keys(nv).find(x => x.toLowerCase() === String(n).toLowerCase()); if (k === undefined) throw new Error(`sensitivity: unknown node "${n}"`); return nv[k]; };
+            return get(out[0]) - (out[1] ? get(out[1]) : 0);
+        };
+        const nominal = volt();
+        const rows = [];
+        for (const el of c.elements) {
+            if (c.isInternal(el.name)) continue;
+            let param = null;
+            if (el instanceof Resistor) param = { name: "resistance", get: () => el.r, set: (v) => { el.r = v; } };
+            else if (el instanceof VoltageSource || el instanceof CurrentSource) param = { name: "dc", get: () => el.wave.dc, set: (v) => { el.wave.dc = v; } };
+            if (!param) continue;
+            const x0 = param.get();
+            const h = x0 !== 0 ? Math.abs(x0) * 1e-4 : 1e-3;
+            try {
+                param.set(x0 + h); const vp = volt();
+                param.set(x0 - h); const vm = volt();
+                const abs = (vp - vm) / (2 * h);
+                rows.push({ element: el.name, param: param.name, value: x0, abs, scaled: abs * x0 });
+            } finally { param.set(x0); }
+        }
+        this.operatingPoint();
+        return { nominal, rows };
+    }
+
     // ------------------------------------------------------- transfer function (.tf)
 
     // Small-signal DC gain from `input` (a source name) to the output node pair, plus the resistance seen by the input
